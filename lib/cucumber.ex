@@ -1,9 +1,41 @@
 defmodule Cucumber do
   @moduledoc """
-  Macro for Gherkin-based testing in Elixir.
-  Usage:
-    use Cucumber, feature: "user_joins_event.feature"
-    use Cucumber, feature: "user_joins_event.feature", tags: ["smoke", "auth"]
+  A behavior-driven development (BDD) testing framework for Elixir using Gherkin syntax.
+
+  Cucumber is a testing framework that allows you to write executable specifications
+  in natural language. It bridges the gap between technical and non-technical stakeholders
+  by allowing tests to be written in plain language while being executed as code.
+
+  ## Usage
+
+  To use Cucumber in your test file:
+
+      defmodule UserAuthenticationTest do
+        use Cucumber, feature: "user_authentication.feature"
+        
+        defstep "I am on the sign in page", context do
+          # Step implementation
+          Map.put(context, :current_page, :sign_in)
+        end
+        
+        # More step definitions
+      end
+
+  You can also filter scenarios by tags:
+
+      # Only run scenarios tagged with "smoke" or "auth"
+      use Cucumber, feature: "user_authentication.feature", tags: ["smoke", "auth"]
+
+  ## Key Features
+
+  * Gherkin Support - Write tests in familiar Given/When/Then format
+  * Parameter Types - Define step patterns with typed parameters like `{string}`, `{int}`
+  * Data Tables - Pass structured data to your steps
+  * DocStrings - Include multi-line text blocks in your steps
+  * Background Steps - Define common setup steps for all scenarios
+  * Tag Filtering - Run subsets of scenarios using tags
+  * Context Passing - Share state between steps with a simple context map
+  * Rich Error Reporting - Clear error messages with step execution history
   """
 
   defmacro __using__(opts) do
@@ -88,6 +120,23 @@ defmodule Cucumber do
   end
 
   # Helper function to call step/2 in the test module with merged args and context
+  @doc """
+  Applies a step from a feature file to a matching step definition.
+
+  This function is used internally by the Cucumber framework to execute steps.
+  It handles the pattern matching, parameter extraction, and context management.
+
+  ## Parameters
+
+  - `module` - The test module containing step definitions
+  - `context` - The current context map
+  - `step` - The `Gherkin.Step` struct to execute
+
+  ## Returns
+
+  Returns the updated context map if the step succeeds, or raises a `Cucumber.StepError`
+  if the step fails or no matching step definition is found.
+  """
   def apply_step(
         module,
         context,
@@ -249,7 +298,48 @@ defmodule Cucumber do
     end
   end
 
-  # New simpler API: defstep "pattern", context do ... end
+  @doc """
+  Defines a step pattern and its implementation.
+
+  The `defstep/3` macro is used to define step implementations that match steps in feature files.
+  It supports pattern parameters like `{string}`, `{int}`, `{float}`, and `{word}`.
+
+  ## Parameters
+
+  - `pattern` - The step pattern to match (e.g., "I click {string} button")
+  - `context` - The variable name to bind the context to (optional)
+  - `do` - The block of code to execute when the step matches
+
+  ## Return Values
+
+  Step implementations can return values in several ways:
+
+  - `:ok` - For steps that perform actions but don't need to update context
+  - A map - To directly replace the context
+  - `{:ok, map}` - To merge new values into the context
+  - `{:error, reason}` - To indicate a step failure with a reason
+
+  ## Examples
+
+      # Simple step with no parameters
+      defstep "I am on the login page" do
+        # Setup logic
+        %{page: :login}
+      end
+
+      # Step with string parameter
+      defstep "I enter {string} in the username field", context do
+        username = List.first(context.args)
+        {:ok, %{username: username}}
+      end
+
+      # Step with docstring
+      defstep "I submit the following comment:", context do
+        # Access the docstring
+        comment_text = context.docstring
+        {:ok, %{comment: comment_text}}
+      end
+  """
   defmacro defstep(pattern, context \\ nil, do: block) do
     quote do
       # Register the pattern in a module attribute for lookup

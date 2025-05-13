@@ -1,6 +1,17 @@
 defmodule Cucumber.StepError do
   @moduledoc """
   Exception raised when a step in a Cucumber scenario fails.
+
+  This module provides detailed error reporting for two main failure cases:
+
+  1. A step has no matching step definition
+  2. A step's implementation raises an error or returns `{:error, reason}`
+
+  The error messages include helpful context like:
+  - The failing step text and location
+  - The scenario name and feature file
+  - A history of previously executed steps
+  - Suggestions for implementing missing steps
   """
 
   defexception [
@@ -25,6 +36,30 @@ defmodule Cucumber.StepError do
 
   @doc """
   Creates a new step error for a missing step definition.
+
+  When a step in a feature file doesn't match any step definition, this function
+  creates a helpful error message that includes a suggestion for implementing
+  the missing step.
+
+  ## Parameters
+
+  * `step` - The `Gherkin.Step` struct that has no matching definition
+  * `feature_file` - The path to the feature file containing the step
+  * `scenario_name` - The name of the scenario containing the step
+  * `step_history` - A list of previously executed steps with their status
+
+  ## Returns
+
+  Returns a `Cucumber.StepError` struct with a formatted error message and context.
+
+  ## Examples
+
+  The error message will include a suggested implementation like:
+
+      defstep "I click the submit button", context do
+        # Your step implementation here
+        context
+      end
   """
   def missing_step_definition(step, feature_file, scenario_name, step_history \\ []) do
     message = """
@@ -54,6 +89,41 @@ defmodule Cucumber.StepError do
 
   @doc """
   Creates a new step error for a step execution failure.
+
+  When a step implementation raises an exception or returns `{:error, reason}`,
+  this function creates a detailed error message with context about the failure.
+
+  ## Parameters
+
+  * `step` - The `Gherkin.Step` struct that failed during execution
+  * `pattern` - The step pattern that matched the step
+  * `failure_reason` - The exception or error reason
+  * `feature_file` - The path to the feature file containing the step
+  * `scenario_name` - The name of the scenario containing the step
+  * `step_history` - A list of previously executed steps with their status
+
+  ## Returns
+
+  Returns a `Cucumber.StepError` struct with a formatted error message and context.
+
+  ## Examples
+
+  The error message will include details like:
+
+      Step failed:
+
+        Then the result should be 10
+
+      in scenario "Basic math" (test/features/calculator.feature:12)
+      matching pattern: "the result should be {int}"
+
+      Expected 10 but got 9
+
+      Step execution history:
+        [passed] Given I have entered 5 into the calculator
+        [passed] And I have entered 4 into the calculator
+        [passed] When I press add
+        [failed] Then the result should be 10
   """
   def failed_step(step, pattern, failure_reason, feature_file, scenario_name, step_history \\ []) do
     message = """

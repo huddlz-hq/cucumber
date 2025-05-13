@@ -1,23 +1,53 @@
 defmodule Cucumber.Expression do
   @moduledoc """
-  Parser for Cucumber Expressions.
+  Parser and matcher for Cucumber Expressions used in step definitions.
 
-  Supports the following parameter types:
-  - {string} - Matches quoted strings and converts to string
-  - {int} - Matches integers and converts to integer
-  - {float} - Matches floating point numbers and converts to float
-  - {word} - Matches a single word (no whitespace) and converts to string
+  Cucumber Expressions are a human-friendly alternative to regular expressions,
+  allowing you to define step patterns with typed parameters. This module handles
+  compiling these expressions to regular expressions and extracting/converting parameters.
 
-  Example:
-  "I click {string} on the {word} event"
+  ## Parameter Types
+
+  The following parameter types are supported:
+
+  * `{string}` - Matches quoted strings ("example") and converts to string
+  * `{int}` - Matches integers (42) and converts to integer
+  * `{float}` - Matches floating point numbers (3.14) and converts to float
+  * `{word}` - Matches a single word (no whitespace) and converts to string
+
+  ## Examples
+
+      # Matching a step with a string parameter
+      "I click {string} button" would match:
+      "I click \"Submit\" button"
+
+      # Matching a step with multiple parameters
+      "I add {int} items to my {word} list" would match:
+      "I add 5 items to my shopping list"
   """
 
   @doc """
   Compiles a Cucumber Expression pattern into a regex and parameter converters.
 
-  Returns `{regex, converters}` where:
-  - `regex` is a compiled regular expression for matching step text
-  - `converters` is a list of functions to convert captured values
+  This function transforms a human-readable pattern with typed parameters
+  into a regular expression for matching and a list of converter functions
+  to transform the captured values to their appropriate types.
+
+  ## Parameters
+
+  * `pattern` - A string containing a Cucumber Expression pattern
+
+  ## Returns
+
+  Returns a tuple `{regex, converters}` where:
+  * `regex` - A compiled regular expression for matching step text
+  * `converters` - A list of functions to convert captured values to their appropriate types
+
+  ## Examples
+
+      iex> {regex, converters} = Cucumber.Expression.compile("I have {int} items")
+      iex> Regex.match?(regex, "I have 42 items")
+      true
   """
   def compile(pattern) do
     # Define parameter type patterns and converters
@@ -62,10 +92,27 @@ defmodule Cucumber.Expression do
   @doc """
   Matches a step text against a compiled Cucumber Expression.
 
-  Returns `{:match, args}` if the text matches, where `args` is a list of
-  converted parameter values.
+  This function attempts to match step text against a compiled Cucumber Expression
+  and extracts/converts any parameters if there's a match.
 
-  Returns `:no_match` if the text doesn't match.
+  ## Parameters
+
+  * `text` - The step text to match against the pattern
+  * `{regex, converters}` - A compiled Cucumber Expression from `compile/1`
+
+  ## Returns
+
+  Returns one of:
+  * `{:match, args}` - If the text matches, where `args` is a list of converted parameter values
+  * `:no_match` - If the text doesn't match the expression
+
+  ## Examples
+
+      iex> compiled = Cucumber.Expression.compile("I have {int} items")
+      iex> Cucumber.Expression.match("I have 42 items", compiled)
+      {:match, [42]}
+      iex> Cucumber.Expression.match("I have no items", compiled)
+      :no_match
   """
   def match(text, {regex, converters}) do
     case Regex.run(regex, text, capture: :all_but_first) do

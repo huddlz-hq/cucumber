@@ -1,11 +1,21 @@
-# Cucumber
+# Cucumber for Elixir
 
-**TODO: Add description**
+A behavior-driven development (BDD) testing framework for Elixir that enables writing executable specifications in natural language. Cucumber for Elixir bridges the gap between technical and non-technical stakeholders by allowing tests to be written in plain language while being executed as code.
+
+## Features
+
+- **Gherkin Support**: Write tests in familiar Given/When/Then format
+- **Parameter Typing**: Define step patterns with typed parameters like `{string}`, `{int}`, `{float}`
+- **Data Tables**: Pass structured data to your steps
+- **DocStrings**: Include multi-line text blocks in your steps
+- **Background Steps**: Define common setup steps for all scenarios
+- **Tag Filtering**: Run subsets of scenarios using tags
+- **Context Passing**: Share state between steps with a simple context map
+- **Rich Error Reporting**: Clear error messages with step execution history
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `cucumber` to your list of dependencies in `mix.exs`:
+Add `cucumber` to your `mix.exs` dependencies:
 
 ```elixir
 def deps do
@@ -15,7 +25,100 @@ def deps do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/cucumber>.
+## Quick Start
 
+### 1. Create a Feature File
+
+Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension:
+
+```gherkin
+# test/features/calculator.feature
+Feature: Basic Calculator
+
+Scenario: Adding two numbers
+  Given I have entered 50 into the calculator
+  And I have entered 70 into the calculator
+  When I press add
+  Then the result should be 120 on the screen
+```
+
+### 2. Create a Test Module
+
+```elixir
+defmodule CalculatorTest do
+  use Cucumber, feature: "calculator.feature"
+  
+  defstep "I have entered {int} into the calculator", context do
+    value = List.first(context.args)
+    values = Map.get(context, :values, [])
+    Map.put(context, :values, values ++ [value])
+  end
+  
+  defstep "I press add", context do
+    sum = Enum.sum(context.values)
+    Map.put(context, :result, sum)
+  end
+  
+  defstep "the result should be {int} on the screen", context do
+    expected = List.first(context.args)
+    assert context.result == expected
+    :ok
+  end
+end
+```
+
+### 3. Run Your Tests
+
+```bash
+mix test
+```
+
+## Documentation
+
+For comprehensive documentation and guides, please visit [HexDocs](https://hexdocs.pm/cucumber).
+
+- [Getting Started](https://hexdocs.pm/cucumber/getting_started.html)
+- [Feature Files](https://hexdocs.pm/cucumber/feature_files.html)
+- [Step Definitions](https://hexdocs.pm/cucumber/step_definitions.html)
+- [Error Handling](https://hexdocs.pm/cucumber/error_handling.html)
+- [Best Practices](https://hexdocs.pm/cucumber/best_practices.html)
+- [Architecture](https://hexdocs.pm/cucumber/architecture.html)
+
+## Example of Working with Data Tables
+
+In your feature file:
+```gherkin
+Given I have the following items in my cart:
+  | Product Name    | Quantity | Price  |
+  | Smartphone      | 1        | 699.99 |
+  | Protection Plan | 1        | 79.99  |
+```
+
+In your test module:
+```elixir
+defstep "I have the following items in my cart:", context do
+  # Access the datatable
+  datatable = context.datatable
+  
+  # Access headers
+  headers = datatable.headers  # ["Product Name", "Quantity", "Price"]
+  
+  # Access rows as maps
+  items = datatable.maps
+  # [
+  #   %{"Product Name" => "Smartphone", "Quantity" => "1", "Price" => "699.99"},
+  #   %{"Product Name" => "Protection Plan", "Quantity" => "1", "Price" => "79.99"}
+  # ]
+  
+  # Process the items
+  {:ok, %{cart_items: items}}
+end
+```
+
+## License
+
+Cucumber for Elixir is licensed under the MIT License. See [LICENSE](LICENSE) for the full license text.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
