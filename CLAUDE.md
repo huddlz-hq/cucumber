@@ -46,8 +46,15 @@ mix docs
 # Build the package locally (without publishing)
 mix hex.build
 
-# Publish package to Hex.pm
+# Publish package to Hex.pm (manually)
 mix hex.publish
+
+# Create a Git tag manually after publishing
+git tag v0.1.0
+git push origin v0.1.0
+
+# OR use the automated release script (recommended)
+./scripts/release.sh 0.1.0
 ```
 
 ## Architecture
