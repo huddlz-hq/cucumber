@@ -42,6 +42,12 @@ mix credo
 
 # Generate documentation
 mix docs
+
+# Build the package locally (without publishing)
+mix hex.build
+
+# Publish package to Hex.pm
+mix hex.publish
 ```
 
 ## Architecture
@@ -128,3 +134,55 @@ Step definitions can return values in several ways:
 - **Data tables**: Tabular data in feature files
 - **Docstrings**: Multi-line text in feature files
 - **Context management**: Sharing state between steps
+
+## Documentation Guidelines
+
+### Elixir Documentation Best Practices
+
+1. Use proper indentation for code examples (not triple backticks):
+
+   ```elixir
+   # INCORRECT - Do not use triple backticks in @doc
+   @doc """
+   ## Examples
+
+   ```elixir
+   Enum.map([1, 2, 3], fn x -> x * 2 end)
+   ```
+   """
+   
+   # CORRECT - Use indentation instead
+   @doc """
+   ## Examples
+
+       Enum.map([1, 2, 3], fn x -> x * 2 end)
+       # => [2, 4, 6]
+   """
+   ```
+
+2. Start function documentation with a single-line summary followed by a blank line
+
+3. Use proper Markdown sections with two hash marks (`##`)
+
+4. Include examples for all public functions
+
+5. Document all type specifications with `@type` to avoid documentation warnings
+
+### Hex Package Requirements
+
+The package configuration in `mix.exs` must include:
+
+- `name` - The package display name
+- `description` - A concise description of the package
+- `version` - Following semantic versioning
+- `source_url` - Link to GitHub repository
+- `package` configuration with:
+  - `licenses` - Using SPDX identifiers
+  - `links` - Links to repository and other resources
+  - `files` - List of files to include in the package
+
+Files that should be maintained:
+
+- README.md - With installation and usage instructions
+- LICENSE - Specifying the package license
+- CHANGELOG.md - Recording version changes
