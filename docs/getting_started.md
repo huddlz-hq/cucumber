@@ -63,20 +63,17 @@ defmodule UserAuthenticationTest do
     Map.put(context, :current_page, :sign_in)
   end
   
-  defstep "I enter {string} as my email", context do
-    email = List.first(context.args)
+  defstep "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
   end
 
-  defstep "I enter {string} as my password", context do
-    password = List.first(context.args)
+  defstep "I enter {string} as my password", %{args: [password]} = context do
     # Code to enter password
     Map.put(context, :password, password)
   end
   
-  defstep "I click the {string} button", context do
-    button_text = List.first(context.args)
+  defstep "I click the {string} button", %{args: [button_text]} do
     # Code to click button
     {:ok, %{clicked: button_text}}
   end
@@ -87,8 +84,7 @@ defmodule UserAuthenticationTest do
     :ok
   end
   
-  defstep "I should see {string} message", context do
-    message = List.first(context.args)
+  defstep "I should see {string} message", %{args: [message]} do
     # Assertion for message
     assert_text(message)
     :ok

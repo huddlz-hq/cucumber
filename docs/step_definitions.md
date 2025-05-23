@@ -15,13 +15,12 @@ end
 
 ## Steps with Parameters
 
-Cucumber supports several parameter types that can be used in step patterns:
+Cucumber supports several parameter types that can be used in step patterns. Parameters are accessed through pattern matching on the `args` field of the context:
 
 ### String Parameters
 
 ```elixir
-defstep "I am on the product page for {string}", context do
-  product_name = List.first(context.args)
+defstep "I am on the product page for {string}", %{args: [product_name]} do
   # Navigate to product page
   {:ok, %{current_page: :product, product_name: product_name}}
 end
@@ -30,8 +29,7 @@ end
 ### Integer Parameters
 
 ```elixir
-defstep "I should have {int} items in my wishlist", context do
-  expected_count = List.first(context.args)
+defstep "I should have {int} items in my wishlist", %{args: [expected_count]} do
   # Assertion for wishlist count
   assert get_wishlist_count() == expected_count
   :ok
@@ -41,8 +39,7 @@ end
 ### Float Parameters
 
 ```elixir
-defstep "the total price should be {float}", context do
-  expected_total = List.first(context.args)
+defstep "the total price should be {float}", %{args: [expected_total]} do
   # Assertion for price
   assert_in_delta get_cart_total(), expected_total, 0.01
   :ok
@@ -52,11 +49,21 @@ end
 ### Word Parameters
 
 ```elixir
-defstep "I should see the {word} dashboard", context do
-  dashboard_type = List.first(context.args)
+defstep "I should see the {word} dashboard", %{args: [dashboard_type]} do
   # Assertion for dashboard type
   assert get_current_dashboard() == dashboard_type
   :ok
+end
+```
+
+### Multiple Parameters
+
+When a step has multiple parameters, you can pattern match on all of them:
+
+```elixir
+defstep "I transfer {float} from {string} to {string}", %{args: [amount, from_account, to_account]} do
+  # Transfer logic
+  {:ok, %{transfer: %{amount: amount, from: from_account, to: to_account}}}
 end
 ```
 

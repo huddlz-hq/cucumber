@@ -75,8 +75,7 @@ Step definitions can indicate failure in several ways:
 Using ExUnit assertions will cause the step to fail if the assertion fails:
 
 ```elixir
-defstep "the total should be {float}", context do
-  total = List.first(context.args)
+defstep "the total should be {float}", %{args: [total]} = context do
   assert context.cart_total == total
   :ok
 end

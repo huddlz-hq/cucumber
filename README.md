@@ -48,8 +48,7 @@ Scenario: Adding two numbers
 defmodule CalculatorTest do
   use Cucumber, feature: "calculator.feature"
   
-  defstep "I have entered {int} into the calculator", context do
-    value = List.first(context.args)
+  defstep "I have entered {int} into the calculator", %{args: [value]} = context do
     values = Map.get(context, :values, [])
     Map.put(context, :values, values ++ [value])
   end
@@ -59,8 +58,7 @@ defmodule CalculatorTest do
     Map.put(context, :result, sum)
   end
   
-  defstep "the result should be {int} on the screen", context do
-    expected = List.first(context.args)
+  defstep "the result should be {int} on the screen", %{args: [expected]} = context do
     assert context.result == expected
     :ok
   end

@@ -115,8 +115,7 @@ defmodule UserAuthenticationTest do
     Map.put(context, :current_page, :sign_in)
   end
   
-  defstep "I enter {string} as my email", context do
-    email = List.first(context.args)
+  defstep "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
   end

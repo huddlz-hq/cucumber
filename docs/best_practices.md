@@ -75,9 +75,7 @@ Scenario: Customer adds product to cart from product detail page
 
 ```elixir
 # Good: Clear, focused, with good error messages
-defstep "I click the {string} button", context do
-  button_text = List.first(context.args)
-  
+defstep "I click the {string} button", %{args: [button_text]} do
   case find_button(button_text) do
     {:ok, button} -> 
       click(button)
@@ -100,8 +98,7 @@ end
 
 ```elixir
 # First step establishes context
-defstep "I submit an order for {string}", _context do
-  product_name = List.first(context.args)
+defstep "I submit an order for {string}", %{args: [product_name]} do
   order_id = create_order(product_name)
   
   # Return context to be used in following steps
@@ -132,8 +129,7 @@ end
 ### UI Testing
 
 ```elixir
-defstep "I click the {string} button", context do
-  button_text = List.first(context.args)
+defstep "I click the {string} button", %{args: [button_text]} do
   click_button(button_text)
   :ok
 end
@@ -142,14 +138,12 @@ end
 ### API Testing
 
 ```elixir
-defstep "I make a GET request to {string}", context do
-  endpoint = List.first(context.args)
+defstep "I make a GET request to {string}", %{args: [endpoint]} = context do
   response = HTTPoison.get!("#{context.base_url}#{endpoint}")
   {:ok, Map.put(context, :response, response)}
 end
 
-defstep "the response status should be {int}", context do
-  expected_status = List.first(context.args)
+defstep "the response status should be {int}", %{args: [expected_status]} = context do
   assert context.response.status_code == expected_status
   :ok
 end
@@ -158,8 +152,7 @@ end
 ### Database Testing
 
 ```elixir
-defstep "there should be a user in the database with email {string}", context do
-  email = List.first(context.args)
+defstep "there should be a user in the database with email {string}", %{args: [email]} do
   user = Repo.get_by(User, email: email)
   assert user != nil
   :ok
@@ -185,8 +178,7 @@ defp create_test_user(attrs \\ %{}) do
 end
 
 # Use in step definitions
-defstep "a user exists with email {string}", context do
-  email = List.first(context.args)
+defstep "a user exists with email {string}", %{args: [email]} do
   user = create_test_user(%{email: email})
   {:ok, %{user: user}}
 end
@@ -304,8 +296,7 @@ defmodule DateParameterType do
 end
 
 # Using in step definitions
-defstep "I schedule an appointment for {date}", context do
-  date = List.first(context.args)
+defstep "I schedule an appointment for {date}", %{args: [date]} do
   # date is already a Date struct
   {:ok, %{appointment_date: date}}
 end
@@ -313,30 +304,28 @@ end
 
 ### Sharing Steps Between Test Modules
 
+Use the `Cucumber.SharedSteps` module to create reusable step definitions:
+
 ```elixir
 # In a shared module
-defmodule CommonSteps do
-  defmacro __using__(_opts) do
-    quote do
-      defstep "I am logged in as {string}", context do
-        username = List.first(context.args)
-        # Login logic
-        {:ok, %{current_user: find_user(username)}}
-      end
-      
-      defstep "I should be on the {string} page", context do
-        page_name = List.first(context.args)
-        assert current_page() == page_name
-        :ok
-      end
-    end
+defmodule SharedSteps.Authentication do
+  use Cucumber.SharedSteps
+  
+  defstep "I am logged in as {string}", %{args: [username]} do
+    # Login logic
+    {:ok, %{current_user: find_user(username)}}
+  end
+  
+  defstep "I should be on the {string} page", %{args: [page_name]} do
+    assert current_page() == page_name
+    :ok
   end
 end
 
 # In a test module
 defmodule AuthenticationTest do
   use Cucumber, feature: "authentication.feature"
-  use CommonSteps
+  use SharedSteps.Authentication
   
   # Additional step definitions specific to this module
 end
