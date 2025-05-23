@@ -28,7 +28,6 @@ defmodule CucumberReturnValuesTest do
 
   # Verify direct map return
   defstep "I should see value {string} in the context", %{args: [value]} = context do
-
     cond do
       # Check for direct map return value
       Map.has_key?(context, :direct_value) ->

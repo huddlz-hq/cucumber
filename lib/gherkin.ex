@@ -156,51 +156,52 @@ defmodule Gherkin.Parser do
   end
 
   defp parse_background_steps(lines) do
-    initial_state = {[], nil, false, nil}
+    lines
+    |> Enum.drop_while(&(&1 == "" or String.starts_with?(&1, "Background:")))
+    |> parse_steps(lines)
+  end
 
-    {steps, _, _, _} =
-      lines
-      |> Enum.drop_while(&(&1 == "" or String.starts_with?(&1, "Background:")))
-      |> Enum.reduce(initial_state, fn line, state ->
-        process_background_line(line, state, lines)
+  # Parse steps for both background and scenarios
+  defp parse_steps(step_lines, all_lines) do
+    initial_state = {[], nil, false}
+
+    {steps, _, _} =
+      Enum.reduce(step_lines, initial_state, fn line, state ->
+        process_step_line(line, state, all_lines)
       end)
 
     Enum.reverse(steps)
   end
 
-  defp process_background_line(line, state, lines) do
-    {steps, current_step, in_docstring, _} = state
+  # Process a single line when parsing steps
+  defp process_step_line(line, {steps, current_step, in_docstring} = state, all_lines) do
+    cond do
+      String.starts_with?(line, ~s(""")) ->
+        handle_docstring_marker(steps, current_step, in_docstring)
 
-    with {:docstring_marker, false} <- {:docstring_marker, String.starts_with?(line, ~s("""))},
-         {:in_docstring, false} <- {:in_docstring, in_docstring},
-         {:table_row, false} <- {:table_row, String.starts_with?(line, "|")},
-         {:step, false} <- {:step, Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line)} do
-      # Ignore other lines
-      state
-    else
-      {:docstring_marker, true} ->
-        handle_bg_docstring_marker(steps, current_step, in_docstring)
+      in_docstring ->
+        handle_docstring_content(line, steps, current_step)
 
-      {:in_docstring, true} ->
-        handle_bg_docstring_content(line, steps, current_step)
+      String.starts_with?(line, "|") ->
+        handle_table_row(line, steps, current_step, in_docstring)
 
-      {:table_row, true} ->
-        handle_bg_table_row(line, steps, current_step, in_docstring)
+      match = Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first) ->
+        handle_step(match, steps, all_lines)
 
-      {:step, true} ->
-        handle_bg_step(line, steps, lines)
+      true ->
+        state
     end
   end
 
-  defp handle_bg_docstring_marker(steps, current_step, in_docstring) do
+  defp handle_docstring_marker(steps, current_step, in_docstring) do
     if in_docstring do
-      {steps, nil, false, nil}
+      {steps, nil, false}
     else
-      {steps, current_step, true, nil}
+      {steps, current_step, true}
     end
   end
 
-  defp handle_bg_docstring_content(line, steps, current_step) do
+  defp handle_docstring_content(line, steps, current_step) do
     updated_step =
       if is_nil(current_step.docstring) do
         %{current_step | docstring: line}
@@ -209,10 +210,10 @@ defmodule Gherkin.Parser do
       end
 
     updated_steps = List.replace_at(steps, 0, updated_step)
-    {updated_steps, updated_step, true, nil}
+    {updated_steps, updated_step, true}
   end
 
-  defp handle_bg_table_row(line, steps, current_step, in_docstring) do
+  defp handle_table_row(line, steps, current_step, in_docstring) do
     table_row =
       line
       |> String.split("|", trim: true)
@@ -227,19 +228,16 @@ defmodule Gherkin.Parser do
         end
 
       updated_steps = List.replace_at(steps, 0, updated_step)
-      {updated_steps, updated_step, in_docstring, nil}
+      {updated_steps, updated_step, in_docstring}
     else
-      {steps, current_step, in_docstring, nil}
+      {steps, current_step, in_docstring}
     end
   end
 
-  defp handle_bg_step(line, steps, lines) do
-    [keyword, text] =
-      Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
-
-    line_number = Enum.find_index(lines, &(&1 =~ text)) || 0
+  defp handle_step([keyword, text], steps, all_lines) do
+    line_number = Enum.find_index(all_lines, &(&1 =~ text)) || 0
     new_step = %Step{keyword: keyword, text: text, line: line_number}
-    {[new_step | steps], new_step, false, nil}
+    {[new_step | steps], new_step, false}
   end
 
   # Helper function to parse scenarios with their tags
@@ -297,81 +295,26 @@ defmodule Gherkin.Parser do
   defp process_line(line, state, lines) do
     {scenarios, current_scenario, current_tags, steps, current_step, in_docstring} = state
 
-    with {:docstring_marker, false} <- {:docstring_marker, String.starts_with?(line, ~s("""))},
-         {:in_docstring, false} <- {:in_docstring, in_docstring},
-         {:table_row, false} <- {:table_row, String.starts_with?(line, "|")},
-         {:tag, false} <- {:tag, String.starts_with?(line, "@")},
-         {:scenario, false} <- {:scenario, String.starts_with?(line, "Scenario:")},
-         {:step, false} <- {:step, Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line)} do
-      # Ignore other lines
-      {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-    else
-      {:docstring_marker, true} ->
-        handle_docstring_marker(state)
-
-      {:in_docstring, true} ->
-        handle_docstring_content(line, state)
-
-      {:table_row, true} ->
-        handle_table_row(line, state)
-
-      {:tag, true} ->
+    cond do
+      String.starts_with?(line, "@") ->
         handle_tag(line, state)
 
-      {:scenario, true} ->
+      String.starts_with?(line, "Scenario:") ->
         handle_scenario(line, state)
 
-      {:step, true} ->
-        handle_step(line, state, lines)
-    end
-  end
+      # For step-related lines, delegate to common step processing
+      String.starts_with?(line, ~s(""")) or in_docstring or
+        String.starts_with?(line, "|") or
+          Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line) ->
+        # Process the step-related line
+        {new_steps, new_current_step, new_in_docstring} =
+          process_step_line(line, {steps, current_step, in_docstring}, lines)
 
-  defp handle_docstring_marker(
-         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-       ) do
-    if in_docstring do
-      {scenarios, current_scenario, current_tags, steps, nil, false}
-    else
-      {scenarios, current_scenario, current_tags, steps, current_step, true}
-    end
-  end
+        {scenarios, current_scenario, current_tags, new_steps, new_current_step, new_in_docstring}
 
-  defp handle_docstring_content(
-         line,
-         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-       ) do
-    updated_step =
-      if is_nil(current_step.docstring) do
-        %{current_step | docstring: line}
-      else
-        %{current_step | docstring: current_step.docstring <> "\n" <> line}
-      end
-
-    updated_steps = List.replace_at(steps, 0, updated_step)
-    {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
-  end
-
-  defp handle_table_row(
-         line,
-         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-       ) do
-    table_row =
-      line
-      |> String.split("|", trim: true)
-      |> Enum.map(&String.trim/1)
-
-    if current_step do
-      updated_step =
-        if current_step.datatable do
-          %{current_step | datatable: current_step.datatable ++ [table_row]}
-        else
-          %{current_step | datatable: [table_row]}
-        end
-
-      updated_steps = List.replace_at(steps, 0, updated_step)
-      {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
-    else
-      {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+      true ->
+        # Ignore other lines
+        state
     end
   end
 
@@ -397,19 +340,6 @@ defmodule Gherkin.Parser do
     else
       {scenarios, line, current_tags, [], nil, false}
     end
-  end
-
-  defp handle_step(
-         line,
-         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring},
-         lines
-       ) do
-    [keyword, text] =
-      Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
-
-    line_number = Enum.find_index(lines, &(&1 =~ text)) || 0
-    new_step = %Step{keyword: keyword, text: text, line: line_number}
-    {scenarios, current_scenario, current_tags, [new_step | steps], new_step, false}
   end
 
   defp build_scenario(scenario_line, steps, tags) do

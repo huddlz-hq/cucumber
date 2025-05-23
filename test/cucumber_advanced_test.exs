@@ -55,7 +55,6 @@ defmodule CucumberAdvancedTest do
 
   # Step that searches in the data from previous step
   defstep "I search for {string}", %{args: [search_term]} = context do
-
     # Find the user with the matching username
     found_user = Enum.find(context.users, &(&1["username"] == search_term))
     Map.put(context, :found_user, found_user)
@@ -63,7 +62,6 @@ defmodule CucumberAdvancedTest do
 
   # Verify the search result
   defstep "I should find user with email {string}", %{args: [expected_email]} = context do
-
     assert context.found_user != nil
     assert context.found_user["email"] == expected_email
     context
