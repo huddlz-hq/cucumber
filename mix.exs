@@ -20,6 +20,14 @@ defmodule Cucumber.MixProject do
     ]
   end
 
+  def cli do
+    [
+      preferred_envs: [
+        "test.watch": :test
+      ]
+    ]
+  end
+
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
@@ -30,7 +38,9 @@ defmodule Cucumber.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.29", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.29", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
   end
 

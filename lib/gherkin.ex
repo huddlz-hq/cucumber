@@ -7,14 +7,14 @@ defmodule Gherkin.Feature do
   It can also have tags that apply to all scenarios in the feature.
   """
   defstruct name: "", description: "", background: nil, scenarios: [], tags: []
-  
+
   @type t :: %__MODULE__{
-    name: String.t(),
-    description: String.t(),
-    background: Gherkin.Background.t() | nil,
-    scenarios: [Gherkin.Scenario.t()],
-    tags: [String.t()]
-  }
+          name: String.t(),
+          description: String.t(),
+          background: Gherkin.Background.t() | nil,
+          scenarios: [Gherkin.Scenario.t()],
+          tags: [String.t()]
+        }
 end
 
 defmodule Gherkin.Background do
@@ -25,10 +25,10 @@ defmodule Gherkin.Background do
   It allows you to define common setup steps that apply to all scenarios.
   """
   defstruct steps: []
-  
+
   @type t :: %__MODULE__{
-    steps: [Gherkin.Step.t()]
-  }
+          steps: [Gherkin.Step.t()]
+        }
 end
 
 defmodule Gherkin.Scenario do
@@ -39,12 +39,12 @@ defmodule Gherkin.Scenario do
   It consists of a name, a list of steps, and optional tags for filtering.
   """
   defstruct name: "", steps: [], tags: []
-  
+
   @type t :: %__MODULE__{
-    name: String.t(),
-    steps: [Gherkin.Step.t()],
-    tags: [String.t()]
-  }
+          name: String.t(),
+          steps: [Gherkin.Step.t()],
+          tags: [String.t()]
+        }
 end
 
 defmodule Gherkin.Step do
@@ -59,14 +59,14 @@ defmodule Gherkin.Step do
   - line: Line number in the source file
   """
   defstruct keyword: "", text: "", docstring: nil, datatable: nil, line: nil
-  
+
   @type t :: %__MODULE__{
-    keyword: String.t(),
-    text: String.t(),
-    docstring: String.t() | nil,
-    datatable: [[String.t()]] | nil,
-    line: non_neg_integer() | nil
-  }
+          keyword: String.t(),
+          text: String.t(),
+          docstring: String.t() | nil,
+          datatable: [[String.t()]] | nil,
+          line: non_neg_integer() | nil
+        }
 end
 
 # Initial parser module scaffold
@@ -84,7 +84,7 @@ defmodule Gherkin.Parser do
   It implements a subset of the Gherkin language focused on core BDD concepts.
   """
 
-  alias Gherkin.{Feature, Background, Scenario, Step}
+  alias Gherkin.{Background, Feature, Scenario, Step}
 
   @doc """
   Parses a Gherkin feature file from a string into structured data.
@@ -112,245 +112,151 @@ defmodule Gherkin.Parser do
       # Returns %Gherkin.Feature{} struct with parsed data
   """
   def parse(gherkin_string) do
-    lines = String.split(gherkin_string, "\n", trim: true)
-    lines = Enum.map(lines, &String.trim/1)
+    lines = gherkin_string
+            |> String.split("\n", trim: true)
+            |> Enum.map(&String.trim/1)
 
-    # Extract feature tags and name
-    {feature_tags, feature_line, rest} = extract_tags_and_element(lines, "Feature:")
+    with {feature_tags, feature_line, rest} <- extract_tags_and_element(lines, "Feature:"),
+         feature_name <- extract_feature_name(feature_line),
+         {background, after_bg} <- extract_background(rest),
+         scenarios <- parse_scenarios(after_bg) do
+      %Feature{
+        name: feature_name,
+        description: "",
+        background: background,
+        scenarios: scenarios,
+        tags: feature_tags
+      }
+    end
+  end
+
+  defp extract_feature_name(feature_line) do
     [_, feature_name] = String.split(feature_line, ":", parts: 2)
-    feature_name = String.trim(feature_name)
+    String.trim(feature_name)
+  end
 
-    # Find Background (optional)
-    {background, after_bg} =
-      case Enum.split_while(rest, fn line ->
-             !String.starts_with?(line, "Scenario:") && !String.starts_with?(line, "@")
-           end) do
-        {bg_lines, rest_with_scenarios} ->
-          has_background = Enum.any?(bg_lines, &String.starts_with?(&1, "Background:"))
+  defp extract_background(lines) do
+    {bg_lines, rest_with_scenarios} =
+      Enum.split_while(lines, fn line ->
+        !String.starts_with?(line, "Scenario:") && !String.starts_with?(line, "@")
+      end)
 
-          if has_background do
-            # Extract background details with docstring and datatable support
-            {bg_steps, _, _, _} =
-              bg_lines
-              |> Enum.drop_while(&(&1 == "" or String.starts_with?(&1, "Background:")))
-              |> Enum.reduce({[], nil, false, nil}, fn line,
-                                                       {steps, current_step, in_docstring, _} ->
-                cond do
-                  # Docstring start/end marker
-                  String.starts_with?(line, ~s(""")) ->
-                    if in_docstring do
-                      # End of docstring
-                      {steps, nil, false, nil}
-                    else
-                      # Start of docstring
-                      {steps, current_step, true, nil}
-                    end
+    background = parse_background(bg_lines)
+    {background, rest_with_scenarios}
+  end
 
-                  # Inside a docstring, collect content
-                  in_docstring ->
-                    # Append this line to the docstring of the current step
-                    # Initialize the docstring if nil, otherwise append with newline
-                    updated_step =
-                      if is_nil(current_step.docstring) do
-                        %{current_step | docstring: line}
-                      else
-                        %{current_step | docstring: current_step.docstring <> "\n" <> line}
-                      end
+  defp parse_background(lines) do
+    if Enum.any?(lines, &String.starts_with?(&1, "Background:")) do
+      steps = parse_background_steps(lines)
+      %Background{steps: steps}
+    else
+      nil
+    end
+  end
 
-                    # Replace the current step in the steps list
-                    updated_steps = List.replace_at(steps, 0, updated_step)
-                    {updated_steps, updated_step, in_docstring, nil}
+  defp parse_background_steps(lines) do
+    initial_state = {[], nil, false, nil}
 
-                  # Data table row
-                  String.starts_with?(line, "|") ->
-                    table_row =
-                      line
-                      |> String.split("|", trim: true)
-                      |> Enum.map(&String.trim/1)
+    {steps, _, _, _} =
+      lines
+      |> Enum.drop_while(&(&1 == "" or String.starts_with?(&1, "Background:")))
+      |> Enum.reduce(initial_state, fn line, state ->
+        process_background_line(line, state, lines)
+      end)
 
-                    if current_step do
-                      # If we already have a step, add this row to its datatable
-                      updated_step =
-                        if current_step.datatable do
-                          %{current_step | datatable: current_step.datatable ++ [table_row]}
-                        else
-                          %{current_step | datatable: [table_row]}
-                        end
+    Enum.reverse(steps)
+  end
 
-                      # Replace the current step in the steps list
-                      updated_steps = List.replace_at(steps, 0, updated_step)
-                      {updated_steps, updated_step, in_docstring, nil}
-                    else
-                      # This shouldn't happen (table row without a step)
-                      {steps, current_step, in_docstring, nil}
-                    end
+  defp process_background_line(line, state, lines) do
+    {steps, current_step, in_docstring, _} = state
 
-                  # Step line
-                  Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line) ->
-                    [keyword, text] =
-                      Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line,
-                        capture: :all_but_first
-                      )
+    with {:docstring_marker, false} <- {:docstring_marker, String.starts_with?(line, ~s("""))},
+         {:in_docstring, false} <- {:in_docstring, in_docstring},
+         {:table_row, false} <- {:table_row, String.starts_with?(line, "|")},
+         {:step, false} <- {:step, Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line)} do
+      # Ignore other lines
+      state
+    else
+      {:docstring_marker, true} ->
+        handle_bg_docstring_marker(steps, current_step, in_docstring)
 
-                    # Track the original line number by using the index in the list
-                    line_number = Enum.find_index(bg_lines, &(&1 =~ text)) || 0
-                    new_step = %Step{keyword: keyword, text: text, line: line_number}
-                    {[new_step | steps], new_step, false, nil}
+      {:in_docstring, true} ->
+        handle_bg_docstring_content(line, steps, current_step)
 
-                  # Ignore other lines
-                  true ->
-                    {steps, current_step, in_docstring, nil}
-                end
-              end)
+      {:table_row, true} ->
+        handle_bg_table_row(line, steps, current_step, in_docstring)
 
-            {%Background{steps: Enum.reverse(bg_steps)}, rest_with_scenarios}
-          else
-            {nil, rest_with_scenarios}
-          end
+      {:step, true} ->
+        handle_bg_step(line, steps, lines)
+    end
+  end
 
-        _ ->
-          {nil, rest}
+  defp handle_bg_docstring_marker(steps, current_step, in_docstring) do
+    if in_docstring do
+      {steps, nil, false, nil}
+    else
+      {steps, current_step, true, nil}
+    end
+  end
+
+  defp handle_bg_docstring_content(line, steps, current_step) do
+    updated_step =
+      if is_nil(current_step.docstring) do
+        %{current_step | docstring: line}
+      else
+        %{current_step | docstring: current_step.docstring <> "\n" <> line}
       end
 
-    # Parse all scenarios with their tags and steps
-    scenarios =
-      parse_scenarios(after_bg)
+    updated_steps = List.replace_at(steps, 0, updated_step)
+    {updated_steps, updated_step, true, nil}
+  end
 
-    %Feature{
-      name: feature_name,
-      description: "",
-      background: background,
-      scenarios: scenarios,
-      tags: feature_tags
-    }
+  defp handle_bg_table_row(line, steps, current_step, in_docstring) do
+    table_row =
+      line
+      |> String.split("|", trim: true)
+      |> Enum.map(&String.trim/1)
+
+    if current_step do
+      updated_step =
+        if current_step.datatable do
+          %{current_step | datatable: current_step.datatable ++ [table_row]}
+        else
+          %{current_step | datatable: [table_row]}
+        end
+
+      updated_steps = List.replace_at(steps, 0, updated_step)
+      {updated_steps, updated_step, in_docstring, nil}
+    else
+      {steps, current_step, in_docstring, nil}
+    end
+  end
+
+  defp handle_bg_step(line, steps, lines) do
+    [keyword, text] =
+      Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
+
+    line_number = Enum.find_index(lines, &(&1 =~ text)) || 0
+    new_step = %Step{keyword: keyword, text: text, line: line_number}
+    {[new_step | steps], new_step, false, nil}
   end
 
   # Helper function to parse scenarios with their tags
   defp parse_scenarios(lines) do
-    # Keep track of state while parsing
-    # current_step tracks the current step being processed for docstring/datatable attachment
+    initial_state = {[], nil, [], [], nil, false}
+
     {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring} =
-      Enum.reduce(lines, {[], nil, [], [], nil, false}, fn line,
-                                                           {scenarios, current_scenario,
-                                                            current_tags, steps, current_step,
-                                                            in_docstring} ->
-        cond do
-          # Docstring start/end marker
-          String.starts_with?(line, ~s(""")) ->
-            if in_docstring do
-              # End of docstring - attach the collected docstring to the current step
-              {scenarios, current_scenario, current_tags, steps, nil, false}
-            else
-              # Start of docstring - begin collecting
-              {scenarios, current_scenario, current_tags, steps, current_step, true}
-            end
-
-          # Inside a docstring, collect content
-          in_docstring ->
-            # Append this line to the docstring of the current step
-            # Initialize the docstring if nil, otherwise append with newline
-            updated_step =
-              if is_nil(current_step.docstring) do
-                %{current_step | docstring: line}
-              else
-                %{current_step | docstring: current_step.docstring <> "\n" <> line}
-              end
-
-            # Replace the current step in the steps list
-            updated_steps = List.replace_at(steps, 0, updated_step)
-            {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
-
-          # Data table row
-          String.starts_with?(line, "|") ->
-            table_row =
-              line
-              |> String.split("|", trim: true)
-              |> Enum.map(&String.trim/1)
-
-            if current_step do
-              # If we already have a step, add this row to its datatable
-              updated_step =
-                if current_step.datatable do
-                  %{current_step | datatable: current_step.datatable ++ [table_row]}
-                else
-                  %{current_step | datatable: [table_row]}
-                end
-
-              # Replace the current step in the steps list
-              updated_steps = List.replace_at(steps, 0, updated_step)
-
-              {scenarios, current_scenario, current_tags, updated_steps, updated_step,
-               in_docstring}
-            else
-              # This should not happen (table row without a step), but handle gracefully
-              {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-            end
-
-          # Tag line
-          String.starts_with?(line, "@") ->
-            if current_scenario do
-              # Save previous scenario before starting a new one with tags
-              [_, scenario_name] = String.split(current_scenario, ":", parts: 2)
-              scenario_name = String.trim(scenario_name)
-
-              scenario = %Scenario{
-                name: scenario_name,
-                steps: Enum.reverse(steps),
-                tags: current_tags
-              }
-
-              {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false}
-            else
-              # Tags before first scenario
-              {scenarios, current_scenario, extract_tags(line), steps, current_step, false}
-            end
-
-          # Scenario line
-          String.starts_with?(line, "Scenario:") ->
-            if current_scenario do
-              # Save previous scenario before starting a new one
-              [_, scenario_name] = String.split(current_scenario, ":", parts: 2)
-              scenario_name = String.trim(scenario_name)
-
-              scenario = %Scenario{
-                name: scenario_name,
-                steps: Enum.reverse(steps),
-                tags: current_tags
-              }
-
-              {scenarios ++ [scenario], line, [], [], nil, false}
-            else
-              # First scenario or scenario after tags
-              {scenarios, line, current_tags, [], nil, false}
-            end
-
-          # Step line
-          Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line) ->
-            [keyword, text] =
-              Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
-
-            # Track the line number based on position in the original lines array
-            line_number = Enum.find_index(lines, &(&1 =~ text)) || 0
-            new_step = %Step{keyword: keyword, text: text, line: line_number}
-            {scenarios, current_scenario, current_tags, [new_step | steps], new_step, false}
-
-          # Ignore other lines
-          true ->
-            {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
-        end
+      Enum.reduce(lines, initial_state, fn line, state ->
+        process_line(line, state, lines)
       end)
 
     # Add the last scenario if present
+    finalize_scenarios(scenarios, current_scenario, current_tags, steps)
+  end
+
+  defp finalize_scenarios(scenarios, current_scenario, current_tags, steps) do
     if current_scenario do
-      [_, scenario_name] = String.split(current_scenario, ":", parts: 2)
-      scenario_name = String.trim(scenario_name)
-
-      scenario = %Scenario{
-        name: scenario_name,
-        steps: Enum.reverse(steps),
-        tags: current_tags
-      }
-
+      scenario = build_scenario(current_scenario, steps, current_tags)
       scenarios ++ [scenario]
     else
       scenarios
@@ -383,5 +289,118 @@ defmodule Gherkin.Parser do
       end
 
     {tags, element_line, new_rest}
+  end
+
+  # Helper functions to reduce complexity
+
+  defp process_line(line, state, lines) do
+    {scenarios, current_scenario, current_tags, steps, current_step, in_docstring} = state
+
+    with {:docstring_marker, false} <- {:docstring_marker, String.starts_with?(line, ~s("""))},
+         {:in_docstring, false} <- {:in_docstring, in_docstring},
+         {:table_row, false} <- {:table_row, String.starts_with?(line, "|")},
+         {:tag, false} <- {:tag, String.starts_with?(line, "@")},
+         {:scenario, false} <- {:scenario, String.starts_with?(line, "Scenario:")},
+         {:step, false} <- {:step, Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line)} do
+      # Ignore other lines
+      {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+    else
+      {:docstring_marker, true} ->
+        handle_docstring_marker(state)
+
+      {:in_docstring, true} ->
+        handle_docstring_content(line, state)
+
+      {:table_row, true} ->
+        handle_table_row(line, state)
+
+      {:tag, true} ->
+        handle_tag(line, state)
+
+      {:scenario, true} ->
+        handle_scenario(line, state)
+
+      {:step, true} ->
+        handle_step(line, state, lines)
+    end
+  end
+
+  defp handle_docstring_marker({scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+    if in_docstring do
+      {scenarios, current_scenario, current_tags, steps, nil, false}
+    else
+      {scenarios, current_scenario, current_tags, steps, current_step, true}
+    end
+  end
+
+  defp handle_docstring_content(line, {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+    updated_step =
+      if is_nil(current_step.docstring) do
+        %{current_step | docstring: line}
+      else
+        %{current_step | docstring: current_step.docstring <> "\n" <> line}
+      end
+
+    updated_steps = List.replace_at(steps, 0, updated_step)
+    {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
+  end
+
+  defp handle_table_row(line, {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+    table_row =
+      line
+      |> String.split("|", trim: true)
+      |> Enum.map(&String.trim/1)
+
+    if current_step do
+      updated_step =
+        if current_step.datatable do
+          %{current_step | datatable: current_step.datatable ++ [table_row]}
+        else
+          %{current_step | datatable: [table_row]}
+        end
+
+      updated_steps = List.replace_at(steps, 0, updated_step)
+      {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
+    else
+      {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+    end
+  end
+
+  defp handle_tag(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}) do
+    if current_scenario do
+      scenario = build_scenario(current_scenario, steps, current_tags)
+      {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false}
+    else
+      {scenarios, current_scenario, extract_tags(line), steps, nil, false}
+    end
+  end
+
+  defp handle_scenario(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}) do
+    if current_scenario do
+      scenario = build_scenario(current_scenario, steps, current_tags)
+      {scenarios ++ [scenario], line, [], [], nil, false}
+    else
+      {scenarios, line, current_tags, [], nil, false}
+    end
+  end
+
+  defp handle_step(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}, lines) do
+    [keyword, text] =
+      Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
+
+    line_number = Enum.find_index(lines, &(&1 =~ text)) || 0
+    new_step = %Step{keyword: keyword, text: text, line: line_number}
+    {scenarios, current_scenario, current_tags, [new_step | steps], new_step, false}
+  end
+
+  defp build_scenario(scenario_line, steps, tags) do
+    [_, scenario_name] = String.split(scenario_line, ":", parts: 2)
+    scenario_name = String.trim(scenario_name)
+
+    %Scenario{
+      name: scenario_name,
+      steps: Enum.reverse(steps),
+      tags: tags
+    }
   end
 end

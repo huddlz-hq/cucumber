@@ -1,7 +1,7 @@
 defmodule Gherkin.ParserTest do
   use ExUnit.Case, async: true
 
-  alias Gherkin.{Feature, Background, Scenario, Step}
+  alias Gherkin.{Background, Feature, Scenario, Step}
 
   describe "parse/1" do
     test "parses a minimal feature file with one scenario and background" do

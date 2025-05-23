@@ -142,21 +142,6 @@ defmodule Cucumber do
         context,
         %Gherkin.Step{text: text, docstring: docstring, datatable: datatable} = step
       ) do
-    # Extract parameters using the Expression module
-    patterns = module.__cucumber_patterns__()
-
-    # Find a matching pattern and extract args
-    result =
-      Enum.find_value(patterns, fn pattern_info ->
-        {pattern_text, _} = pattern_info
-        compiled_pattern = Cucumber.Expression.compile(pattern_text)
-
-        case Cucumber.Expression.match(text, compiled_pattern) do
-          {:match, args} -> {pattern_text, args}
-          :no_match -> nil
-        end
-      end)
-
     # Get feature file and scenario name from context for error reporting
     feature_file = Map.get(context, :feature_file, "unknown_feature.feature")
     scenario_name = Map.get(context, :scenario_name, "Unknown Scenario")
@@ -165,127 +150,22 @@ defmodule Cucumber do
     step_history = Map.get(context, :step_history, [])
     updated_context = Map.put(context, :step_history, step_history ++ [{"pending", step}])
 
-    case result do
+    # Find a matching pattern and extract args
+    case find_matching_pattern(module, text) do
       {pattern, args} ->
-        try do
-          # Merge args into context and add docstring and datatable when present
-          context_with_args = Map.put(updated_context, :args, args)
+        step_info = %{
+          module: module,
+          context: updated_context,
+          step: step,
+          pattern: pattern,
+          args: args,
+          docstring: docstring,
+          datatable: datatable,
+          feature_file: feature_file,
+          scenario_name: scenario_name
+        }
 
-          # Add docstring if present
-          context_with_docstring =
-            if docstring,
-              do: Map.put(context_with_args, :docstring, docstring),
-              else: context_with_args
-
-          # Add datatable if present
-          context_with_extras =
-            if datatable do
-              # If first row looks like headers, convert to a list of maps
-              if length(datatable) > 1 do
-                [headers | rows] = datatable
-
-                # Convert rows to maps using headers as keys
-                table_maps =
-                  Enum.map(rows, fn row ->
-                    Enum.zip(headers, row) |> Enum.into(%{})
-                  end)
-
-                Map.put(context_with_docstring, :datatable, %{
-                  headers: headers,
-                  rows: rows,
-                  maps: table_maps,
-                  raw: datatable
-                })
-              else
-                # Single row or empty table
-                Map.put(context_with_docstring, :datatable, %{
-                  headers: [],
-                  rows: datatable,
-                  maps: [],
-                  raw: datatable
-                })
-              end
-            else
-              context_with_docstring
-            end
-
-          # Call the step function with the enhanced context
-          step_result = apply(module, :step, [context_with_extras, pattern])
-
-          # Update step history to mark this step as passed
-          current_history = Map.get(context_with_extras, :step_history, [])
-
-          # Enhanced return value handling
-          case step_result do
-            # When step returns {:ok, map}, merge map into context
-            {:ok, value} when is_map(value) ->
-              new_context = Map.merge(context, value)
-              # Update step history in the new context
-              Map.put(
-                new_context,
-                :step_history,
-                List.delete_at(current_history, -1) ++ [{"passed", step}]
-              )
-
-            # When step returns a map directly, use it as the new context
-            %{} = new_context ->
-              # Make sure the step_history is preserved and updated
-              history = Map.get(new_context, :step_history, current_history)
-
-              Map.put(
-                new_context,
-                :step_history,
-                List.delete_at(history, -1) ++ [{"passed", step}]
-              )
-
-            # When step returns :ok or nil, keep existing context
-            result when result == :ok or result == nil ->
-              # Update step history in the existing context
-              Map.put(
-                context,
-                :step_history,
-                List.delete_at(current_history, -1) ++ [{"passed", step}]
-              )
-
-            # When step returns {:error, reason}, raise a StepError
-            {:error, reason} ->
-              # Update step history to mark this step as failed
-              failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
-
-              raise Cucumber.StepError.failed_step(
-                      step,
-                      pattern,
-                      reason,
-                      feature_file,
-                      scenario_name,
-                      failed_history
-                    )
-
-            # For any other return value, just keep the current context
-            _other ->
-              # Update step history in the existing context
-              Map.put(
-                context,
-                :step_history,
-                List.delete_at(current_history, -1) ++ [{"passed", step}]
-              )
-          end
-        rescue
-          error ->
-            # If any other error occurs during step execution, wrap it in a StepError
-            current_history = Map.get(updated_context, :step_history, [])
-            failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
-
-            reraise Cucumber.StepError.failed_step(
-                      step,
-                      pattern,
-                      error,
-                      feature_file,
-                      scenario_name,
-                      failed_history
-                    ),
-                    __STACKTRACE__
-        end
+        execute_step(step_info)
 
       nil ->
         # No matching pattern found, raise a helpful error with suggestions
@@ -295,6 +175,134 @@ defmodule Cucumber do
                 scenario_name,
                 step_history
               )
+    end
+  end
+
+  defp execute_step(%{
+         module: module,
+         context: context,
+         step: step,
+         pattern: pattern,
+         args: args,
+         docstring: docstring,
+         datatable: datatable,
+         feature_file: feature_file,
+         scenario_name: scenario_name
+       }) do
+    # Build context with all extras
+    context_with_extras = build_context_with_extras(context, args, docstring, datatable)
+
+    # Call the step function with the enhanced context
+    step_result = module.step(context_with_extras, pattern)
+
+    # Handle the result
+    handle_step_result(step_result, context, step, pattern, feature_file, scenario_name)
+  rescue
+    error ->
+      # If any other error occurs during step execution, wrap it in a StepError
+      current_history = Map.get(context, :step_history, [])
+      failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
+
+      reraise Cucumber.StepError.failed_step(
+                step,
+                pattern,
+                error,
+                feature_file,
+                scenario_name,
+                failed_history
+              ),
+              __STACKTRACE__
+  end
+
+  # Private helper functions for apply_step/3
+
+  defp find_matching_pattern(module, text) do
+    patterns = module.__cucumber_patterns__()
+
+    Enum.find_value(patterns, fn {pattern_text, _} ->
+      compiled_pattern = Cucumber.Expression.compile(pattern_text)
+
+      case Cucumber.Expression.match(text, compiled_pattern) do
+        {:match, args} -> {pattern_text, args}
+        :no_match -> nil
+      end
+    end)
+  end
+
+  defp build_context_with_extras(context, args, docstring, datatable) do
+    context
+    |> Map.put(:args, args)
+    |> add_docstring(docstring)
+    |> add_datatable(datatable)
+  end
+
+  defp add_docstring(context, nil), do: context
+  defp add_docstring(context, docstring), do: Map.put(context, :docstring, docstring)
+
+  defp add_datatable(context, nil), do: context
+
+  defp add_datatable(context, datatable) do
+    datatable_map =
+      if length(datatable) > 1 do
+        [headers | rows] = datatable
+
+        table_maps =
+          Enum.map(rows, fn row ->
+            Enum.zip(headers, row) |> Enum.into(%{})
+          end)
+
+        %{
+          headers: headers,
+          rows: rows,
+          maps: table_maps,
+          raw: datatable
+        }
+      else
+        %{
+          headers: [],
+          rows: datatable,
+          maps: [],
+          raw: datatable
+        }
+      end
+
+    Map.put(context, :datatable, datatable_map)
+  end
+
+  defp update_step_history(context, status, step) do
+    current_history = Map.get(context, :step_history, [])
+    updated_history = List.delete_at(current_history, -1) ++ [{status, step}]
+    Map.put(context, :step_history, updated_history)
+  end
+
+  defp handle_step_result(step_result, context, step, pattern, feature_file, scenario_name) do
+    case step_result do
+      {:ok, value} when is_map(value) ->
+        Map.merge(context, value)
+        |> update_step_history("passed", step)
+
+      %{} = new_context ->
+        new_context
+        |> update_step_history("passed", step)
+
+      result when result == :ok or result == nil ->
+        update_step_history(context, "passed", step)
+
+      {:error, reason} ->
+        current_history = Map.get(context, :step_history, [])
+        failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
+
+        raise Cucumber.StepError.failed_step(
+                step,
+                pattern,
+                reason,
+                feature_file,
+                scenario_name,
+                failed_history
+              )
+
+      _other ->
+        update_step_history(context, "passed", step)
     end
   end
 
