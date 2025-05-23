@@ -10,8 +10,7 @@ defmodule CucumberSharedStepsTest do
           %{step: :first}
         end
 
-        defstep "second accumulated step with {string}", context do
-          param = List.first(context.args)
+        defstep "second accumulated step with {string}", %{args: [param]} do
           {:ok, %{step: :second, param: param}}
         end
       end
@@ -34,8 +33,7 @@ defmodule CucumberSharedStepsTest do
           %{exported: :one}
         end
 
-        defstep "exported step {int}", context do
-          num = List.first(context.args)
+        defstep "exported step {int}", %{args: [num]} do
           %{exported: :two, number: num}
         end
       end
@@ -72,8 +70,7 @@ defmodule CucumberSharedStepsTest do
           %{module_a: true}
         end
 
-        defstep "shared step {int}", context do
-          num = List.first(context.args)
+        defstep "shared step {int}", %{args: [num]} = context do
           Map.put(context, :number_from_a, num)
         end
       end
@@ -86,8 +83,7 @@ defmodule CucumberSharedStepsTest do
           %{module_b: true}
         end
 
-        defstep "another shared step {string}", context do
-          str = List.first(context.args)
+        defstep "another shared step {string}", %{args: [str]} = context do
           Map.put(context, :string_from_b, str)
         end
       end
@@ -197,7 +193,7 @@ defmodule CucumberSharedStepsTest do
 
       # The line number should be from the shared module definition
       # With delegation, we expect it to be from the SharedWithError module
-      assert result.step_line == 182
+      assert result.step_line == 178
     end
   end
 
@@ -211,8 +207,7 @@ defmodule CucumberSharedStepsTest do
           :ok
         end
 
-        defstep "a shared step with parameter {string}", context do
-          param = List.first(context.args)
+        defstep "a shared step with parameter {string}", %{args: [param]} do
           {:ok, %{param: param}}
         end
       end

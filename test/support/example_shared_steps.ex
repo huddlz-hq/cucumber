@@ -13,13 +13,11 @@ defmodule ExampleSharedSteps do
     %{shared_step_executed: true}
   end
 
-  defstep "I have {int} items", context do
-    count = List.first(context.args)
+  defstep "I have {int} items", %{args: [count]} do
     {:ok, %{item_count: count}}
   end
 
-  defstep "I log in as {string}", context do
-    username = List.first(context.args)
+  defstep "I log in as {string}", %{args: [username]} = context do
     Map.put(context, :current_user, username)
   end
 end

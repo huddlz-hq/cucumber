@@ -7,8 +7,7 @@ defmodule CucumberReturnValuesTest do
   end
 
   # Test returning a map directly
-  defstep "I return a map directly with value {string}", context do
-    value = List.first(context.args)
+  defstep "I return a map directly with value {string}", %{args: [value]} do
     %{direct_value: value}
   end
 
@@ -18,8 +17,7 @@ defmodule CucumberReturnValuesTest do
   end
 
   # Test returning {:ok, map} tuple
-  defstep "I return a tuple with value {string}", context do
-    value = List.first(context.args)
+  defstep "I return a tuple with value {string}", %{args: [value]} do
     {:ok, %{tuple_value: value}}
   end
 
@@ -29,8 +27,7 @@ defmodule CucumberReturnValuesTest do
   end
 
   # Verify direct map return
-  defstep "I should see value {string} in the context", context do
-    value = List.first(context.args)
+  defstep "I should see value {string} in the context", %{args: [value]} = context do
 
     cond do
       # Check for direct map return value

@@ -34,8 +34,7 @@ defmodule CucumberAdvancedTest do
   end
 
   # Verify the docstring was processed correctly
-  defstep "I should verify it contains {string}", context do
-    search_term = List.first(context.args)
+  defstep "I should verify it contains {string}", %{args: [search_term]} = context do
     assert context.document != nil
     assert String.contains?(context.document, search_term)
     assert String.contains?(context.processed_document, String.upcase(search_term))
@@ -55,8 +54,7 @@ defmodule CucumberAdvancedTest do
   end
 
   # Step that searches in the data from previous step
-  defstep "I search for {string}", context do
-    search_term = List.first(context.args)
+  defstep "I search for {string}", %{args: [search_term]} = context do
 
     # Find the user with the matching username
     found_user = Enum.find(context.users, &(&1["username"] == search_term))
@@ -64,8 +62,7 @@ defmodule CucumberAdvancedTest do
   end
 
   # Verify the search result
-  defstep "I should find user with email {string}", context do
-    expected_email = List.first(context.args)
+  defstep "I should find user with email {string}", %{args: [expected_email]} = context do
 
     assert context.found_user != nil
     assert context.found_user["email"] == expected_email

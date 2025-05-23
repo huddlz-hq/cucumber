@@ -2,15 +2,13 @@ defmodule CucumberParameterTest do
   use Cucumber, feature: "parameters.feature"
 
   # Step with {int} parameter
-  defstep "a number {int}", context do
-    number = List.first(context.args)
+  defstep "a number {int}", %{args: [number]} = context do
     assert number == 42
     Map.put(context, :number, number)
   end
 
   # Step with {float} parameter
-  defstep "a decimal {float}", context do
-    float = List.first(context.args)
+  defstep "a decimal {float}", %{args: [float]} = context do
     assert float == 3.14
     Map.put(context, :float, float)
   end

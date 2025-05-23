@@ -4,13 +4,11 @@ defmodule SharedSteps.Shopping do
   """
   use Cucumber.SharedSteps
 
-  defstep "I have {int} items in my cart", context do
-    item_count = List.first(context.args)
+  defstep "I have {int} items in my cart", %{args: [item_count]} = context do
     Map.put(context, :cart_items, item_count)
   end
 
-  defstep "I should have {int} items total", context do
-    expected_count = List.first(context.args)
+  defstep "I should have {int} items total", %{args: [expected_count]} = context do
     assert context.cart_items == expected_count
     context
   end

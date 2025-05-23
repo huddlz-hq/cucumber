@@ -4,8 +4,7 @@ defmodule SharedSteps.Authentication do
   """
   use Cucumber.SharedSteps
 
-  defstep "I am logged in as {string}", context do
-    username = List.first(context.args)
+  defstep "I am logged in as {string}", %{args: [username]} do
     {:ok, %{current_user: username, authenticated: true}}
   end
 
@@ -14,8 +13,7 @@ defmodule SharedSteps.Authentication do
     context
   end
 
-  defstep "I should see {string} as the current user", context do
-    expected_user = List.first(context.args)
+  defstep "I should see {string} as the current user", %{args: [expected_user]} = context do
     assert context.current_user == expected_user
     context
   end
