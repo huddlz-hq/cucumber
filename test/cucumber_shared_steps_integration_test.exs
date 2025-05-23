@@ -4,7 +4,7 @@ defmodule CucumberSharedStepsIntegrationTest do
   use SharedSteps.Shopping
 
   # Test-specific steps
-  defstep "I navigate to my profile", context do
+  defstep "I navigate to my profile" do
     {:ok, %{page: :profile, navigation_history: [:home, :profile]}}
   end
 

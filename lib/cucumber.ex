@@ -309,7 +309,7 @@ defmodule Cucumber do
   @doc """
   Defines a step pattern and its implementation.
 
-  The `defstep/3` macro is used to define step implementations that match steps in feature files.
+  The `defstep` macro is used to define step implementations that match steps in feature files.
   It supports pattern parameters like `{string}`, `{int}`, `{float}`, and `{word}`.
 
   ## Parameters
@@ -348,18 +348,47 @@ defmodule Cucumber do
         {:ok, %{comment: comment_text}}
       end
   """
-  defmacro defstep(pattern, context \\ nil, do: block) do
+  # Handle the 2-arity version (pattern + block)
+  defmacro defstep(pattern, do: block) do
+    # Check if block uses 'context' variable
+    context_used? = ast_uses_var?(block, :context)
+
     quote do
       # Register the pattern in a module attribute for lookup
       @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
 
-      # Generate a step/2 function with pattern as second parameter and merged context+args
-      def step(context_value, unquote(pattern)) do
-        # Bind context to the actual value (already contains args)
-        unquote(context || quote(do: context)) = context_value
+      # Generate a step/2 function - use _context if context not used to avoid warnings
+      def step(
+            unquote(if context_used?, do: quote(do: context), else: quote(do: _context)),
+            unquote(pattern)
+          ) do
         unquote(block)
       end
     end
+  end
+
+  # Handle the 3-arity version (pattern + context_var + block)
+  defmacro defstep(pattern, context_var, do: block) do
+    quote do
+      # Register the pattern in a module attribute for lookup
+      @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
+
+      # Generate a step/2 function with custom context variable name
+      def step(unquote(context_var), unquote(pattern)) do
+        unquote(block)
+      end
+    end
+  end
+
+  # Helper to check if AST uses a specific variable
+  defp ast_uses_var?(ast, var_name) do
+    {_, found?} =
+      Macro.prewalk(ast, false, fn
+        {^var_name, _, nil}, _acc -> {{var_name, [], nil}, true}
+        node, acc -> {node, acc}
+      end)
+
+    found?
   end
 
   # __before_compile__ generates the function to return cucumber patterns

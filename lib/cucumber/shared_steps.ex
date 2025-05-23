@@ -36,6 +36,13 @@ defmodule Cucumber.SharedSteps do
 
   This approach maintains proper file and line number information in error messages
   and stack traces, making debugging easier compared to runtime-loaded steps.
+
+  ## Pattern Conflicts
+
+  If multiple shared modules define the same step pattern, the first definition will
+  be used and Elixir will generate a warning about unreachable clauses. This is
+  intentional - each step pattern should have exactly one implementation to avoid
+  ambiguity in your tests.
   """
 
   @doc """
@@ -71,6 +78,7 @@ defmodule Cucumber.SharedSteps do
       @cucumber_shared_module true
 
       @before_compile Cucumber.SharedSteps
+      @before_compile Cucumber
     end
   end
 
@@ -88,22 +96,27 @@ defmodule Cucumber.SharedSteps do
       end
 
       defmacro __using__(_opts) do
+        module = __MODULE__
         patterns = __MODULE__.__cucumber_shared_patterns__()
 
-        # Generate defstep calls for each pattern
-        # We need to reconstruct the defstep calls
-        for {pattern, block} <- patterns do
-          # The block already has the context binding built in
-          quote location: :keep do
-            @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
+        # Generate defstep calls that delegate to the shared module
+        ast_list =
+          for {pattern, _block} <- patterns do
+            quote location: :keep do
+              # Use the original defstep macro
+              require Cucumber
 
-            def step(context_value, unquote(pattern)) do
-              # Handle both cases: when context var was provided and when it wasn't
-              # This matches the behavior in the original defstep macro
-              var!(context) = context_value
-              unquote(block)
+              # Generate a step that delegates to the shared module
+              Cucumber.defstep unquote(pattern), context do
+                # Call the step function in the shared module
+                unquote(module).step(context, unquote(pattern))
+              end
             end
           end
+
+        # Return a block that contains all the defstep calls
+        quote do
+          (unquote_splicing(ast_list))
         end
       end
     end
