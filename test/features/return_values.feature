@@ -15,6 +15,6 @@ Scenario: Return {:ok, map} tuple
   When I return a tuple with value "tuple"
   Then I should see value "tuple" in the context
 
-Scenario: Return nil value
-  When I return nil explicitly
-  Then the initial context should be preserved
+Scenario: Return keyword list
+  When I return a keyword list with value "keyword"
+  Then I should see value "keyword" in the context

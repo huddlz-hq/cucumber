@@ -277,16 +277,19 @@ defmodule Cucumber do
 
   defp handle_step_result(step_result, context, step, pattern, feature_file, scenario_name) do
     case step_result do
-      {:ok, value} when is_map(value) ->
-        Map.merge(context, value)
-        |> update_step_history("passed", step)
-
-      %{} = new_context ->
-        new_context
-        |> update_step_history("passed", step)
-
-      result when result == :ok or result == nil ->
+      :ok ->
         update_step_history(context, "passed", step)
+
+      {:ok, value} when is_map(value) or is_list(value) ->
+        merge_context(context, value)
+        |> update_step_history("passed", step)
+
+      %{} = map ->
+        Map.merge(context, map)
+        |> update_step_history("passed", step)
+
+      keyword_list when is_list(keyword_list) and keyword_list != [] ->
+        handle_list_result(keyword_list, context, step, pattern, feature_file, scenario_name)
 
       {:error, reason} ->
         current_history = Map.get(context, :step_history, [])
@@ -301,9 +304,48 @@ defmodule Cucumber do
                 failed_history
               )
 
-      _other ->
-        update_step_history(context, "passed", step)
+      other ->
+        raise_invalid_return_value(other, step, pattern, feature_file, scenario_name)
     end
+  end
+
+  defp handle_list_result(list, context, step, pattern, feature_file, scenario_name) do
+    if Keyword.keyword?(list) do
+      merge_context(context, list)
+      |> update_step_history("passed", step)
+    else
+      raise_invalid_return_value(list, step, pattern, feature_file, scenario_name)
+    end
+  end
+
+  defp merge_context(context, keyword_list) when is_list(keyword_list) do
+    Map.merge(context, Map.new(keyword_list))
+  end
+
+  defp merge_context(context, map) when is_map(map) do
+    Map.merge(context, map)
+  end
+
+  defp raise_invalid_return_value(value, step, pattern, feature_file, scenario_name) do
+    message = """
+    Invalid return value from step implementation.
+
+    Step: #{step.keyword} #{step.text}
+    Pattern: "#{pattern}"
+    Location: #{feature_file}:#{step.line + 1}
+    Scenario: #{scenario_name}
+
+    Got: #{inspect(value)}
+
+    Valid return values are:
+      - :ok (keeps context unchanged)
+      - a map (merged into context)
+      - a keyword list (merged into context)  
+      - {:ok, map_or_keyword_list} (merged into context)
+      - {:error, reason} (fails the step)
+    """
+
+    raise Cucumber.StepError, message: message
   end
 
   @doc """
@@ -320,12 +362,15 @@ defmodule Cucumber do
 
   ## Return Values
 
-  Step implementations can return values in several ways:
+  Step implementations must return one of the following values (matching ExUnit's setup behavior):
 
-  - `:ok` - For steps that perform actions but don't need to update context
-  - A map - To directly replace the context
-  - `{:ok, map}` - To merge new values into the context
-  - `{:error, reason}` - To indicate a step failure with a reason
+  - `:ok` - Keeps the context unchanged
+  - A map - Merged into the existing context
+  - A keyword list - Merged into the existing context
+  - `{:ok, map_or_keyword_list}` - Merged into the existing context
+  - `{:error, reason}` - Fails the step with the given reason
+  
+  Any other return value will raise an error with a helpful message.
 
   ## Examples
 
@@ -336,8 +381,7 @@ defmodule Cucumber do
       end
 
       # Step with string parameter
-      defstep "I enter {string} in the username field", context do
-        username = List.first(context.args)
+      defstep "I enter {string} in the username field", %{args: [username]} do
         {:ok, %{username: username}}
       end
 

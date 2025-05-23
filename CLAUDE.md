@@ -127,12 +127,13 @@ end
 
 ## Return Value Patterns
 
-Step definitions can return values in several ways:
+Step definitions must return one of the following values (matching ExUnit's setup behavior):
 
-1. `:ok` - For steps that perform actions but don't update context
-2. A map - To directly replace the context
-3. `{:ok, map}` - To merge new values into the context
-4. `{:error, reason}` - To indicate a step failure with a reason
+1. `:ok` - Keeps the context unchanged
+2. A map - Merged into the existing context
+3. A keyword list - Merged into the existing context
+4. `{:ok, map_or_keyword_list}` - Merged into the existing context
+5. `{:error, reason}` - Fails the step with the given reason
 
 ## Advanced Features
 

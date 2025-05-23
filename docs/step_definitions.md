@@ -114,7 +114,7 @@ end
 
 ## Return Values
 
-Step definitions can return values in several ways:
+Step definitions must return one of the following values (matching ExUnit's setup behavior):
 
 ### 1. Return `:ok`
 
@@ -129,27 +129,36 @@ end
 
 ### 2. Return a Map
 
-To directly replace the context:
+To merge new values into the context:
 
 ```elixir
-defstep "I am on the home page", _context do
-  %{current_page: :home}
+defstep "I am on the home page", context do
+  Map.put(context, :current_page, :home)
 end
 ```
 
-### 3. Return `{:ok, map}`
+### 3. Return a Keyword List
 
 To merge new values into the context:
 
 ```elixir
-defstep "I search for {string}", context do
-  search_term = List.first(context.args)
+defstep "I set user preferences", _context do
+  [theme: :dark, language: :en]
+end
+```
+
+### 4. Return `{:ok, map_or_keyword_list}`
+
+To merge new values into the context (same as returning the map/list directly):
+
+```elixir
+defstep "I search for {string}", %{args: [search_term]} do
   # Search logic
   {:ok, %{search_term: search_term, search_results: perform_search(search_term)}}
 end
 ```
 
-### 4. Return `{:error, reason}`
+### 5. Return `{:error, reason}`
 
 To indicate a step failure with a reason:
 

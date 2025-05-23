@@ -21,9 +21,9 @@ defmodule CucumberReturnValuesTest do
     {:ok, %{tuple_value: value}}
   end
 
-  # Test returning nil
-  defstep "I return nil explicitly", _context do
-    nil
+  # Test returning keyword list
+  defstep "I return a keyword list with value {string}", %{args: [value]} do
+    [keyword_value: value]
   end
 
   # Verify direct map return
@@ -36,6 +36,10 @@ defmodule CucumberReturnValuesTest do
       # Check for {:ok, map} tuple return value
       Map.has_key?(context, :tuple_value) ->
         assert context.tuple_value == value
+
+      # Check for keyword list return value
+      Map.has_key?(context, :keyword_value) ->
+        assert context.keyword_value == value
 
       true ->
         flunk("Expected value #{value} not found in context")
