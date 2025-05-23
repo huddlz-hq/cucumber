@@ -1,6 +1,68 @@
 defmodule CucumberSharedStepsTest do
   use ExUnit.Case, async: true
 
+  describe "Phase 2: Step Accumulation & Export" do
+    test "shared module accumulates steps and provides __using__ macro" do
+      defmodule TestSharedAccumulation do
+        use Cucumber.SharedSteps
+        
+        defstep "first accumulated step" do
+          %{step: :first}
+        end
+        
+        defstep "second accumulated step with {string}", context do
+          param = List.first(context.args)
+          {:ok, %{step: :second, param: param}}
+        end
+      end
+      
+      # The module should now provide a __using__ macro
+      assert macro_exported?(TestSharedAccumulation, :__using__, 1)
+      
+      # Check that it has the shared step definitions
+      assert function_exported?(TestSharedAccumulation, :__cucumber_shared_patterns__, 0)
+      patterns = TestSharedAccumulation.__cucumber_shared_patterns__()
+      assert length(patterns) == 2
+    end
+    
+    test "using a shared module imports all its steps" do
+      # First define a shared module
+      defmodule TestSharedExport do
+        use Cucumber.SharedSteps
+        
+        defstep "exported step one" do
+          %{exported: :one}
+        end
+        
+        defstep "exported step {int}", context do
+          num = List.first(context.args)
+          %{exported: :two, number: num}
+        end
+      end
+      
+      # Now use it in another module that also uses Cucumber patterns
+      defmodule TestUsingShared do
+        # Need to set up the Cucumber infrastructure
+        import Cucumber, only: [defstep: 2, defstep: 3]
+        Module.register_attribute(__MODULE__, :cucumber_patterns, accumulate: true)
+        @before_compile Cucumber
+        
+        use TestSharedExport
+        
+        # This module should now have the step functions
+      end
+      
+      # Verify the steps were imported
+      assert function_exported?(TestUsingShared, :step, 2)
+      
+      # Verify we have the patterns
+      patterns = TestUsingShared.__cucumber_patterns__()
+      assert length(patterns) == 2
+      assert {"exported step one", _} = List.keyfind(patterns, "exported step one", 0)
+      assert {"exported step {int}", _} = List.keyfind(patterns, "exported step {int}", 0)
+    end
+  end
+  
   describe "Phase 1: Basic SharedSteps module" do
     test "can define a module using Cucumber.SharedSteps" do
       # This test verifies that a module can use Cucumber.SharedSteps and compile successfully
