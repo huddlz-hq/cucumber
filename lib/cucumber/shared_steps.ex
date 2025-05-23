@@ -60,40 +60,43 @@ defmodule Cucumber.SharedSteps do
   defmacro __using__(_opts) do
     quote do
       import Cucumber, only: [defstep: 2, defstep: 3]
-      
+
+      # Import ExUnit assertions for use in shared steps
+      import ExUnit.Assertions
+
       # Register the same attribute that Cucumber uses for patterns
       Module.register_attribute(__MODULE__, :cucumber_patterns, accumulate: true)
-      
+
       # Mark this as a shared module
       @cucumber_shared_module true
-      
+
       @before_compile Cucumber.SharedSteps
     end
   end
-  
+
   @doc false
   defmacro __before_compile__(env) do
     # Get all the patterns that were accumulated by defstep
     patterns = Module.get_attribute(env.module, :cucumber_patterns, [])
-    
+
     # Reverse to maintain definition order
     patterns = Enum.reverse(patterns)
-    
+
     quote do
       def __cucumber_shared_patterns__ do
         unquote(Macro.escape(patterns))
       end
-      
+
       defmacro __using__(_opts) do
         patterns = __MODULE__.__cucumber_shared_patterns__()
-        
+
         # Generate defstep calls for each pattern
         # We need to reconstruct the defstep calls
         for {pattern, block} <- patterns do
           # The block already has the context binding built in
           quote location: :keep do
             @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
-            
+
             def step(context_value, unquote(pattern)) do
               # Handle both cases: when context var was provided and when it wasn't
               # This matches the behavior in the original defstep macro

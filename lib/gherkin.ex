@@ -112,9 +112,10 @@ defmodule Gherkin.Parser do
       # Returns %Gherkin.Feature{} struct with parsed data
   """
   def parse(gherkin_string) do
-    lines = gherkin_string
-            |> String.split("\n", trim: true)
-            |> Enum.map(&String.trim/1)
+    lines =
+      gherkin_string
+      |> String.split("\n", trim: true)
+      |> Enum.map(&String.trim/1)
 
     with {feature_tags, feature_line, rest} <- extract_tags_and_element(lines, "Feature:"),
          feature_name <- extract_feature_name(feature_line),
@@ -325,7 +326,9 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_docstring_marker({scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+  defp handle_docstring_marker(
+         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+       ) do
     if in_docstring do
       {scenarios, current_scenario, current_tags, steps, nil, false}
     else
@@ -333,7 +336,10 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_docstring_content(line, {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+  defp handle_docstring_content(
+         line,
+         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+       ) do
     updated_step =
       if is_nil(current_step.docstring) do
         %{current_step | docstring: line}
@@ -345,7 +351,10 @@ defmodule Gherkin.Parser do
     {scenarios, current_scenario, current_tags, updated_steps, updated_step, in_docstring}
   end
 
-  defp handle_table_row(line, {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}) do
+  defp handle_table_row(
+         line,
+         {scenarios, current_scenario, current_tags, steps, current_step, in_docstring}
+       ) do
     table_row =
       line
       |> String.split("|", trim: true)
@@ -366,7 +375,10 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_tag(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}) do
+  defp handle_tag(
+         line,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}
+       ) do
     if current_scenario do
       scenario = build_scenario(current_scenario, steps, current_tags)
       {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false}
@@ -375,7 +387,10 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_scenario(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}) do
+  defp handle_scenario(
+         line,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}
+       ) do
     if current_scenario do
       scenario = build_scenario(current_scenario, steps, current_tags)
       {scenarios ++ [scenario], line, [], [], nil, false}
@@ -384,7 +399,11 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_step(line, {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}, lines) do
+  defp handle_step(
+         line,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring},
+         lines
+       ) do
     [keyword, text] =
       Regex.run(~r/^(Given|When|Then|And|But|\*) (.+)$/, line, capture: :all_but_first)
 
