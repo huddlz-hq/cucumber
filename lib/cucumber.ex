@@ -369,7 +369,7 @@ defmodule Cucumber do
   - A keyword list - Merged into the existing context
   - `{:ok, map_or_keyword_list}` - Merged into the existing context
   - `{:error, reason}` - Fails the step with the given reason
-  
+
   Any other return value will raise an error with a helpful message.
 
   ## Examples
