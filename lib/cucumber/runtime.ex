@@ -34,7 +34,7 @@ defmodule Cucumber.Runtime do
         raise "Undefined step: '#{step.text}'\n\n" <>
                 "You can implement it by adding this to one of your step definition files:\n\n" <>
                 "step \"#{step.text}\", context do\n" <>
-                "  # TODO: Write implementation\n" <>
+                "  # Your implementation here\n" <>
                 "  context\n" <>
                 "end"
     end

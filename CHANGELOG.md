@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.3.0 (2025-05-28)
+
+### Complete Architecture Redesign
+
+This release completely redesigns the Cucumber library to follow Ruby Cucumber conventions with auto-discovery of features and step definitions.
+
+#### Breaking Changes
+
+1. **Auto-Discovery Architecture**
+   - Tests are now auto-discovered - no need for explicit test modules
+   - Feature files must be in `test/features/`
+   - Step definitions must be in `test/features/step_definitions/`
+   - Support files can be in `test/features/support/`
+   - Just call `Cucumber.compile_features!()` in `test_helper.exs`
+
+2. **New Step Definition Syntax**
+   - Use `step` macro instead of `defstep`
+   - Step definitions now use `use Cucumber.StepDefinition`
+   - No more `use Cucumber, feature: "..."`
+
+3. **Simplified API**
+   - Main module only exports `compile_features!/1`
+   - Step definitions are registered automatically
+   - Background steps become ExUnit setup blocks
+
+#### New Features
+
+1. **Ruby Cucumber Compatibility**
+   - Directory structure matches Ruby Cucumber conventions
+   - Configurable paths using glob patterns
+   - One ExUnit test module generated per feature file
+
+2. **Better Integration**
+   - Seamless `mix test` integration
+   - ExUnit tags work as expected
+   - Standard ExUnit context for state management
+
+#### Migration from v0.2.0
+
+1. Move your test files:
+   ```
+   # Old structure
+   test/my_feature_test.exs
+
+   # New structure
+   test/features/my_feature.feature
+   test/features/step_definitions/my_steps.exs
+   ```
+
+2. Update step definitions:
+   ```elixir
+   # Old
+   defmodule MyFeatureTest do
+     use Cucumber, feature: "my_feature.feature"
+     
+     defstep "I do something", context do
+       {:ok, context}
+     end
+   end
+
+   # New
+   defmodule MySteps do
+     use Cucumber.StepDefinition
+     
+     step "I do something", context do
+       {:ok, context}
+     end
+   end
+   ```
+
+3. Update test_helper.exs:
+   ```elixir
+   # Old
+   ExUnit.start()
+
+   # New
+   ExUnit.start()
+   Cucumber.compile_features!()
+   ```
+
 ## v0.2.0 (2025-05-23)
 
  New Features
