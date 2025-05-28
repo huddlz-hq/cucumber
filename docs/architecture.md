@@ -6,10 +6,23 @@ This document provides an overview of the Cucumber implementation architecture, 
 
 ```
 Cucumber
+  ├── Discovery (Feature/Step Finding)
   ├── Gherkin (Parser)
   ├── Expression (Parameter Matching)
-  ├── Runner (Test Execution)
-  └── Formatter (Output)
+  ├── Compiler (Test Generation)
+  ├── Runtime (Step Execution)
+  └── StepError (Error Reporting)
+```
+
+### Discovery System
+
+The discovery system automatically finds and loads feature files and step definitions:
+
+```elixir
+Discovery.discover()
+  ├── Scans for features (test/features/**/*.feature)
+  ├── Loads step definitions (test/features/step_definitions/**/*.exs)
+  └── Returns: %{features: [...], step_registry: %{...}}
 ```
 
 ### Gherkin Parser
@@ -53,149 +66,112 @@ defmodule Cucumber.Expression do
 end
 ```
 
-### Runner
+### Compiler
 
-The Runner is responsible for executing the parsed features against step definitions. It:
-
-1. Loads feature files
-2. Finds matching step definitions
-3. Executes steps in order
-4. Manages test context between steps
-5. Handles errors and reporting
-
-```
-Feature → Scenarios → Steps → Step Definitions → Execution
-```
-
-### Context Management
-
-The context is a map that's passed between step definitions, allowing them to share state. The runner:
-
-1. Creates an initial context
-2. Passes it to each step
-3. Collects the updated context
-4. Passes the updated context to the next step
+The compiler generates ExUnit test modules from discovered features:
 
 ```elixir
-# Example context flow
-initial_context = %{feature_name: "Authentication"}
-{:ok, updated_context} = execute_step(step1, initial_context)
-{:ok, final_context} = execute_step(step2, updated_context)
+Compiler.compile_features!()
+  ├── For each feature file:
+  │   ├── Generates a test module
+  │   ├── Creates setup from Background
+  │   ├── Creates test cases from Scenarios
+  │   └── Adds appropriate tags
+  └── Compiles modules into memory
 ```
 
-## Integration with ExUnit
+### Runtime
 
-The Cucumber library integrates with ExUnit through:
-
-1. Custom ExUnit case modules
-2. Test module generation
-3. Test callbacks (setup, teardown)
+The runtime executes steps during test runs:
 
 ```elixir
-# Simplified representation of ExUnit integration
-defmodule MyTest do
-  use Cucumber, feature: "my.feature"
+Runtime.execute_step(context, step, step_registry)
+  ├── Finds matching step definition
+  ├── Prepares context with args, datatables, docstrings
+  ├── Executes step function
+  └── Processes return value
+```
+
+### StepDefinition Macro
+
+The StepDefinition module provides the DSL for defining steps:
+
+```elixir
+defmodule MySteps do
+  use Cucumber.StepDefinition
   
-  # Step definitions become test functions
-  # Scenarios become test cases
-end
-```
-
-## Macro System
-
-Cucumber uses Elixir's macro system extensively to provide a clean DSL:
-
-```elixir
-defmodule MyTest do
-  use Cucumber, feature: "authentication.feature"
-  
-  # Macros transform these into functions
-  defstep "I am on the login page", _context do
-    # Implementation
-    :ok
+  step "pattern", context do
+    # implementation
   end
 end
 ```
 
-At compile time, these macros:
-
-1. Read the feature file
-2. Generate ExUnit test cases
-3. Register step definitions
-4. Set up test callbacks
-
-## Extension Points
-
-The architecture provides several extension points:
-
-1. **Custom Parameter Types**: Extend the Expression engine with new types
-2. **Formatters**: Create custom output formats
-3. **Hooks**: Add before/after hooks at different levels
-4. **Tags**: Filter and customize execution based on tags
-
-## Implementation Details
-
-### Optimizations
-
-- **Step Definition Registry**: Fast lookup of step definitions
-- **Pattern Compilation**: Expressions are compiled once and reused
-- **Lazy Loading**: Feature files are parsed on demand
-
-### Error Handling
-
-When a step fails, the system:
-
-1. Captures the error information
-2. Adds context about the feature and scenario
-3. Reports detailed failure information
-4. Stops execution of the current scenario
-5. Continues with the next scenario
-
 ## Execution Flow
 
-```
-1. Feature loading
-   ├── Parse feature files
-   └── Build execution plan
+1. **Discovery Phase** (at compile time)
+   - `Cucumber.compile_features!()` is called in test_helper.exs
+   - Discovery system finds all features and step definitions
+   - Step registry is built with pattern → module mappings
 
-2. Test compilation
-   ├── Generate ExUnit tests
-   └── Register step definitions
+2. **Compilation Phase**
+   - For each feature, a test module is generated
+   - Background steps become setup blocks
+   - Scenarios become test cases
+   - Tags are added for filtering
 
-3. Test execution
-   ├── Setup test environment
-   ├── Execute steps
-   │   ├── Find matching step definition
-   │   ├── Apply parameter conversions
-   │   ├── Execute step function
-   │   └── Manage context between steps
-   └── Report results
-```
+3. **Execution Phase** (at runtime)
+   - ExUnit runs the generated test modules
+   - Each test executes its steps via Runtime
+   - Context is passed between steps
+   - Errors are reported with helpful messages
 
-## Code Structure
+## Data Flow
 
 ```
-lib/
-├── cucumber.ex             # Main module and API
-├── gherkin.ex              # Feature file parser
-├── cucumber/
-    ├── expression.ex       # Step matching engine
-    ├── runner.ex           # Test execution
-    ├── formatter.ex        # Output formatting
-    ├── step_definition.ex  # Step definition handling
-    └── hooks.ex            # Before/after hooks
+Feature File → Parser → AST
+                          ↓
+Step Files → Discovery → Registry
+                          ↓
+                      Compiler → Test Modules
+                                      ↓
+                                  ExUnit → Results
 ```
 
-## Runtime Behavior
+## Key Design Decisions
 
-1. The `use Cucumber` macro transforms the module at compile time
-2. ExUnit runs the generated test cases
-3. Each scenario becomes a test case
-4. Each step invocation:
-   - Finds the matching step definition
-   - Extracts parameters
-   - Runs the step function
-   - Manages the context
-5. Results are reported through ExUnit's reporting system
+### Auto-Discovery
+- Features and steps are automatically discovered
+- No need to explicitly wire features to test modules
+- Follows Ruby Cucumber's convention-over-configuration approach
 
-This architecture provides a solid foundation that balances simplicity of use with flexibility for extension.
+### ExUnit Integration
+- Generated tests are standard ExUnit test modules
+- Full support for ExUnit features (tags, setup, async)
+- Works with existing test tooling
+
+### Runtime Compilation
+- Tests are generated at runtime when `mix test` runs
+- Allows for dynamic test generation
+- No generated files to manage
+
+### Context Management
+- ExUnit context is used directly
+- Background steps modify context in setup
+- Each step can read and modify context
+
+## Error Handling
+
+Cucumber provides detailed error messages for common issues:
+
+1. **Undefined Steps**: Shows the exact step text and suggests implementation
+2. **Step Failures**: Shows the error, step location, and execution history
+3. **Duplicate Steps**: Detected at load time with file/line information
+
+## Extensibility
+
+The architecture supports several extension points:
+
+1. **Custom Parameter Types**: Add new parameter types to Expression
+2. **Custom Formatters**: Create custom output formats
+3. **Hooks**: Before/after scenario hooks (via ExUnit setup/teardown)
+4. **Step Libraries**: Create reusable step definition modules

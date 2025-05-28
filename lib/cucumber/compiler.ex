@@ -35,6 +35,11 @@ defmodule Cucumber.Compiler do
           @moduletag :cucumber
           @moduletag unquote(feature_tag(feature.name))
 
+          # Store the step registry for runtime access
+          def __step_registry__ do
+            unquote(Macro.escape(Map.new(step_registry)))
+          end
+
           # If there's a background, create setup block
           unquote(generate_setup(feature.background, step_registry))
 
@@ -133,13 +138,13 @@ defmodule Cucumber.Compiler do
     :"scenario_#{tag_name}"
   end
 
-  defp generate_step_execution(step, step_registry) do
+  defp generate_step_execution(step, _step_registry) do
     quote do
       context =
         Cucumber.Runtime.execute_step(
           context,
           unquote(Macro.escape(step)),
-          unquote(Macro.escape(step_registry))
+          __MODULE__.__step_registry__()
         )
     end
   end

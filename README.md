@@ -4,6 +4,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 
 ## Features
 
+- **Auto-discovery**: Automatically finds and runs feature files and step definitions
 - **Gherkin Support**: Write tests in familiar Given/When/Then format
 - **Parameter Typing**: Define step patterns with typed parameters like `{string}`, `{int}`, `{float}`
 - **Data Tables**: Pass structured data to your steps
@@ -12,6 +13,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 - **Tag Filtering**: Run subsets of scenarios using tags
 - **Context Passing**: Share state between steps with a simple context map
 - **Rich Error Reporting**: Clear error messages with step execution history
+- **ExUnit Integration**: Seamlessly integrates with Elixir's built-in test framework
 
 ## Installation
 
@@ -20,14 +22,23 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.1.0"}
+    {:cucumber, "~> 0.2.0"}
   ]
 end
 ```
 
 ## Quick Start
 
-### 1. Create a Feature File
+### 1. Add Cucumber to your test helper
+
+In your `test/test_helper.exs`:
+
+```elixir
+ExUnit.start()
+Cucumber.compile_features!()
+```
+
+### 2. Create a Feature File
 
 Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension:
 
@@ -42,47 +53,70 @@ Scenario: Adding two numbers
   Then the result should be 120 on the screen
 ```
 
-### 2. Create a Test Module
+### 3. Create Step Definitions
+
+Step definitions should be placed in `test/features/step_definitions/` with a `.exs` extension:
 
 ```elixir
-defmodule CalculatorTest do
-  use Cucumber, feature: "calculator.feature"
+# test/features/step_definitions/calculator_steps.exs
+defmodule CalculatorSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
   
-  defstep "I have entered {int} into the calculator", %{args: [value]} = context do
+  step "I have entered {int} into the calculator", %{args: [value]} = context do
     values = Map.get(context, :values, [])
     Map.put(context, :values, values ++ [value])
   end
   
-  defstep "I press add", context do
+  step "I press add", context do
     sum = Enum.sum(context.values)
     Map.put(context, :result, sum)
   end
   
-  defstep "the result should be {int} on the screen", %{args: [expected]} = context do
+  step "the result should be {int} on the screen", %{args: [expected]} = context do
     assert context.result == expected
-    :ok
+    context
   end
 end
 ```
 
-### 3. Run Your Tests
+### 4. Run Your Tests
 
 ```bash
+# Run all tests including Cucumber
 mix test
+
+# Run only Cucumber tests
+mix test --only cucumber
+
+# Run specific feature
+mix test --only feature_basic_calculator
 ```
 
-## Documentation
+## File Structure
 
-For comprehensive documentation and guides, please visit [HexDocs](https://hexdocs.pm/cucumber).
+By default, Cucumber expects the following structure:
 
-- [Getting Started](https://hexdocs.pm/cucumber/getting_started.html)
-- [Feature Files](https://hexdocs.pm/cucumber/feature_files.html)
-- [Step Definitions](https://hexdocs.pm/cucumber/step_definitions.html)
-- [Error Handling](https://hexdocs.pm/cucumber/error_handling.html)
-- [Best Practices](https://hexdocs.pm/cucumber/best_practices.html)
-- [Architecture](https://hexdocs.pm/cucumber/architecture.html)
+```
+test/
+  features/
+    authentication.feature
+    shopping.feature
+    step_definitions/
+      authentication_steps.exs
+      shopping_steps.exs
+      common_steps.exs
+```
 
-## Example of Working with Data Tables
+You can customize paths in `config/test.exs`:
+
+```elixir
+config :cucumber,
+  features: ["test/features/**/*.feature"],
+  steps: ["test/features/step_definitions/**/*.exs"]
+```
+
+## Working with Data Tables
 
 In your feature file:
 ```gherkin
@@ -92,9 +126,9 @@ Given I have the following items in my cart:
   | Protection Plan | 1        | 79.99  |
 ```
 
-In your test module:
+In your step definitions:
 ```elixir
-defstep "I have the following items in my cart:", context do
+step "I have the following items in my cart:", context do
   # Access the datatable
   datatable = context.datatable
   
@@ -109,9 +143,20 @@ defstep "I have the following items in my cart:", context do
   # ]
   
   # Process the items
-  {:ok, %{cart_items: items}}
+  Map.put(context, :cart_items, items)
 end
 ```
+
+## Documentation
+
+For comprehensive documentation and guides, please visit [HexDocs](https://hexdocs.pm/cucumber).
+
+- [Getting Started](https://hexdocs.pm/cucumber/getting_started.html)
+- [Feature Files](https://hexdocs.pm/cucumber/feature_files.html)
+- [Step Definitions](https://hexdocs.pm/cucumber/step_definitions.html)
+- [Error Handling](https://hexdocs.pm/cucumber/error_handling.html)
+- [Best Practices](https://hexdocs.pm/cucumber/best_practices.html)
+- [Architecture](https://hexdocs.pm/cucumber/architecture.html)
 
 ## License
 

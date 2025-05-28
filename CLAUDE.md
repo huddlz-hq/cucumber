@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Cucumber implementation for Elixir, providing a behavior-driven development (BDD) testing framework that uses Gherkin syntax to write executable specifications in natural language. It bridges the gap between technical and non-technical stakeholders by allowing tests to be written in plain language while being executed as code.
 
+## Key Features
+
+- Auto-discovery of feature files and step definitions
+- Runtime test generation (no explicit test modules needed)
+- Full ExUnit integration with tagging support
+- Rich error messages with step suggestions
+
 ## Memory
 
 - do not use co-author for claude in commit messages
@@ -61,23 +68,35 @@ git push origin v0.1.0
 
 This Cucumber implementation consists of several key components:
 
-1. **Gherkin Parser** (`lib/gherkin.ex`) - Parses Gherkin syntax from `.feature` files into Elixir structs. Handles:
+1. **Discovery System** (`lib/cucumber/discovery.ex`) - Auto-discovers features and steps
+   - Scans for feature files based on patterns
+   - Loads step definition modules
+   - Builds a registry of step patterns
+
+2. **Gherkin Parser** (`lib/gherkin.ex`) - Parses Gherkin syntax from `.feature` files
    - Features (with descriptions and tags)
-   - Backgrounds (setup steps common to all scenarios in a feature)
+   - Backgrounds (setup steps common to all scenarios)
    - Scenarios (with steps and tags)
    - Steps (with keywords, text, docstrings, and datatables)
 
-2. **Cucumber Module** (`lib/cucumber.ex`) - Provides macros for test integration:
-   - `use Cucumber` - Sets up a test module to run a specific feature file
-   - `defstep` - Defines step implementations that match steps in the feature files
-   - Pattern matching to connect steps to code
-   - Context management to share state between steps
+3. **Compiler** (`lib/cucumber/compiler.ex`) - Generates ExUnit test modules
+   - Creates one test module per feature file
+   - Converts backgrounds to setup blocks
+   - Converts scenarios to test cases
+   - Adds appropriate tags for filtering
 
-3. **Parameter Handling** (`lib/cucumber/expression.ex`) - Handles parameter extraction from steps
-   - Supports string, integer, float, and word parameters
-   - Manages datatable and docstring parameters
+4. **Runtime** (`lib/cucumber/runtime.ex`) - Executes steps during tests
+   - Finds matching step definitions
+   - Manages context between steps
+   - Handles datatables and docstrings
+   - Processes step return values
 
-4. **Error Handling** (`lib/cucumber/step_error.ex`) - Provides useful error messages
+5. **Step Definition** (`lib/cucumber/step_definition.ex`) - DSL for defining steps
+   - `step` macro for defining step implementations
+   - Automatic parameter extraction
+   - Context management
+
+6. **Error Handling** (`lib/cucumber/step_error.ex`) - Provides useful error messages
    - Detailed error reports when steps fail
    - Suggestions for missing step definitions
 
@@ -103,19 +122,21 @@ Scenario: User signs in with valid credentials
 
 ## Step Definitions
 
-Step definitions connect Gherkin steps to code and are defined using the `defstep` macro.
+Step definitions connect Gherkin steps to code and are defined using the `step` macro in separate modules.
 
 Example:
 ```elixir
-defmodule UserAuthenticationTest do
-  use Cucumber, feature: "user_authentication.feature"
+# test/features/step_definitions/authentication_steps.exs
+defmodule AuthenticationSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
   
-  defstep "I am on the sign in page", context do
+  step "I am on the sign in page", context do
     # Navigate to sign in page
     Map.put(context, :current_page, :sign_in)
   end
   
-  defstep "I enter {string} as my email", %{args: [email]} = context do
+  step "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
   end
@@ -123,6 +144,8 @@ defmodule UserAuthenticationTest do
   # More step definitions...
 end
 ```
+
+Step definitions are automatically discovered - no need to explicitly wire them to features.
 
 ## Return Value Patterns
 
@@ -136,11 +159,12 @@ Step definitions must return one of the following values (matching ExUnit's setu
 
 ## Advanced Features
 
-- **Tagged tests**: Filter scenarios by tags
-- **Background steps**: Common setup steps
-- **Data tables**: Tabular data in feature files
+- **Auto-discovery**: Features and steps are automatically found
+- **Tagged tests**: Filter scenarios by tags using ExUnit's tag system
+- **Background steps**: Common setup steps become ExUnit setup blocks
+- **Data tables**: Tabular data with headers, rows, and map access
 - **Docstrings**: Multi-line text in feature files
-- **Context management**: Sharing state between steps
+- **Context management**: ExUnit context used for sharing state
 
 ## Documentation Guidelines
 

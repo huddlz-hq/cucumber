@@ -6,449 +6,95 @@ defmodule Cucumber do
   in natural language. It bridges the gap between technical and non-technical stakeholders
   by allowing tests to be written in plain language while being executed as code.
 
-  ## Usage
+  ## Setup
 
-  To use Cucumber in your test file:
+  Add to your `test_helper.exs`:
 
-      defmodule UserAuthenticationTest do
-        use Cucumber, feature: "user_authentication.feature"
+      Cucumber.compile_features!()
+
+  ## File Structure
+
+  By default, Cucumber expects the following structure:
+
+      test/
+        features/
+          authentication.feature
+          shopping.feature
+          step_definitions/
+            authentication_steps.exs
+            shopping_steps.exs
+            common_steps.exs
+          support/
+            hooks.exs
+
+  ## Configuration
+
+  You can customize paths in `config/test.exs`:
+
+      config :cucumber,
+        features: ["test/features/**/*.feature"],
+        steps: ["test/features/step_definitions/**/*.exs"]
+
+  ## Step Definitions
+
+  Create step definition modules using `Cucumber.StepDefinition`:
+
+      defmodule AuthenticationSteps do
+        use Cucumber.StepDefinition
         
-        defstep "I am on the sign in page", context do
-          # Step implementation
-          Map.put(context, :current_page, :sign_in)
+        step "I am logged in as {string}", %{args: [username]} = context do
+          {:ok, Map.put(context, :current_user, username)}
         end
-        
-        # More step definitions
       end
 
-  You can also filter scenarios by tags:
+  ## Running Tests
 
-      # Only run scenarios tagged with "smoke" or "auth"
-      use Cucumber, feature: "user_authentication.feature", tags: ["smoke", "auth"]
+  Cucumber tests run with `mix test` and can be filtered using tags:
+
+      # Run all tests including Cucumber
+      mix test
+      
+      # Run only Cucumber tests
+      mix test --only cucumber
+      
+      # Exclude Cucumber tests
+      mix test --exclude cucumber
 
   ## Key Features
 
-  * Gherkin Support - Write tests in familiar Given/When/Then format
-  * Parameter Types - Define step patterns with typed parameters like `{string}`, `{int}`
-  * Data Tables - Pass structured data to your steps
-  * DocStrings - Include multi-line text blocks in your steps
-  * Background Steps - Define common setup steps for all scenarios
-  * Tag Filtering - Run subsets of scenarios using tags
-  * Context Passing - Share state between steps with a simple context map
-  * Rich Error Reporting - Clear error messages with step execution history
+  * Auto-discovery of features and step definitions
+  * Integration with ExUnit's tagging system
+  * Context passing between steps
+  * Support for data tables and doc strings
+  * Rich error reporting with suggestions
   """
 
-  defmacro __using__(opts) do
-    feature_file = Keyword.fetch!(opts, :feature)
-    filter_tags = Keyword.get(opts, :tags, [])
-    feature_path = Path.join(["test", "features", feature_file])
-    feature = Gherkin.Parser.parse(File.read!(feature_path))
-
-    # Filter scenarios based on tags if filter_tags is provided
-    filtered_scenarios =
-      if filter_tags == [] do
-        feature.scenarios
-      else
-        # Keep scenarios that have at least one matching tag
-        Enum.filter(feature.scenarios, fn scenario ->
-          Enum.any?(scenario.tags, &(&1 in filter_tags)) ||
-            Enum.any?(feature.tags, &(&1 in filter_tags))
-        end)
-      end
-
-    # Generate setup block
-    setup_block =
-      if feature.background do
-        quote do
-          setup context do
-            # Add feature file path to context
-            context = Map.put(context, :feature_file, unquote(feature_path))
-            # Add feature name to context
-            context = Map.put(context, :feature_name, unquote(feature.name))
-            # Initialize step history
-            context = Map.put(context, :step_history, [])
-
-            Enum.reduce(unquote(Macro.escape(feature.background.steps)), context, fn step, ctx ->
-              Cucumber.apply_step(__MODULE__, ctx, step)
-            end)
-          end
-        end
-      else
-        quote do
-          setup context do
-            # Add feature file path to context even without background
-            context = Map.put(context, :feature_file, unquote(feature_path))
-            # Add feature name to context
-            context = Map.put(context, :feature_name, unquote(feature.name))
-            # Initialize step history
-            context = Map.put(context, :step_history, [])
-            context
-          end
-        end
-      end
-
-    # Generate test blocks for each filtered scenario
-    test_blocks =
-      for scenario <- filtered_scenarios do
-        quote do
-          test unquote(scenario.name), context do
-            # Add scenario name to context
-            context = Map.put(context, :scenario_name, unquote(scenario.name))
-
-            Enum.reduce(unquote(Macro.escape(scenario.steps)), context, fn step, ctx ->
-              Cucumber.apply_step(__MODULE__, ctx, step)
-            end)
-          end
-        end
-      end
-
-    quote do
-      use ExUnit.Case, async: true
-
-      # Import only the defstep macros that we actually define
-      import Cucumber, only: [defstep: 2, defstep: 3]
-
-      # Register module attribute for cucumber patterns
-      Module.register_attribute(__MODULE__, :cucumber_patterns, accumulate: true)
-      @before_compile Cucumber
-
-      describe unquote(feature.name) do
-        unquote(setup_block)
-        unquote_splicing(test_blocks)
-      end
-    end
-  end
-
-  # Helper function to call step/2 in the test module with merged args and context
   @doc """
-  Applies a step from a feature file to a matching step definition.
+  Discovers and compiles all cucumber features into ExUnit tests.
 
-  This function is used internally by the Cucumber framework to execute steps.
-  It handles the pattern matching, parameter extraction, and context management.
+  This function should be called in your `test_helper.exs` file.
 
-  ## Parameters
+  ## Options
 
-  - `module` - The test module containing step definitions
-  - `context` - The current context map
-  - `step` - The `Gherkin.Step` struct to execute
-
-  ## Returns
-
-  Returns the updated context map if the step succeeds, or raises a `Cucumber.StepError`
-  if the step fails or no matching step definition is found.
-  """
-  def apply_step(
-        module,
-        context,
-        %Gherkin.Step{text: text, docstring: docstring, datatable: datatable} = step
-      ) do
-    # Get feature file and scenario name from context for error reporting
-    feature_file = Map.get(context, :feature_file, "unknown_feature.feature")
-    scenario_name = Map.get(context, :scenario_name, "Unknown Scenario")
-
-    # Update step history with this step (pending)
-    step_history = Map.get(context, :step_history, [])
-    updated_context = Map.put(context, :step_history, step_history ++ [{"pending", step}])
-
-    # Find a matching pattern and extract args
-    case find_matching_pattern(module, text) do
-      {pattern, args} ->
-        step_info = %{
-          module: module,
-          context: updated_context,
-          step: step,
-          pattern: pattern,
-          args: args,
-          docstring: docstring,
-          datatable: datatable,
-          feature_file: feature_file,
-          scenario_name: scenario_name
-        }
-
-        execute_step(step_info)
-
-      nil ->
-        # No matching pattern found, raise a helpful error with suggestions
-        raise Cucumber.StepError.missing_step_definition(
-                step,
-                feature_file,
-                scenario_name,
-                step_history
-              )
-    end
-  end
-
-  defp execute_step(%{
-         module: module,
-         context: context,
-         step: step,
-         pattern: pattern,
-         args: args,
-         docstring: docstring,
-         datatable: datatable,
-         feature_file: feature_file,
-         scenario_name: scenario_name
-       }) do
-    # Build context with all extras
-    context_with_extras = build_context_with_extras(context, args, docstring, datatable)
-
-    # Call the step function with the enhanced context
-    step_result = module.step(context_with_extras, pattern)
-
-    # Handle the result
-    handle_step_result(step_result, context, step, pattern, feature_file, scenario_name)
-  rescue
-    error ->
-      # If any other error occurs during step execution, wrap it in a StepError
-      current_history = Map.get(context, :step_history, [])
-      failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
-
-      reraise Cucumber.StepError.failed_step(
-                step,
-                pattern,
-                error,
-                feature_file,
-                scenario_name,
-                failed_history
-              ),
-              __STACKTRACE__
-  end
-
-  # Private helper functions for apply_step/3
-
-  defp find_matching_pattern(module, text) do
-    patterns = module.__cucumber_patterns__()
-
-    Enum.find_value(patterns, fn {pattern_text, _} ->
-      compiled_pattern = Cucumber.Expression.compile(pattern_text)
-
-      case Cucumber.Expression.match(text, compiled_pattern) do
-        {:match, args} -> {pattern_text, args}
-        :no_match -> nil
-      end
-    end)
-  end
-
-  defp build_context_with_extras(context, args, docstring, datatable) do
-    context
-    |> Map.put(:args, args)
-    |> add_docstring(docstring)
-    |> add_datatable(datatable)
-  end
-
-  defp add_docstring(context, nil), do: context
-  defp add_docstring(context, docstring), do: Map.put(context, :docstring, docstring)
-
-  defp add_datatable(context, nil), do: context
-
-  defp add_datatable(context, datatable) do
-    datatable_map =
-      if length(datatable) > 1 do
-        [headers | rows] = datatable
-
-        table_maps =
-          Enum.map(rows, fn row ->
-            Enum.zip(headers, row) |> Enum.into(%{})
-          end)
-
-        %{
-          headers: headers,
-          rows: rows,
-          maps: table_maps,
-          raw: datatable
-        }
-      else
-        %{
-          headers: [],
-          rows: datatable,
-          maps: [],
-          raw: datatable
-        }
-      end
-
-    Map.put(context, :datatable, datatable_map)
-  end
-
-  defp update_step_history(context, status, step) do
-    current_history = Map.get(context, :step_history, [])
-    updated_history = List.delete_at(current_history, -1) ++ [{status, step}]
-    Map.put(context, :step_history, updated_history)
-  end
-
-  defp handle_step_result(step_result, context, step, pattern, feature_file, scenario_name) do
-    case step_result do
-      :ok ->
-        update_step_history(context, "passed", step)
-
-      {:ok, value} when is_map(value) or is_list(value) ->
-        merge_context(context, value)
-        |> update_step_history("passed", step)
-
-      %{} = map ->
-        Map.merge(context, map)
-        |> update_step_history("passed", step)
-
-      keyword_list when is_list(keyword_list) and keyword_list != [] ->
-        handle_list_result(keyword_list, context, step, pattern, feature_file, scenario_name)
-
-      {:error, reason} ->
-        current_history = Map.get(context, :step_history, [])
-        failed_history = List.delete_at(current_history, -1) ++ [{"failed", step}]
-
-        raise Cucumber.StepError.failed_step(
-                step,
-                pattern,
-                reason,
-                feature_file,
-                scenario_name,
-                failed_history
-              )
-
-      other ->
-        raise_invalid_return_value(other, step, pattern, feature_file, scenario_name)
-    end
-  end
-
-  defp handle_list_result(list, context, step, pattern, feature_file, scenario_name) do
-    if Keyword.keyword?(list) do
-      merge_context(context, list)
-      |> update_step_history("passed", step)
-    else
-      raise_invalid_return_value(list, step, pattern, feature_file, scenario_name)
-    end
-  end
-
-  defp merge_context(context, keyword_list) when is_list(keyword_list) do
-    Map.merge(context, Map.new(keyword_list))
-  end
-
-  defp merge_context(context, map) when is_map(map) do
-    Map.merge(context, map)
-  end
-
-  defp raise_invalid_return_value(value, step, pattern, feature_file, scenario_name) do
-    message = """
-    Invalid return value from step implementation.
-
-    Step: #{step.keyword} #{step.text}
-    Pattern: "#{pattern}"
-    Location: #{feature_file}:#{step.line + 1}
-    Scenario: #{scenario_name}
-
-    Got: #{inspect(value)}
-
-    Valid return values are:
-      - :ok (keeps context unchanged)
-      - a map (merged into context)
-      - a keyword list (merged into context)  
-      - {:ok, map_or_keyword_list} (merged into context)
-      - {:error, reason} (fails the step)
-    """
-
-    raise Cucumber.StepError, message: message
-  end
-
-  @doc """
-  Defines a step pattern and its implementation.
-
-  The `defstep` macro is used to define step implementations that match steps in feature files.
-  It supports pattern parameters like `{string}`, `{int}`, `{float}`, and `{word}`.
-
-  ## Parameters
-
-  - `pattern` - The step pattern to match (e.g., "I click {string} button")
-  - `context` - The variable name to bind the context to (optional)
-  - `do` - The block of code to execute when the step matches
-
-  ## Return Values
-
-  Step implementations must return one of the following values (matching ExUnit's setup behavior):
-
-  - `:ok` - Keeps the context unchanged
-  - A map - Merged into the existing context
-  - A keyword list - Merged into the existing context
-  - `{:ok, map_or_keyword_list}` - Merged into the existing context
-  - `{:error, reason}` - Fails the step with the given reason
-
-  Any other return value will raise an error with a helpful message.
+    * `:features` - List of patterns for feature files
+    * `:steps` - List of patterns for step definition files  
+    * `:support` - List of patterns for support files
 
   ## Examples
 
-      # Simple step with no parameters
-      defstep "I am on the login page" do
-        # Setup logic
-        %{page: :login}
-      end
-
-      # Step with string parameter
-      defstep "I enter {string} in the username field", %{args: [username]} do
-        {:ok, %{username: username}}
-      end
-
-      # Step with docstring
-      defstep "I submit the following comment:", context do
-        # Access the docstring
-        comment_text = context.docstring
-        {:ok, %{comment: comment_text}}
-      end
+      # Use default paths
+      Cucumber.compile_features!()
+      
+      # Use custom paths
+      Cucumber.compile_features!(
+        features: ["test/acceptance/**/*.feature"],
+        steps: ["test/acceptance/steps/**/*.exs"]
+      )
   """
-  # Handle the 2-arity version (pattern + block)
-  defmacro defstep(pattern, do: block) do
-    # Check if block uses 'context' variable
-    context_used? = ast_uses_var?(block, :context)
+  def compile_features!(opts \\ []) do
+    modules = Cucumber.Compiler.compile_features!(opts)
 
-    quote do
-      # Register the pattern in a module attribute for lookup
-      @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
-
-      # Generate a step/2 function - use _context if context not used to avoid warnings
-      def step(
-            unquote(if context_used?, do: quote(do: context), else: quote(do: _context)),
-            unquote(pattern)
-          ) do
-        unquote(block)
-      end
-    end
-  end
-
-  # Handle the 3-arity version (pattern + context_var + block)
-  defmacro defstep(pattern, context_var, do: block) do
-    quote do
-      # Register the pattern in a module attribute for lookup
-      @cucumber_patterns {unquote(pattern), unquote(Macro.escape(block))}
-
-      # Generate a step/2 function with custom context variable name
-      def step(unquote(context_var), unquote(pattern)) do
-        unquote(block)
-      end
-    end
-  end
-
-  # Helper to check if AST uses a specific variable
-  defp ast_uses_var?(ast, var_name) do
-    {_, found?} =
-      Macro.prewalk(ast, false, fn
-        {^var_name, _, nil}, _acc -> {{var_name, [], nil}, true}
-        node, acc -> {node, acc}
-      end)
-
-    found?
-  end
-
-  # __before_compile__ generates the function to return cucumber patterns
-  defmacro __before_compile__(env) do
-    patterns = Module.get_attribute(env.module, :cucumber_patterns) || []
-
-    quote do
-      # Helper function to get defined patterns for lookup
-      def __cucumber_patterns__ do
-        unquote(Macro.escape(patterns))
-      end
-
-      # Fallback step function for unmatched patterns
-      def step(_context, _pattern) do
-        raise "No matching step definition found"
-      end
-    end
+    # Return the compiled module names for debugging
+    modules
   end
 end

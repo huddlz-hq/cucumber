@@ -8,23 +8,25 @@ This guide outlines best practices for writing and organizing your Cucumber test
 
 ```
 test/
-├── features/           # Feature files
-│   ├── authentication/ # Feature grouping by domain
+├── features/                    # Feature files
+│   ├── authentication/          # Feature grouping by domain
 │   │   ├── login.feature
 │   │   └── registration.feature
-│   └── shopping/       # Another domain
-│       ├── cart.feature
-│       └── checkout.feature
-└── lib/                # Test modules with step definitions
-    ├── authentication_test.exs
-    └── shopping_test.exs
+│   ├── shopping/               # Another domain
+│   │   ├── cart.feature
+│   │   └── checkout.feature
+│   └── step_definitions/       # Step definition files
+│       ├── authentication_steps.exs
+│       ├── shopping_steps.exs
+│       └── common_steps.exs
 ```
 
 ### Naming Conventions
 
 - Use snake_case for feature file names
 - Group related features into subdirectories
-- Name test modules with a descriptive suffix (e.g., `LoginTest`, `CheckoutTest`)
+- Name step definition modules descriptively (e.g., `AuthenticationSteps`, `ShoppingSteps`)
+- Use `.exs` extension for step definition files
 
 ## Writing Good Scenarios
 
@@ -49,291 +51,190 @@ Scenario: User interaction
 
 Good:
 ```gherkin
-Scenario: Customer adds product to cart from product detail page
-  Given I am logged in as "john@example.com"
-  And I am viewing the product "Ergonomic Keyboard"
-  When I click the "Add to Cart" button
-  Then I should see "Product added to cart" message
-  And my cart should contain 1 item
+Scenario: Customer adds product to shopping cart
+  Given I am logged in as "alice@example.com"
+  And I am viewing the "iPhone 15 Pro" product page
+  When I click "Add to Cart"
+  Then I should see "iPhone 15 Pro" in my shopping cart
+  And the cart total should be $999.00
 ```
 
 ## Step Definition Best Practices
 
-### Organization
+### Keep Steps Reusable
 
-1. **Group related step definitions**: Keep related steps together in the same file
-2. **Use helper functions**: Extract common functionality into helper functions
-3. **Create reusable steps**: Design steps to be reused across scenarios
-
-### Naming Steps
-
-1. **Use the actor's perspective**: "I click the button" rather than "Button is clicked"
-2. **Be specific**: "I submit the registration form" rather than "I submit the form"
-3. **Avoid technical implementation details**: "I click Login" rather than "I click #login-button"
-
-### Step Implementation
+Write generic steps that can be reused across features:
 
 ```elixir
-# Good: Clear, focused, with good error messages
-defstep "I click the {string} button", %{args: [button_text]} do
-  case find_button(button_text) do
-    {:ok, button} -> 
-      click(button)
-      :ok
-    {:error, :not_found} ->
-      {:error, "Button with text '#{button_text}' not found on page"}
-  end
+# Good - reusable
+step "I click {string}", %{args: [button_text]} = context do
+  click_button(context, button_text)
 end
 
-# Bad: Vague, doing too much, poor error handling
-defstep "I interact with the page", _context do
-  find_element("#some-button") |> click()
-  :ok
+# Less reusable - too specific
+step "I click the red submit button on the login form", context do
+  click_specific_button(context)
 end
 ```
 
-## Context Management
+### Use the Context Effectively
 
-### Passing Data Between Steps
-
-```elixir
-# First step establishes context
-defstep "I submit an order for {string}", %{args: [product_name]} do
-  order_id = create_order(product_name)
-  
-  # Return context to be used in following steps
-  {:ok, %{product_name: product_name, order_id: order_id}}
-end
-
-# Second step uses that context
-defstep "I should receive an order confirmation email", context do
-  # Access data from previous step
-  assert_email_sent(
-    to: context.user.email,
-    subject: "Order Confirmation for ##{context.order_id}",
-    containing: context.product_name
-  )
-  
-  :ok
-end
-```
-
-### Context Guidelines
-
-1. **Be explicit**: Only store what's needed for subsequent steps
-2. **Consider naming**: Use descriptive keys in the context map
-3. **Clean up after yourself**: Don't let the context grow too large
-
-## Testing Different Layers
-
-### UI Testing
+Pass data between steps using the context:
 
 ```elixir
-defstep "I click the {string} button", %{args: [button_text]} do
-  click_button(button_text)
-  :ok
-end
-```
-
-### API Testing
-
-```elixir
-defstep "I make a GET request to {string}", %{args: [endpoint]} = context do
-  response = HTTPoison.get!("#{context.base_url}#{endpoint}")
-  {:ok, Map.put(context, :response, response)}
+step "I create a product named {string}", %{args: [name]} = context do
+  product = create_product(name: name)
+  Map.put(context, :product, product)
 end
 
-defstep "the response status should be {int}", %{args: [expected_status]} = context do
-  assert context.response.status_code == expected_status
-  :ok
-end
-```
-
-### Database Testing
-
-```elixir
-defstep "there should be a user in the database with email {string}", %{args: [email]} do
-  user = Repo.get_by(User, email: email)
-  assert user != nil
-  :ok
-end
-```
-
-## Handling Test Data
-
-### Using Factory Functions
-
-```elixir
-# Helper function to create test data
-defp create_test_user(attrs \\ %{}) do
-  defaults = %{
-    username: "testuser",
-    email: "test@example.com",
-    password: "password123"
-  }
-  
-  Map.merge(defaults, attrs)
-  |> User.changeset()
-  |> Repo.insert!()
-end
-
-# Use in step definitions
-defstep "a user exists with email {string}", %{args: [email]} do
-  user = create_test_user(%{email: email})
-  {:ok, %{user: user}}
-end
-```
-
-### Using Tags for Test Environment
-
-```gherkin
-@require_db_cleanup
-Feature: User Management
-
-Scenario: Create a new user
-  When I create a user with email "newuser@example.com"
-  Then the user should exist in the database
-```
-
-```elixir
-setup context do
-  if "require_db_cleanup" in context.feature_tags do
-    on_exit(fn -> 
-      # Clean up database after tests
-      Repo.delete_all(User)
-    end)
-  end
-  
+step "I should see the product in my catalog", context do
+  assert product_in_catalog?(context.product)
   context
 end
 ```
 
-## Common Testing Patterns
+### Organize Step Definitions
 
-### The Given-When-Then Formula
+Group related steps in the same module:
 
-1. **Given**: Establishes the initial context
-2. **When**: Describes the key action
-3. **Then**: Specifies expected outcomes
+```elixir
+# test/features/step_definitions/authentication_steps.exs
+defmodule AuthenticationSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
+  
+  # Login steps
+  step "I am logged in as {string}", %{args: [email]} = context do
+    user = login_user(email)
+    Map.put(context, :current_user, user)
+  end
+  
+  # Registration steps
+  step "I register with email {string}", %{args: [email]} = context do
+    user = register_user(email: email)
+    Map.put(context, :new_user, user)
+  end
+end
+```
 
-### Table-Driven Scenarios
+## Common Patterns
+
+### Data Setup Pattern
+
+Create helper functions for common data setup:
+
+```elixir
+defmodule TestHelpers do
+  def create_user(attrs \\ %{}) do
+    default_attrs = %{
+      email: "test@example.com",
+      name: "Test User"
+    }
+    
+    attrs = Map.merge(default_attrs, attrs)
+    # Create user logic
+  end
+end
+
+# In your steps
+step "a user exists with email {string}", %{args: [email]} do
+  user = TestHelpers.create_user(email: email)
+  %{user: user}
+end
+```
+
+### Assertion Helpers
+
+Create custom assertion helpers for cleaner steps:
+
+```elixir
+defmodule AssertionHelpers do
+  import ExUnit.Assertions
+  
+  def assert_logged_in(context) do
+    assert context[:current_user] != nil
+    assert context[:session_token] != nil
+  end
+  
+  def assert_product_visible(context, product_name) do
+    assert product_name in get_visible_products(context)
+  end
+end
+```
+
+## Testing Tips
+
+### Use Tags for Organization
+
+Tag your scenarios for easy filtering:
 
 ```gherkin
-Scenario Outline: User registration with different passwords
-  When I try to register with email "user@example.com" and password "<password>"
-  Then registration should be "<result>"
-  And I should see message "<message>"
-  
-  Examples:
-    | password      | result    | message                            |
-    | pass          | failed    | Password is too short              |
-    | password123   | success   | Registration successful            |
-    | noUppercase1  | failed    | Password needs an uppercase letter |
-    | NoNumbers     | failed    | Password needs a number            |
+@authentication @smoke
+Scenario: Successful login
+  Given I am on the login page
+  When I enter valid credentials
+  Then I should be logged in
+
+@wip @slow
+Scenario: Complex data processing
+  Given a large dataset
+  When I process the data
+  Then the results should be accurate
 ```
 
-### State-Based Testing
+Run specific tags:
+```bash
+mix test --only authentication
+mix test --exclude wip
+```
+
+### Background vs. Helper Steps
+
+Use backgrounds for truly common setup that applies to all scenarios:
 
 ```gherkin
-Scenario: Completed order cannot be modified
-  Given I have an order with id "12345"
-  And the order status is "completed"
-  When I attempt to modify the order
-  Then I should receive an error "Cannot modify completed order"
+Background:
+  Given the system is initialized
+  And default products exist
+
+Scenario: View product catalog
+  When I visit the catalog page
+  Then I should see all products
 ```
 
-## Continuous Integration
+### Handling Asynchronous Operations
 
-### Running Tests in CI
-
-```yaml
-# Example GitHub Actions workflow
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: '25'
-          elixir-version: '1.14'
-      - run: mix deps.get
-      - run: mix test
-```
-
-### Reporting Test Results
-
-Consider tools for generating test reports:
+For operations that might take time:
 
 ```elixir
-# In test_helper.exs
-ExUnit.configure(
-  formatters: [ExUnit.CLIFormatter, JUnitFormatter]
-)
+step "I wait for the email to arrive", context do
+  # Poll for the email with a timeout
+  email = wait_for_email(context.current_user.email, timeout: 5_000)
+  Map.put(context, :received_email, email)
+end
+
+defp wait_for_email(email, opts) do
+  timeout = Keyword.get(opts, :timeout, 5_000)
+  poll_interval = 100
+  
+  wait_until(timeout, poll_interval, fn ->
+    check_email_arrived(email)
+  end)
+end
 ```
 
-## Advanced Techniques
+## Debugging Tips
 
-### Custom Parameter Types
+1. **Use IO.inspect in steps**: Temporarily add `IO.inspect(context)` to see the current state
+2. **Run single scenarios**: Focus on one test at a time during debugging
+3. **Check step history**: Error messages show which steps ran before failure
+4. **Use meaningful assertions**: Include context in assertion messages
 
 ```elixir
-# Custom parameter type for dates
-defmodule DateParameterType do
-  def match("today") do
-    Date.utc_today()
-  end
-  
-  def match("tomorrow") do
-    Date.add(Date.utc_today(), 1)
-  end
-  
-  def match(date_string) do
-    case Date.from_iso8601(date_string) do
-      {:ok, date} -> date
-      _ -> raise "Invalid date format: #{date_string}. Use ISO-8601 format."
-    end
-  end
-end
-
-# Using in step definitions
-defstep "I schedule an appointment for {date}", %{args: [date]} do
-  # date is already a Date struct
-  {:ok, %{appointment_date: date}}
+step "the order should be completed", context do
+  order = context.order
+  assert order.status == "completed", 
+         "Expected order #{order.id} to be completed, but was #{order.status}"
+  context
 end
 ```
-
-### Sharing Steps Between Test Modules
-
-Use the `Cucumber.SharedSteps` module to create reusable step definitions:
-
-```elixir
-# In a shared module
-defmodule SharedSteps.Authentication do
-  use Cucumber.SharedSteps
-  
-  defstep "I am logged in as {string}", %{args: [username]} do
-    # Login logic
-    {:ok, %{current_user: find_user(username)}}
-  end
-  
-  defstep "I should be on the {string} page", %{args: [page_name]} do
-    assert current_page() == page_name
-    :ok
-  end
-end
-
-# In a test module
-defmodule AuthenticationTest do
-  use Cucumber, feature: "authentication.feature"
-  use SharedSteps.Authentication
-  
-  # Additional step definitions specific to this module
-end
-```
-
-### Performance Considerations
-
-1. **Minimize external dependencies**: Mock third-party services
-2. **Optimize database usage**: Use transactions, clean up test data
-3. **Reuse browser sessions**: For UI tests, avoid creating new sessions for each scenario
-4. **Parallelization**: Consider running tests in parallel when possible

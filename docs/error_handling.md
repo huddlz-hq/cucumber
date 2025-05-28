@@ -17,7 +17,7 @@ in scenario "Missing Step Example" (test/features/example.feature:6)
 
 Please define this step with:
 
-defstep "I try to use a step with no definition", context do
+step "I try to use a step with no definition", context do
   # Your step implementation here
   context
 end
@@ -75,7 +75,7 @@ Step definitions can indicate failure in several ways:
 Using ExUnit assertions will cause the step to fail if the assertion fails:
 
 ```elixir
-defstep "the total should be {float}", %{args: [total]} = context do
+step "the total should be {float}", %{args: [total]} = context do
   assert context.cart_total == total
   :ok
 end
@@ -86,7 +86,7 @@ end
 Any uncaught exception will cause the step to fail:
 
 ```elixir
-defstep "I click the submit button", _context do
+step "I click the submit button", _context do
   raise "The submit button is disabled"
   :ok
 end
@@ -97,7 +97,7 @@ end
 You can explicitly return an error tuple to fail a step:
 
 ```elixir
-defstep "the payment should be successful", context do
+step "the payment should be successful", context do
   if context.payment_status == :success do
     :ok
   else
@@ -113,7 +113,7 @@ end
 Insert `IO.inspect` calls to see the values of variables during test execution:
 
 ```elixir
-defstep "I should see my order summary", context do
+step "I should see my order summary", context do
   IO.inspect(context, label: "Context in order summary step")
   assert context.order != nil
   :ok
@@ -125,7 +125,7 @@ end
 Log information about step execution:
 
 ```elixir
-defstep "I complete the checkout process", context do
+step "I complete the checkout process", context do
   IO.puts("Starting checkout process")
   # Checkout logic
   IO.puts("Completed checkout process")
@@ -138,7 +138,7 @@ end
 Print the full context at any point to see the accumulated state:
 
 ```elixir
-defstep "I check my context", context do
+step "I check my context", context do
   IO.inspect(context, label: "Current context", pretty: true)
   :ok
 end
@@ -149,7 +149,7 @@ end
 Add steps specifically for debugging:
 
 ```elixir
-defstep "I debug my test state", context do
+step "I debug my test state", context do
   IO.puts("==== DEBUG STATE ====")
   IO.inspect(context.current_page, label: "Current Page")
   IO.inspect(context.user, label: "Current User")
@@ -164,7 +164,7 @@ end
 Sometimes tests can be inconsistent due to timing issues, especially with UI interactions:
 
 ```elixir
-defstep "I should see the confirmation message", context do
+step "I should see the confirmation message", context do
   # Add delay or retry logic for UI-related assertions
   :timer.sleep(500)  # Give the UI time to update
   assert_text("Your order has been confirmed")
@@ -190,7 +190,7 @@ defp retry_until(function, max_attempts \\ 5, delay \\ 100) do
   end)
 end
 
-defstep "I should see the success notification", _context do
+step "I should see the success notification", _context do
   result = retry_until(fn ->
     if element_visible?(".success-notification") do
       {:ok, true}

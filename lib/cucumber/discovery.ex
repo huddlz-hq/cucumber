@@ -92,10 +92,7 @@ defmodule Cucumber.Discovery do
 
   defp add_module_steps_to_registry(registry, module, steps) do
     Enum.reduce(steps, registry, fn {pattern, metadata}, acc ->
-      # Compile the pattern
-      compiled_pattern = Cucumber.Expression.compile(pattern)
-
-      # Check for duplicates using original pattern as key
+      # Check for duplicates using pattern as key
       if Map.has_key?(acc, pattern) do
         {existing_module, existing_meta} = acc[pattern]
 
@@ -110,8 +107,8 @@ defmodule Cucumber.Discovery do
         """
       end
 
-      # Store with compiled pattern
-      Map.put(acc, compiled_pattern, {module, metadata})
+      # Store with pattern as key (compile at runtime)
+      Map.put(acc, pattern, {module, metadata})
     end)
   end
 

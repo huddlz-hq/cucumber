@@ -2,14 +2,28 @@
 
 Step definitions connect the Gherkin steps in your feature files to actual code. They're the glue between your natural language specifications and the implementation that tests your application.
 
-## Basic Step Definition
+## Creating Step Definition Files
 
-Step definitions are created using the `defstep` macro:
+Step definitions should be placed in `test/features/step_definitions/` with a `.exs` extension:
 
 ```elixir
-defstep "I am logged in as a customer", context do
+# test/features/step_definitions/authentication_steps.exs
+defmodule AuthenticationSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
+  
+  # Step definitions go here
+end
+```
+
+## Basic Step Definition
+
+Step definitions are created using the `step` macro:
+
+```elixir
+step "I am logged in as a customer", context do
   # Authentication logic here
-  {:ok, %{user: create_and_login_customer()}}
+  Map.put(context, :user, create_and_login_customer())
 end
 ```
 
@@ -20,39 +34,39 @@ Cucumber supports several parameter types that can be used in step patterns. Par
 ### String Parameters
 
 ```elixir
-defstep "I am on the product page for {string}", %{args: [product_name]} do
+step "I am on the product page for {string}", %{args: [product_name]} do
   # Navigate to product page
-  {:ok, %{current_page: :product, product_name: product_name}}
+  %{current_page: :product, product_name: product_name}
 end
 ```
 
 ### Integer Parameters
 
 ```elixir
-defstep "I should have {int} items in my wishlist", %{args: [expected_count]} do
+step "I should have {int} items in my wishlist", %{args: [expected_count]} = context do
   # Assertion for wishlist count
-  assert get_wishlist_count() == expected_count
-  :ok
+  assert get_wishlist_count(context) == expected_count
+  context
 end
 ```
 
 ### Float Parameters
 
 ```elixir
-defstep "the total price should be {float}", %{args: [expected_total]} do
+step "the total price should be {float}", %{args: [expected_total]} = context do
   # Assertion for price
-  assert_in_delta get_cart_total(), expected_total, 0.01
-  :ok
+  assert_in_delta get_cart_total(context), expected_total, 0.01
+  context
 end
 ```
 
 ### Word Parameters
 
 ```elixir
-defstep "I should see the {word} dashboard", %{args: [dashboard_type]} do
+step "I should see the {word} dashboard", %{args: [dashboard_type]} = context do
   # Assertion for dashboard type
-  assert get_current_dashboard() == dashboard_type
-  :ok
+  assert get_current_dashboard(context) == dashboard_type
+  context
 end
 ```
 
@@ -61,9 +75,9 @@ end
 When a step has multiple parameters, you can pattern match on all of them:
 
 ```elixir
-defstep "I transfer {float} from {string} to {string}", %{args: [amount, from_account, to_account]} do
+step "I transfer {float} from {string} to {string}", %{args: [amount, from_account, to_account]} do
   # Transfer logic
-  {:ok, %{transfer: %{amount: amount, from: from_account, to: to_account}}}
+  %{transfer: %{amount: amount, from: from_account, to: to_account}}
 end
 ```
 
@@ -77,9 +91,9 @@ Given I have the following items in my cart:
   | Protection Plan | 1        | 79.99 |
 ```
 
-In your test module:
+In your step definitions:
 ```elixir
-defstep "I have the following items in my cart:", context do
+step "I have the following items in my cart:", context do
   # Access the datatable
   datatable = context.datatable
 
@@ -94,28 +108,34 @@ defstep "I have the following items in my cart:", context do
   # ]
   
   # Process the items
-  {:ok, %{cart_items: items}}
+  Map.put(context, :cart_items, items)
 end
 ```
 
-## Working with Doc Strings
+## Working with DocStrings
+
+DocStrings allow you to pass multi-line text to a step:
 
 In your feature file:
 ```gherkin
-When I submit the following feedback:
+When I submit the following JSON:
   """
-  I really like your product, but I think
-  it could be improved by adding more features.
-  Keep up the good work!
+  {
+    "name": "Test Product",
+    "price": 29.99,
+    "available": true
+  }
   """
 ```
 
-In your test module:
+In your step definitions:
 ```elixir
-defstep "I submit the following feedback:", context do
-  feedback_text = context.docstring
-  # Submit feedback logic
-  {:ok, %{submitted_feedback: feedback_text}}
+step "I submit the following JSON:", context do
+  # The docstring is available in context.docstring
+  json_data = Jason.decode!(context.docstring)
+  
+  # Process the JSON
+  Map.put(context, :submitted_data, json_data)
 end
 ```
 
@@ -123,112 +143,38 @@ end
 
 Step definitions must return one of the following values (matching ExUnit's setup behavior):
 
-### 1. Return `:ok`
+- `:ok` - Keeps the context unchanged
+- A map - Merged into the existing context
+- A keyword list - Merged into the existing context
+- `{:ok, map_or_keyword_list}` - Merged into the existing context
+- `{:error, reason}` - Fails the step with the given reason
 
-For steps that perform actions but don't need to update context:
+## Reusable Step Definitions
 
-```elixir
-defstep "I click the submit button", _context do
-  # Click logic
-  :ok
-end
-```
-
-### 2. Return a Map
-
-To merge new values into the context:
+You can create reusable step definitions that can be shared across multiple features:
 
 ```elixir
-defstep "I am on the home page", context do
-  Map.put(context, :current_page, :home)
-end
-```
-
-### 3. Return a Keyword List
-
-To merge new values into the context:
-
-```elixir
-defstep "I set user preferences", _context do
-  [theme: :dark, language: :en]
-end
-```
-
-### 4. Return `{:ok, map_or_keyword_list}`
-
-To merge new values into the context (same as returning the map/list directly):
-
-```elixir
-defstep "I search for {string}", %{args: [search_term]} do
-  # Search logic
-  {:ok, %{search_term: search_term, search_results: perform_search(search_term)}}
-end
-```
-
-### 5. Return `{:error, reason}`
-
-To indicate a step failure with a reason:
-
-```elixir
-defstep "the payment should be successful", context do
-  if context.payment_status == :success do
-    :ok
-  else
-    {:error, "Expected payment to succeed, but got status: #{context.payment_status}"}
+# test/features/step_definitions/common_steps.exs
+defmodule CommonSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
+  
+  step "I wait {int} seconds", %{args: [seconds]} = context do
+    Process.sleep(seconds * 1000)
+    context
+  end
+  
+  step "I should see {string}", %{args: [text]} = context do
+    assert page_contains_text?(context, text)
+    context
   end
 end
 ```
 
-## Step Patterns and Matching
+## Best Practices
 
-When a Gherkin step needs to be executed, the framework searches through all step definitions for a matching pattern. The matching process:
-
-1. Starts with the current module's step definitions
-2. Looks for an exact match first
-3. Then tries to match using parameter placeholders
-4. Raises an error if no matching step definition is found
-
-## Context Management
-
-The context object is a map that flows from step to step during a scenario's execution:
-
-- It starts as an empty map or the ExUnit test context
-- Each step can add to, modify, or replace the context
-- Any values added to the context are available to subsequent steps
-- It's useful for sharing state between steps, such as user sessions, form data, etc.
-
-Example of context flow:
-
-```elixir
-defstep "I am on the login page", _context do
-  # Initial step sets up the page
-  %{page: :login}
-end
-
-defstep "I enter my credentials", context do
-  # Second step uses the page from previous step and adds credentials
-  assert context.page == :login
-  {:ok, %{username: "testuser", password: "password123"}}
-end
-
-defstep "I click the login button", context do
-  # Third step can access all previous context values
-  assert context.page == :login
-  assert context.username == "testuser" 
-  assert context.password == "password123"
-  
-  # And add more context values
-  {:ok, %{logged_in: true, user_id: 123}}
-end
-```
-
-## Best Practices for Step Definitions
-
-1. **Keep steps reusable** - Write generic steps that can be used across features
-2. **One assertion per step** - Especially for "Then" steps
-3. **Use context for state management** - Pass necessary data between steps
-4. **Handle errors gracefully** - Provide helpful error messages
-5. **Name steps from the user's perspective** - Focus on what, not how
-6. **Organize steps logically** - Group related steps together
-7. **Document complex steps** - Add comments for steps with complex logic
-8. **Avoid implementation details in step patterns** - Keep to business terminology
+1. **Keep steps focused**: Each step should do one thing well
+2. **Use descriptive step patterns**: Make your steps readable and self-documenting
+3. **Share common steps**: Create reusable step definitions for common actions
+4. **Handle errors gracefully**: Return `{:error, reason}` for expected failures
+5. **Maintain context**: Always return the context (or `:ok`) to maintain state between steps

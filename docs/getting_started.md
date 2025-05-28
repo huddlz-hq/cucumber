@@ -9,6 +9,7 @@ The Cucumber framework allows you to write tests in a natural language format us
 - Behavior-driven development (BDD)
 - Clear documentation of application behavior
 - Tests that serve as living documentation
+- Auto-discovery of feature files and step definitions
 
 ## Installation
 
@@ -17,14 +18,23 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.1.0"}
+    {:cucumber, "~> 0.2.0"}
   ]
 end
 ```
 
 ## Quick Start
 
-### 1. Create a Feature File
+### 1. Configure Test Helper
+
+Add Cucumber to your `test/test_helper.exs`:
+
+```elixir
+ExUnit.start()
+Cucumber.compile_features!()
+```
+
+### 2. Create a Feature File
 
 Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension.
 
@@ -44,47 +54,49 @@ Scenario: User signs in with valid credentials
   And I should see "Welcome back" message
 ```
 
-### 2. Create a Test Module
+### 3. Create Step Definitions
 
-Create a test module that uses the `Cucumber` macro:
+Create step definitions in `test/features/step_definitions/` with a `.exs` extension:
 
 ```elixir
-defmodule UserAuthenticationTest do
-  use Cucumber, feature: "user_authentication.feature"
+# test/features/step_definitions/authentication_steps.exs
+defmodule AuthenticationSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
   
   # Step definitions
-  defstep "the application is running" do
+  step "the application is running" do
     # Setup code here
-    :ok
+    %{app_started: true}
   end
   
-  defstep "I am on the sign in page", context do
+  step "I am on the sign in page", context do
     # Navigate to sign in page
     Map.put(context, :current_page, :sign_in)
   end
   
-  defstep "I enter {string} as my email", %{args: [email]} = context do
+  step "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
   end
 
-  defstep "I enter {string} as my password", %{args: [password]} = context do
+  step "I enter {string} as my password", %{args: [password]} = context do
     # Code to enter password
     Map.put(context, :password, password)
   end
   
-  defstep "I click the {string} button", %{args: [button_text]} do
+  step "I click the {string} button", %{args: [button_text]} do
     # Code to click button
     {:ok, %{clicked: button_text}}
   end
   
-  defstep "I should be redirected to the dashboard", context do
+  step "I should be redirected to the dashboard", context do
     # Assertions for redirection
     assert context.current_page == :dashboard
-    :ok
+    context
   end
   
-  defstep "I should see {string} message", %{args: [message]} do
+  step "I should see {string} message", %{args: [message]} do
     # Assertion for message
     assert_text(message)
     :ok
@@ -92,12 +104,34 @@ defmodule UserAuthenticationTest do
 end
 ```
 
-### 3. Run Your Tests
+### 4. Run Your Tests
 
 Run your tests using the standard mix test command:
 
+```bash
+# Run all tests including Cucumber
+mix test
+
+# Run only Cucumber tests
+mix test --only cucumber
+
+# Run tests for a specific feature
+mix test --only feature_user_authentication
 ```
-mix test test/lib/user_authentication_test.exs
+
+## File Structure
+
+Cucumber automatically discovers features and steps using this structure:
+
+```
+test/
+  features/                      # Feature files
+    user_authentication.feature
+    shopping_cart.feature
+    step_definitions/           # Step definition files
+      authentication_steps.exs
+      shopping_steps.exs
+      common_steps.exs
 ```
 
 ## Next Steps

@@ -1,20 +1,21 @@
-defmodule CucumberParameterTest do
-  use Cucumber, feature: "parameters.feature"
+defmodule ParameterSteps do
+  use Cucumber.StepDefinition
+  import ExUnit.Assertions
 
   # Step with {int} parameter
-  defstep "a number {int}", %{args: [number]} = context do
+  step "a number {int}", %{args: [number]} = context do
     assert number == 42
     Map.put(context, :number, number)
   end
 
   # Step with {float} parameter
-  defstep "a decimal {float}", %{args: [float]} = context do
+  step "a decimal {float}", %{args: [float]} = context do
     assert float == 3.14
     Map.put(context, :float, float)
   end
 
   # Step with {string} and {word} parameters
-  defstep "I click {string} on the {word}", context do
+  step "I click {string} on the {word}", context do
     [button_text, form_name] = context.args
     assert button_text == "Submit"
     assert form_name == "form"
@@ -22,7 +23,7 @@ defmodule CucumberParameterTest do
   end
 
   # Step with {string} and {word} parameters that uses the context from previous steps
-  defstep "I should see {string} message on the {word}", context do
+  step "I should see {string} message on the {word}", context do
     [message, location] = context.args
     assert message == "Success"
     assert location == "dashboard"

@@ -42,8 +42,11 @@ defmodule Cucumber.Runtime do
 
   defp find_step_definition(step_text, step_registry) do
     # Try to match against each registered pattern
-    Enum.find_value(step_registry, :error, fn {pattern, definition} ->
-      case Expression.match(step_text, pattern) do
+    Enum.find_value(step_registry, :error, fn {pattern_text, definition} ->
+      # Compile pattern on the fly
+      compiled_pattern = Expression.compile(pattern_text)
+
+      case Expression.match(step_text, compiled_pattern) do
         {:match, args} -> {:ok, definition, args}
         :no_match -> nil
       end
@@ -60,17 +63,36 @@ defmodule Cucumber.Runtime do
   defp add_datatable(context, nil), do: context
 
   defp add_datatable(context, datatable) do
-    # Convert datatable to list of maps
-    [headers | rows] = datatable
+    # Convert datatable to the expected structure
+    if length(datatable) > 1 do
+      [headers | rows] = datatable
 
-    table_data =
-      Enum.map(rows, fn row ->
-        headers
-        |> Enum.zip(row)
-        |> Map.new()
-      end)
+      table_maps =
+        Enum.map(rows, fn row ->
+          headers
+          |> Enum.zip(row)
+          |> Map.new()
+        end)
 
-    Map.put(context, :datatable, table_data)
+      table_data = %{
+        headers: headers,
+        rows: rows,
+        maps: table_maps,
+        raw: datatable
+      }
+
+      Map.put(context, :datatable, table_data)
+    else
+      # Single row table
+      table_data = %{
+        headers: [],
+        rows: datatable,
+        maps: [],
+        raw: datatable
+      }
+
+      Map.put(context, :datatable, table_data)
+    end
   end
 
   defp add_docstring(context, nil), do: context

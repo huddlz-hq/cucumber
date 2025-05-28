@@ -56,7 +56,7 @@ defmodule Cucumber.StepError do
 
   The error message will include a suggested implementation like:
 
-      defstep "I click the submit button", context do
+      step "I click the submit button", context do
         # Your step implementation here
         context
       end
@@ -71,7 +71,7 @@ defmodule Cucumber.StepError do
 
     Please define this step with:
 
-    defstep "#{format_step_for_suggestion(step.text)}", context do
+    step "#{format_step_for_suggestion(step.text)}", context do
       # Your step implementation here
       context
     end
