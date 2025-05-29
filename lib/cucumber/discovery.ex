@@ -9,7 +9,7 @@ defmodule Cucumber.Discovery do
 
   defmodule DiscoveryResult do
     @moduledoc false
-    defstruct features: [], step_modules: [], step_registry: %{}
+    defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
   end
 
   @doc """
@@ -22,7 +22,7 @@ defmodule Cucumber.Discovery do
     support_patterns = get_patterns(:support, opts)
 
     # Load support files first (like Ruby cucumber)
-    load_support_files(support_patterns)
+    hook_modules = load_support_files(support_patterns)
 
     # Discover and load step definitions
     step_modules = load_step_definitions(steps_patterns)
@@ -36,7 +36,8 @@ defmodule Cucumber.Discovery do
     %DiscoveryResult{
       features: features,
       step_modules: step_modules,
-      step_registry: step_registry
+      step_registry: step_registry,
+      hook_modules: hook_modules
     }
   end
 
@@ -59,7 +60,22 @@ defmodule Cucumber.Discovery do
   defp load_support_files(patterns) do
     patterns
     |> expand_patterns()
-    |> Enum.each(&Code.require_file/1)
+    |> Enum.map(&load_hook_module/1)
+    |> Enum.filter(& &1)
+  end
+
+  defp load_hook_module(path) do
+    # Load the file and get the modules
+    modules = Code.require_file(path)
+
+    # Find hook modules
+    modules
+    |> Enum.map(fn {module, _} -> module end)
+    |> Enum.find(fn module ->
+      function_exported?(module, :__cucumber_hooks__, 0)
+    end)
+  rescue
+    _ -> nil
   end
 
   defp load_step_definitions(patterns) do

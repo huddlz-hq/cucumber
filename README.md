@@ -12,6 +12,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 - **Background Steps**: Define common setup steps for all scenarios
 - **Tag Filtering**: Run subsets of scenarios using tags
 - **Async Test Execution**: Run feature tests concurrently with the `@async` tag
+- **Hooks**: Before/After scenario hooks with tag-based filtering
 - **Context Passing**: Share state between steps with a simple context map
 - **Rich Error Reporting**: Clear error messages with step execution history
 - **ExUnit Integration**: Seamlessly integrates with Elixir's built-in test framework
@@ -176,6 +177,7 @@ For comprehensive documentation and guides, please visit [HexDocs](https://hexdo
 - [Getting Started](https://hexdocs.pm/cucumber/getting_started.html)
 - [Feature Files](https://hexdocs.pm/cucumber/feature_files.html)
 - [Step Definitions](https://hexdocs.pm/cucumber/step_definitions.html)
+- [Hooks](https://hexdocs.pm/cucumber/hooks.html) - Before/After scenario hooks
 - [Error Handling](https://hexdocs.pm/cucumber/error_handling.html)
 - [Best Practices](https://hexdocs.pm/cucumber/best_practices.html)
 - [Architecture](https://hexdocs.pm/cucumber/architecture.html)

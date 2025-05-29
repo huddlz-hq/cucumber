@@ -12,21 +12,25 @@ defmodule Cucumber.Compiler do
     # Discover features and steps
     %Discovery.DiscoveryResult{
       features: features,
-      step_registry: step_registry
+      step_registry: step_registry,
+      hook_modules: hook_modules
     } = Discovery.discover(opts)
 
     # Generate a test module for each feature
     for feature <- features do
-      compile_feature(feature, step_registry)
+      compile_feature(feature, step_registry, hook_modules)
     end
   end
 
-  defp compile_feature(feature, step_registry) do
+  defp compile_feature(feature, step_registry, hook_modules) do
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
 
     # Check if feature has @async tag
     async = "async" in feature.tags
+
+    # Collect all hooks
+    all_hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
     # Generate test module AST
     ast =
@@ -37,6 +41,13 @@ defmodule Cucumber.Compiler do
           # Tag with cucumber and feature name
           @moduletag :cucumber
           @moduletag unquote(feature_tag(feature.name))
+
+          # Add feature tags as module tags (except reserved ones)
+          unquote_splicing(
+            for tag <- feature.tags, tag != "async" do
+              quote do: @moduletag(unquote(String.to_atom(tag)))
+            end
+          )
 
           # Store the step registry for runtime access
           def __step_registry__ do
@@ -49,7 +60,7 @@ defmodule Cucumber.Compiler do
           # Generate test for each scenario
           unquote_splicing(
             for scenario <- feature.scenarios do
-              generate_scenario_test(scenario, step_registry)
+              generate_scenario_test(scenario, step_registry, all_hooks, feature.tags, async)
             end
           )
         end
@@ -105,26 +116,49 @@ defmodule Cucumber.Compiler do
     end
   end
 
-  defp generate_scenario_test(scenario, step_registry) do
+  defp generate_scenario_test(scenario, step_registry, all_hooks, feature_tags, async) do
     # Generate tags for the scenario
     tags =
       scenario.tags
       |> Enum.map(&String.to_atom/1)
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
+    # Collect all tags for this scenario
+    scenario_tags = feature_tags ++ scenario.tags
+
     quote do
       unquote_splicing(tags)
       @tag unquote(scenario_tag(scenario.name))
 
       test unquote(scenario.name), context do
-        # Add scenario info to context
-        context = Map.put(context, :scenario_name, unquote(scenario.name))
+        # Initialize cucumber context
+        context =
+          Map.merge(context, %{
+            scenario_name: unquote(scenario.name),
+            async: unquote(async),
+            step_history: []
+          })
+
+        # Run before hooks
+        {:ok, context} =
+          Cucumber.Hooks.run_before_hooks(
+            unquote(Macro.escape(all_hooks)),
+            context,
+            unquote(scenario_tags)
+          )
 
         # Execute scenario steps
         unquote_splicing(
           for step <- scenario.steps do
             generate_step_execution(step, step_registry)
           end
+        )
+
+        # Run after hooks
+        Cucumber.Hooks.run_after_hooks(
+          unquote(Macro.escape(all_hooks)),
+          context,
+          unquote(scenario_tags)
         )
       end
     end
