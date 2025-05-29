@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.1 (2025-05-28)
+
+### New Features
+
+- **Async Test Execution**: Added support for concurrent test execution using the `@async` tag
+  - Features marked with `@async` run concurrently with other async tests
+  - Improves test suite performance for independent features
+  - Safe to use with Ecto SQL sandbox in shared mode
+  - Comprehensive documentation added
+
+### Documentation
+
+- Updated README with async feature documentation
+- Enhanced feature files guide with `@async` tag usage
+- Added async examples to getting started guide
+
 ## v0.3.0 (2025-05-28)
 
 ### Complete Architecture Redesign
