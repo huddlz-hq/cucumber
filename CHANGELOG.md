@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.0 (2025-05-28)
+
+### New Features
+
+- **Hooks Support**: Added before/after scenario hooks for setup and teardown
+  - Define hooks in `test/features/support/` files
+  - Global hooks run for all scenarios
+  - Tag-filtered hooks run only for matching scenarios (e.g., `@database`)
+  - Hooks can modify test context
+  - Support for async scenarios
+  - Auto-discovery of support files
+  
+### Documentation
+
+- Added comprehensive hooks documentation guide
+- Updated README with hooks feature
+- Added practical examples for database setup, authentication, and performance monitoring
+
+### Examples
+
+- Added database setup example showing selective setup with `@database` tag
+- Demonstrates how to avoid unnecessary setup for tests that don't need it
+
 ## v0.3.1 (2025-05-28)
 
 ### New Features
