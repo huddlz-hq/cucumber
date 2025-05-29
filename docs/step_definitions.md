@@ -11,7 +11,7 @@ Step definitions should be placed in `test/features/step_definitions/` with a `.
 defmodule AuthenticationSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   # Step definitions go here
 end
 ```
@@ -99,14 +99,14 @@ step "I have the following items in my cart:", context do
 
   # Access headers
   headers = datatable.headers  # ["Product Name", "Quantity", "Price"]
-  
+
   # Access rows as maps
   items = datatable.maps
   # [
   #   %{"Product Name" => "Smartphone", "Quantity" => "1", "Price" => "699.99"},
   #   %{"Product Name" => "Protection Plan", "Quantity" => "1", "Price" => "79.99"}
   # ]
-  
+
   # Process the items
   Map.put(context, :cart_items, items)
 end
@@ -133,7 +133,7 @@ In your step definitions:
 step "I submit the following JSON:", context do
   # The docstring is available in context.docstring
   json_data = Jason.decode!(context.docstring)
-  
+
   # Process the JSON
   Map.put(context, :submitted_data, json_data)
 end
@@ -158,12 +158,12 @@ You can create reusable step definitions that can be shared across multiple feat
 defmodule CommonSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   step "I wait {int} seconds", %{args: [seconds]} = context do
     Process.sleep(seconds * 1000)
     context
   end
-  
+
   step "I should see {string}", %{args: [text]} = context do
     assert page_contains_text?(context, text)
     context

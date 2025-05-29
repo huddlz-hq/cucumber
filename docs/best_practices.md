@@ -102,13 +102,13 @@ Group related steps in the same module:
 defmodule AuthenticationSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   # Login steps
   step "I am logged in as {string}", %{args: [email]} = context do
     user = login_user(email)
     Map.put(context, :current_user, user)
   end
-  
+
   # Registration steps
   step "I register with email {string}", %{args: [email]} = context do
     user = register_user(email: email)
@@ -130,7 +130,7 @@ defmodule TestHelpers do
       email: "test@example.com",
       name: "Test User"
     }
-    
+
     attrs = Map.merge(default_attrs, attrs)
     # Create user logic
   end
@@ -150,12 +150,12 @@ Create custom assertion helpers for cleaner steps:
 ```elixir
 defmodule AssertionHelpers do
   import ExUnit.Assertions
-  
+
   def assert_logged_in(context) do
     assert context[:current_user] != nil
     assert context[:session_token] != nil
   end
-  
+
   def assert_product_visible(context, product_name) do
     assert product_name in get_visible_products(context)
   end
@@ -216,7 +216,7 @@ end
 defp wait_for_email(email, opts) do
   timeout = Keyword.get(opts, :timeout, 5_000)
   poll_interval = 100
-  
+
   wait_until(timeout, poll_interval, fn ->
     check_email_arrived(email)
   end)
@@ -233,7 +233,7 @@ end
 ```elixir
 step "the order should be completed", context do
   order = context.order
-  assert order.status == "completed", 
+  assert order.status == "completed",
          "Expected order #{order.id} to be completed, but was #{order.status}"
   context
 end

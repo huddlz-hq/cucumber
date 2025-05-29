@@ -130,12 +130,12 @@ Example:
 defmodule AuthenticationSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   step "I am on the sign in page", context do
     # Navigate to sign in page
     Map.put(context, :current_page, :sign_in)
   end
-  
+
   step "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
@@ -181,7 +181,7 @@ Step definitions must return one of the following values (matching ExUnit's setu
    Enum.map([1, 2, 3], fn x -> x * 2 end)
    ```
    """
-   
+
    # CORRECT - Use indentation instead
    @doc """
    ## Examples

@@ -6,7 +6,7 @@ defmodule Cucumber.StepDefinition do
 
       defmodule AuthenticationSteps do
         use Cucumber.StepDefinition
-        
+
         step "I am logged in as {string}", %{args: [username]} = context do
           {:ok, Map.put(context, :current_user, username)}
         end

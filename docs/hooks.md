@@ -14,24 +14,24 @@ To define hooks, create a module that uses `Cucumber.Hooks`:
 # test/features/support/database_support.exs
 defmodule DatabaseSupport do
   use Cucumber.Hooks
-  
+
   # Global hook - runs before every scenario
   before_scenario context do
     # Your setup code here
     {:ok, Map.put(context, :setup_done, true)}
   end
-  
+
   # Tagged hook - only runs for scenarios with @database tag
   before_scenario "@database", context do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Repo)
-    
+
     if context.async do
       Ecto.Adapters.SQL.Sandbox.mode(MyApp.Repo, {:shared, self()})
     end
-    
+
     {:ok, context}
   end
-  
+
   # After hooks run in reverse order of definition
   after_scenario _context do
     # Cleanup code
@@ -130,14 +130,14 @@ The context passed to hooks includes:
 ```elixir
 defmodule DatabaseSupport do
   use Cucumber.Hooks
-  
+
   before_scenario "@database", context do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Repo)
-    
+
     if context.async do
       Ecto.Adapters.SQL.Sandbox.mode(MyApp.Repo, {:shared, self()})
     end
-    
+
     {:ok, context}
   end
 end
@@ -148,11 +148,11 @@ end
 ```elixir
 defmodule AuthSupport do
   use Cucumber.Hooks
-  
+
   before_scenario "@authenticated", context do
     user = MyApp.Factory.insert(:user)
     token = MyApp.Auth.generate_token(user)
-    
+
     {:ok, Map.merge(context, %{
       current_user: user,
       auth_token: token
@@ -166,16 +166,16 @@ end
 ```elixir
 defmodule PerformanceSupport do
   use Cucumber.Hooks
-  
+
   before_scenario "@performance", context do
     start_time = System.monotonic_time()
     {:ok, Map.put(context, :start_time, start_time)}
   end
-  
+
   after_scenario "@performance", context do
     duration = System.monotonic_time() - context.start_time
     milliseconds = System.convert_time_unit(duration, :native, :millisecond)
-    
+
     IO.puts("Scenario completed in #{milliseconds}ms")
     :ok
   end

@@ -10,24 +10,24 @@ defmodule Cucumber.Hooks do
 
       defmodule DatabaseSupport do
         use Cucumber.Hooks
-        
+
         # Global before hook - runs for all scenarios
         before_scenario context do
           # Setup code
           {:ok, Map.put(context, :setup, true)}
         end
-        
-        # Tagged before hook - only runs for @database scenarios  
+
+        # Tagged before hook - only runs for @database scenarios
         before_scenario "@database", context do
           :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Repo)
-          
+
           if context.async do
             Ecto.Adapters.SQL.Sandbox.mode(MyApp.Repo, {:shared, self()})
           end
-          
+
           {:ok, context}
         end
-        
+
         # After hooks run in reverse order
         after_scenario _context do
           # Cleanup code
@@ -49,8 +49,9 @@ defmodule Cucumber.Hooks do
 
   Can optionally be filtered by tag. The hook receives the test context
   and must return one of:
-  - {:ok, context}
-  - :ok (keeps context unchanged)
+
+  - `{:ok, context}`
+  - `:ok` (keeps context unchanged)
   - map (merged into context)
   """
   defmacro before_scenario(context_var, do: block) do

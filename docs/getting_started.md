@@ -63,18 +63,18 @@ Create step definitions in `test/features/step_definitions/` with a `.exs` exten
 defmodule AuthenticationSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   # Step definitions
   step "the application is running" do
     # Setup code here
     %{app_started: true}
   end
-  
+
   step "I am on the sign in page", context do
     # Navigate to sign in page
     Map.put(context, :current_page, :sign_in)
   end
-  
+
   step "I enter {string} as my email", %{args: [email]} = context do
     # Code to enter email
     Map.put(context, :email, email)
@@ -84,18 +84,18 @@ defmodule AuthenticationSteps do
     # Code to enter password
     Map.put(context, :password, password)
   end
-  
+
   step "I click the {string} button", %{args: [button_text]} do
     # Code to click button
     {:ok, %{clicked: button_text}}
   end
-  
+
   step "I should be redirected to the dashboard", context do
     # Assertions for redirection
     assert context.current_page == :dashboard
     context
   end
-  
+
   step "I should see {string} message", %{args: [message]} do
     # Assertion for message
     assert_text(message)

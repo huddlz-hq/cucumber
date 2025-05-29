@@ -41,7 +41,7 @@ defmodule Cucumber do
 
       defmodule AuthenticationSteps do
         use Cucumber.StepDefinition
-        
+
         step "I am logged in as {string}", %{args: [username]} = context do
           {:ok, Map.put(context, :current_user, username)}
         end
@@ -53,10 +53,10 @@ defmodule Cucumber do
 
       # Run all tests including Cucumber
       mix test
-      
+
       # Run only Cucumber tests
       mix test --only cucumber
-      
+
       # Exclude Cucumber tests
       mix test --exclude cucumber
 
@@ -77,14 +77,14 @@ defmodule Cucumber do
   ## Options
 
     * `:features` - List of patterns for feature files
-    * `:steps` - List of patterns for step definition files  
+    * `:steps` - List of patterns for step definition files
     * `:support` - List of patterns for support files
 
   ## Examples
 
       # Use default paths
       Cucumber.compile_features!()
-      
+
       # Use custom paths
       Cucumber.compile_features!(
         features: ["test/acceptance/**/*.feature"],

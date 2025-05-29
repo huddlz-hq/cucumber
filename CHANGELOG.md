@@ -11,7 +11,7 @@
   - Hooks can modify test context
   - Support for async scenarios
   - Auto-discovery of support files
-  
+
 ### Documentation
 
 - Added comprehensive hooks documentation guide
@@ -93,7 +93,7 @@ This release completely redesigns the Cucumber library to follow Ruby Cucumber c
    # Old
    defmodule MyFeatureTest do
      use Cucumber, feature: "my_feature.feature"
-     
+
      defstep "I do something", context do
        {:ok, context}
      end
@@ -102,7 +102,7 @@ This release completely redesigns the Cucumber library to follow Ruby Cucumber c
    # New
    defmodule MySteps do
      use Cucumber.StepDefinition
-     
+
      step "I do something", context do
        {:ok, context}
      end

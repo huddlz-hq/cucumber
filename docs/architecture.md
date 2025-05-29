@@ -99,7 +99,7 @@ The StepDefinition module provides the DSL for defining steps:
 ```elixir
 defmodule MySteps do
   use Cucumber.StepDefinition
-  
+
   step "pattern", context do
     # implementation
   end

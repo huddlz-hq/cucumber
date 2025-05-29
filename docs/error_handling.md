@@ -62,7 +62,7 @@ If there are syntax errors in your feature files, you'll get an error when the p
   test/features/invalid.feature:5
 
 Expected a scenario or background but found:
-  
+
   Invalid line that doesn't start with a Gherkin keyword
 ```
 
@@ -198,7 +198,7 @@ step "I should see the success notification", _context do
       {:error, "Success notification not visible"}
     end
   end)
-  
+
   case result do
     {:ok, _} -> :ok
     {:error, reason} -> {:error, reason}

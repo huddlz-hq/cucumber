@@ -64,17 +64,17 @@ Step definitions should be placed in `test/features/step_definitions/` with a `.
 defmodule CalculatorSteps do
   use Cucumber.StepDefinition
   import ExUnit.Assertions
-  
+
   step "I have entered {int} into the calculator", %{args: [value]} = context do
     values = Map.get(context, :values, [])
     Map.put(context, :values, values ++ [value])
   end
-  
+
   step "I press add", context do
     sum = Enum.sum(context.values)
     Map.put(context, :result, sum)
   end
-  
+
   step "the result should be {int} on the screen", %{args: [expected]} = context do
     assert context.result == expected
     context
@@ -133,17 +133,17 @@ In your step definitions:
 step "I have the following items in my cart:", context do
   # Access the datatable
   datatable = context.datatable
-  
+
   # Access headers
   headers = datatable.headers  # ["Product Name", "Quantity", "Price"]
-  
+
   # Access rows as maps
   items = datatable.maps
   # [
   #   %{"Product Name" => "Smartphone", "Quantity" => "1", "Price" => "699.99"},
   #   %{"Product Name" => "Protection Plan", "Quantity" => "1", "Price" => "79.99"}
   # ]
-  
+
   # Process the items
   Map.put(context, :cart_items, items)
 end
