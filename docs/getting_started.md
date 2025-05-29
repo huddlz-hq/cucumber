@@ -134,6 +134,31 @@ test/
       common_steps.exs
 ```
 
+## Async Test Execution
+
+For features that don't share state, you can enable concurrent test execution by adding the `@async` tag:
+
+```gherkin
+# test/features/calculator.feature
+@async
+Feature: Calculator Operations
+  Independent calculations that can run concurrently
+
+Scenario: Addition
+  Given I have numbers 10 and 20
+  When I add them together
+  Then the result should be 30
+
+Scenario: Multiplication
+  Given I have numbers 5 and 6
+  When I multiply them
+  Then the result should be 30
+```
+
+Async features run concurrently with other async tests, improving test suite performance. Only use `@async` for features that are truly independent and don't rely on test execution order.
+
+When using Ecto, async tests work well with the SQL sandbox in shared mode. See your application's test setup for database configuration.
+
 ## Next Steps
 
 For more detailed information about the Cucumber for Elixir framework, check out these guides:

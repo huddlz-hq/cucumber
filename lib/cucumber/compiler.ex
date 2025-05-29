@@ -25,11 +25,14 @@ defmodule Cucumber.Compiler do
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
 
+    # Check if feature has @async tag
+    async = "async" in feature.tags
+
     # Generate test module AST
     ast =
       quote do
         defmodule unquote(module_name) do
-          use ExUnit.Case
+          use ExUnit.Case, async: unquote(async)
 
           # Tag with cucumber and feature name
           @moduletag :cucumber

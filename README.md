@@ -11,6 +11,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 - **DocStrings**: Include multi-line text blocks in your steps
 - **Background Steps**: Define common setup steps for all scenarios
 - **Tag Filtering**: Run subsets of scenarios using tags
+- **Async Test Execution**: Run feature tests concurrently with the `@async` tag
 - **Context Passing**: Share state between steps with a simple context map
 - **Rich Error Reporting**: Clear error messages with step execution history
 - **ExUnit Integration**: Seamlessly integrates with Elixir's built-in test framework
@@ -146,6 +147,27 @@ step "I have the following items in my cart:", context do
   Map.put(context, :cart_items, items)
 end
 ```
+
+## Async Test Execution
+
+By default, Cucumber tests run synchronously. To enable concurrent execution for features that don't share state, add the `@async` tag:
+
+```gherkin
+@async
+Feature: Independent Feature
+
+Scenario: Concurrent scenario
+  Given some precondition
+  When something happens
+  Then expect a result
+```
+
+Features marked with `@async` will run concurrently with other async tests, improving test suite performance. Only use this tag for features that:
+- Don't share state with other tests
+- Don't rely on test execution order
+- Are truly independent
+
+Note: Database tests can safely run async when using Ecto's SQL sandbox in shared mode.
 
 ## Documentation
 

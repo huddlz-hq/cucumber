@@ -116,6 +116,35 @@ Scenario: Failed login with invalid credentials
 
 Tags can be used at the Feature level (applies to all scenarios) or at the Scenario level.
 
+### Special Tags
+
+#### @async
+
+The `@async` tag enables concurrent test execution for features that don't share state:
+
+```gherkin
+@async
+Feature: Independent Calculator Operations
+  This feature can run concurrently with other async tests
+
+Scenario: Addition
+  Given I have a calculator
+  When I add 5 and 3
+  Then the result should be 8
+
+Scenario: Multiplication
+  Given I have a calculator
+  When I multiply 4 and 7
+  Then the result should be 28
+```
+
+Use `@async` only for features that:
+- Don't share state with other tests
+- Don't rely on test execution order
+- Are truly independent of other tests
+
+Note: Database tests can safely run async when using Ecto's SQL sandbox in shared mode. For non-Ecto resources (files, external APIs, etc.), ensure they can handle concurrent access.
+
 ## Best Practices for Feature Files
 
 1. **Keep language simple and consistent** - Use clear, business-focused terminology
