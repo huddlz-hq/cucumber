@@ -36,14 +36,16 @@ defmodule Gherkin.Scenario do
   Represents a Gherkin Scenario section.
 
   A Scenario is a concrete example that illustrates a business rule.
-  It consists of a name, a list of steps, and optional tags for filtering.
+  It consists of a name, a list of steps, optional tags for filtering,
+  and the line number where it appears in the source file.
   """
-  defstruct name: "", steps: [], tags: []
+  defstruct name: "", steps: [], tags: [], line: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
           steps: [Gherkin.Step.t()],
-          tags: [String.t()]
+          tags: [String.t()],
+          line: non_neg_integer() | nil
         }
 end
 
@@ -117,10 +119,16 @@ defmodule Gherkin.Parser do
       |> String.split("\n", trim: true)
       |> Enum.map(&String.trim/1)
 
+    # Keep track of original lines with their line numbers
+    all_lines_indexed =
+      gherkin_string
+      |> String.split("\n")
+      |> Enum.with_index()
+
     with {feature_tags, feature_line, rest} <- extract_tags_and_element(lines, "Feature:"),
          feature_name <- extract_feature_name(feature_line),
          {background, after_bg} <- extract_background(rest),
-         scenarios <- parse_scenarios(after_bg) do
+         scenarios <- parse_scenarios_with_lines(after_bg, all_lines_indexed) do
       %Feature{
         name: feature_name,
         description: "",
@@ -240,26 +248,17 @@ defmodule Gherkin.Parser do
     {[new_step | steps], new_step, false}
   end
 
-  # Helper function to parse scenarios with their tags
-  defp parse_scenarios(lines) do
-    initial_state = {[], nil, [], [], nil, false}
+  # Parse scenarios with line number tracking
+  defp parse_scenarios_with_lines(lines, all_lines_indexed) do
+    initial_state = {[], nil, [], [], nil, false, nil}
 
-    {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring} =
+    {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _} =
       Enum.reduce(lines, initial_state, fn line, state ->
-        process_line(line, state, lines)
+        process_line_with_number(line, state, lines, all_lines_indexed)
       end)
 
     # Add the last scenario if present
-    finalize_scenarios(scenarios, current_scenario, current_tags, steps)
-  end
-
-  defp finalize_scenarios(scenarios, current_scenario, current_tags, steps) do
-    if current_scenario do
-      scenario = build_scenario(current_scenario, steps, current_tags)
-      scenarios ++ [scenario]
-    else
-      scenarios
-    end
+    finalize_scenarios_with_line(scenarios, current_scenario, current_tags, steps)
   end
 
   # Extract tags from a line like "@tag1 @tag2 @tag3"
@@ -290,17 +289,40 @@ defmodule Gherkin.Parser do
     {tags, element_line, new_rest}
   end
 
-  # Helper functions to reduce complexity
+  defp finalize_scenarios_with_line(scenarios, current_scenario, current_tags, steps) do
+    if current_scenario do
+      {scenario_line, line_num} = current_scenario
+      scenario = build_scenario_with_line(scenario_line, steps, current_tags, line_num)
+      scenarios ++ [scenario]
+    else
+      scenarios
+    end
+  end
 
-  defp process_line(line, state, lines) do
-    {scenarios, current_scenario, current_tags, steps, current_step, in_docstring} = state
+  defp build_scenario_with_line(scenario_line, steps, tags, line_num) do
+    [_, scenario_name] = String.split(scenario_line, ":", parts: 2)
+    scenario_name = String.trim(scenario_name)
+
+    %Scenario{
+      name: scenario_name,
+      steps: Enum.reverse(steps),
+      tags: tags,
+      line: line_num
+    }
+  end
+
+  defp process_line_with_number(line, state, lines, all_lines_indexed) do
+    {scenarios, current_scenario, current_tags, steps, current_step, in_docstring, _line_num} =
+      state
 
     cond do
       String.starts_with?(line, "@") ->
-        handle_tag(line, state)
+        handle_tag_with_line(line, state)
 
       String.starts_with?(line, "Scenario:") ->
-        handle_scenario(line, state)
+        # Find the line number for this scenario
+        line_num = find_line_number(line, all_lines_indexed)
+        handle_scenario_with_line(line, line_num, state)
 
       # For step-related lines, delegate to common step processing
       String.starts_with?(line, ~s(""")) or in_docstring or
@@ -310,7 +332,8 @@ defmodule Gherkin.Parser do
         {new_steps, new_current_step, new_in_docstring} =
           process_step_line(line, {steps, current_step, in_docstring}, lines)
 
-        {scenarios, current_scenario, current_tags, new_steps, new_current_step, new_in_docstring}
+        {scenarios, current_scenario, current_tags, new_steps, new_current_step, new_in_docstring,
+         nil}
 
       true ->
         # Ignore other lines
@@ -318,38 +341,42 @@ defmodule Gherkin.Parser do
     end
   end
 
-  defp handle_tag(
-         line,
-         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}
-       ) do
-    if current_scenario do
-      scenario = build_scenario(current_scenario, steps, current_tags)
-      {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false}
-    else
-      {scenarios, current_scenario, extract_tags(line), steps, nil, false}
+  defp find_line_number(line, all_lines_indexed) do
+    trimmed_line = String.trim(line)
+
+    case Enum.find(all_lines_indexed, fn {orig_line, _idx} ->
+           String.trim(orig_line) == trimmed_line
+         end) do
+      {_, idx} -> idx
+      nil -> 0
     end
   end
 
-  defp handle_scenario(
+  defp handle_tag_with_line(
          line,
-         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring}
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring,
+          _line_num}
        ) do
     if current_scenario do
-      scenario = build_scenario(current_scenario, steps, current_tags)
-      {scenarios ++ [scenario], line, [], [], nil, false}
+      {scenario_line, line_num} = current_scenario
+      scenario = build_scenario_with_line(scenario_line, steps, current_tags, line_num)
+      {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false, nil}
     else
-      {scenarios, line, current_tags, [], nil, false}
+      {scenarios, current_scenario, extract_tags(line), steps, nil, false, nil}
     end
   end
 
-  defp build_scenario(scenario_line, steps, tags) do
-    [_, scenario_name] = String.split(scenario_line, ":", parts: 2)
-    scenario_name = String.trim(scenario_name)
-
-    %Scenario{
-      name: scenario_name,
-      steps: Enum.reverse(steps),
-      tags: tags
-    }
+  defp handle_scenario_with_line(
+         line,
+         line_num,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _}
+       ) do
+    if current_scenario do
+      {scenario_line, old_line_num} = current_scenario
+      scenario = build_scenario_with_line(scenario_line, steps, current_tags, old_line_num)
+      {scenarios ++ [scenario], {line, line_num}, [], [], nil, false, nil}
+    else
+      {scenarios, {line, line_num}, current_tags, [], nil, false, nil}
+    end
   end
 end
