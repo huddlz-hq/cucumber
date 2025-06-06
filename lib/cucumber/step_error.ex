@@ -166,13 +166,31 @@ defmodule Cucumber.StepError do
     |> String.replace(~r/\b(\d+)\b/, "{int}")
   end
 
-  defp format_failure_reason(reason) when is_binary(reason), do: reason
-  defp format_failure_reason(%{message: message}), do: message
+  defp format_failure_reason(reason) when is_binary(reason) do
+    # For multi-line reasons, ensure proper formatting
+    if String.contains?(reason, "\n") do
+      format_multiline_reason(reason)
+    else
+      reason
+    end
+  end
+
+  defp format_failure_reason(%{message: message}), do: format_failure_reason(message)
 
   defp format_failure_reason(%{__exception__: true} = exception),
-    do: Exception.message(exception)
+    do: format_failure_reason(Exception.message(exception))
 
   defp format_failure_reason(reason), do: inspect(reason, pretty: true)
+
+  defp format_multiline_reason(reason) do
+    reason
+    |> String.split("\n")
+    |> Enum.map_join("\n", &format_line/1)
+  end
+
+  defp format_line(line) do
+    if String.trim(line) == "", do: "", else: line
+  end
 
   defp format_step_history(step_history) do
     """

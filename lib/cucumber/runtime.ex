@@ -15,7 +15,7 @@ defmodule Cucumber.Runtime do
 
     # Find matching step definition
     case find_step_definition(step.text, step_registry) do
-      {:ok, {module, _metadata}, args} ->
+      {:ok, {module, _metadata}, args, pattern_text} ->
         # Prepare context with step arguments
         context = prepare_context(context, args, step)
 
@@ -25,18 +25,38 @@ defmodule Cucumber.Runtime do
           process_step_result(result, context)
         rescue
           e ->
-            # Re-raise with more context
-            reraise e, __STACKTRACE__
+            # Extract meaningful information from the error
+            feature_file = Map.get(context, :feature_file, "unknown")
+            scenario_name = Map.get(context, :scenario_name, "unknown scenario")
+            step_history = Map.get(context, :step_history, [])
+
+            # Create enhanced error with better formatting
+            enhanced_error =
+              Cucumber.StepError.failed_step(
+                step,
+                pattern_text,
+                format_exception_for_display(e),
+                feature_file,
+                scenario_name,
+                format_step_history_with_status(step_history, step)
+              )
+
+            reraise enhanced_error, __STACKTRACE__
         end
 
       :error ->
-        # Generate undefined step error
-        raise "Undefined step: '#{step.text}'\n\n" <>
-                "You can implement it by adding this to one of your step definition files:\n\n" <>
-                "step \"#{step.text}\", context do\n" <>
-                "  # Your implementation here\n" <>
-                "  context\n" <>
-                "end"
+        # Extract context info for better error
+        feature_file = Map.get(context, :feature_file, "unknown")
+        scenario_name = Map.get(context, :scenario_name, "unknown scenario")
+        step_history = Map.get(context, :step_history, [])
+
+        # Use the enhanced error module
+        raise Cucumber.StepError.missing_step_definition(
+                step,
+                feature_file,
+                scenario_name,
+                format_step_history_with_status(step_history, step)
+              )
     end
   end
 
@@ -47,7 +67,7 @@ defmodule Cucumber.Runtime do
       compiled_pattern = Expression.compile(pattern_text)
 
       case Expression.match(step_text, compiled_pattern) do
-        {:match, args} -> {:ok, definition, args}
+        {:match, args} -> {:ok, definition, args, pattern_text}
         :no_match -> nil
       end
     end)
@@ -122,5 +142,107 @@ defmodule Cucumber.Runtime do
         raise "Invalid step return value: #{inspect(other)}. " <>
                 "Expected :ok, a map, a keyword list, or {:ok, data}"
     end
+  end
+
+  defp format_exception_for_display(exception) do
+    # Format the exception with enhanced readability
+    case exception do
+      %{__struct__: module} = e
+      when module in [ExUnit.AssertionError, PhoenixTest.AssertionError] ->
+        # Special handling for assertion errors
+        format_assertion_error(e)
+
+      %{__exception__: true} = e ->
+        # Standard exception
+        Exception.message(e)
+
+      other ->
+        inspect(other, pretty: true)
+    end
+  end
+
+  defp format_assertion_error(error) do
+    # Extract the most useful parts of assertion errors
+    base_message = Exception.message(error)
+
+    # For PhoenixTest errors, enhance the formatting
+    if String.contains?(base_message, "Found these elements") do
+      lines = String.split(base_message, "\n")
+
+      # Find where HTML elements start
+      {before_html, html_and_after} =
+        Enum.split_while(lines, fn line ->
+          not (String.trim(line) |> String.starts_with?("<"))
+        end)
+
+      # Format the message parts
+      formatted_before = Enum.join(before_html, "\n")
+
+      # Group and format HTML elements
+      formatted_html =
+        html_and_after
+        |> format_html_elements()
+        |> Enum.join("\n")
+
+      formatted_before <> "\n" <> formatted_html
+    else
+      base_message
+    end
+  end
+
+  defp format_html_elements(lines) do
+    lines
+    |> group_html_elements()
+    |> Enum.map(&format_single_html_element/1)
+    |> Enum.reject(&(&1 == []))
+  end
+
+  defp group_html_elements(lines) do
+    lines
+    |> Enum.reduce({[], []}, &group_line/2)
+    |> finalize_groups()
+  end
+
+  defp group_line(line, {groups, current}) do
+    if html_line?(line) do
+      {groups, current ++ [line]}
+    else
+      finalize_current_group(groups, current)
+    end
+  end
+
+  defp finalize_current_group(groups, []), do: {groups, []}
+  defp finalize_current_group(groups, current), do: {groups ++ [current], []}
+
+  defp finalize_groups({groups, []}), do: groups
+  defp finalize_groups({groups, current}), do: groups ++ [current]
+
+  defp html_line?(line) do
+    trimmed = String.trim(line)
+    String.starts_with?(trimmed, "<") or String.ends_with?(trimmed, ">")
+  end
+
+  defp format_single_html_element(lines) do
+    # Format a single HTML element with proper indentation
+    lines
+    |> Enum.map_join("\n", fn line ->
+      "  " <> line
+    end)
+    # Add blank line after each element
+    |> then(&[&1, ""])
+  end
+
+  defp format_step_history_with_status(step_history, current_step) do
+    # Convert step history to include status
+    step_history
+    |> Enum.reverse()
+    # Show last 10 steps to avoid clutter
+    |> Enum.take(10)
+    # Put them back in chronological order
+    |> Enum.reverse()
+    |> Enum.map(fn step ->
+      status = if step == current_step, do: :failed, else: :passed
+      {status, step}
+    end)
   end
 end
