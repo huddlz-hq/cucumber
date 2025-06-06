@@ -101,21 +101,22 @@ defmodule Cucumber.RuntimeErrorTest do
         ]
       }
 
-      error = assert_raise Cucumber.StepError, fn ->
-        Runtime.execute_step(context, step, step_registry)
-      end
+      error =
+        assert_raise Cucumber.StepError, fn ->
+          Runtime.execute_step(context, step, step_registry)
+        end
 
       # Check that the error message is properly formatted
       assert error.message =~ "Step failed:"
       assert error.message =~ "When I click the submit button"
       assert error.message =~ "in scenario \"Form submission\""
       assert error.message =~ "test/features/form.feature:16"
-      
+
       # Check HTML formatting
       assert error.message =~ "Found these elements"
       assert error.message =~ "<button class=\"btn btn-primary\">"
       assert error.message =~ "Save Draft"
-      
+
       # Check step history
       assert error.message =~ "Step execution history:"
       assert error.message =~ "[passed] Given I am on the form page"

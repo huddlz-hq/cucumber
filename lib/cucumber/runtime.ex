@@ -38,7 +38,7 @@ defmodule Cucumber.Runtime do
                 format_exception_for_display(e),
                 feature_file,
                 scenario_name,
-                format_step_history_with_status(step_history, step)
+                format_step_history_with_status(step_history, step, context)
               )
 
             reraise enhanced_error, __STACKTRACE__
@@ -55,7 +55,7 @@ defmodule Cucumber.Runtime do
                 step,
                 feature_file,
                 scenario_name,
-                format_step_history_with_status(step_history, step)
+                format_step_history_with_status(step_history, step, context)
               )
     end
   end
@@ -232,8 +232,8 @@ defmodule Cucumber.Runtime do
     |> then(&[&1, ""])
   end
 
-  defp format_step_history_with_status(step_history, current_step) do
-    # Convert step history to include status
+  defp format_step_history_with_status(step_history, current_step, context) do
+    # Convert step history to include status and context
     step_history
     |> Enum.reverse()
     # Show last 10 steps to avoid clutter
@@ -242,7 +242,7 @@ defmodule Cucumber.Runtime do
     |> Enum.reverse()
     |> Enum.map(fn step ->
       status = if step == current_step, do: :failed, else: :passed
-      {status, step}
+      {status, step, context}
     end)
   end
 end

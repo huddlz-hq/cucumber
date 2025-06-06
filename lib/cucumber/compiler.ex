@@ -130,6 +130,7 @@ defmodule Cucumber.Compiler do
     quote do
       unquote_splicing(tags)
       @tag unquote(scenario_tag(scenario.name))
+      @tag scenario_line: unquote((scenario.line || 0) + 1)
 
       test unquote(scenario.name), context do
         # Initialize cucumber context
@@ -137,6 +138,7 @@ defmodule Cucumber.Compiler do
           Map.merge(context, %{
             scenario_name: unquote(scenario.name),
             feature_file: unquote(feature.file),
+            scenario_line: unquote((scenario.line || 0) + 1),
             async: unquote(async),
             step_history: []
           })

@@ -62,12 +62,22 @@ defmodule Cucumber.StepError do
       end
   """
   def missing_step_definition(step, feature_file, scenario_name, step_history \\ []) do
+    # Get scenario line from step history context if available
+    scenario_line = extract_scenario_line(step_history)
+
+    location =
+      if scenario_line && scenario_line > 0 do
+        "#{feature_file}:#{scenario_line}"
+      else
+        "#{feature_file}:#{step.line + 1}"
+      end
+
     message = """
     No matching step definition found for step:
 
       #{step.keyword} #{step.text}
 
-    in scenario "#{scenario_name}" (#{feature_file}:#{step.line + 1})
+    in scenario "#{scenario_name}" (#{location})
 
     Please define this step with:
 
@@ -126,12 +136,22 @@ defmodule Cucumber.StepError do
         [failed] Then the result should be 10
   """
   def failed_step(step, pattern, failure_reason, feature_file, scenario_name, step_history \\ []) do
+    # Get scenario line from step history context if available
+    scenario_line = extract_scenario_line(step_history)
+
+    location =
+      if scenario_line && scenario_line > 0 do
+        "#{feature_file}:#{scenario_line}"
+      else
+        "#{feature_file}:#{step.line + 1}"
+      end
+
     message = """
     Step failed:
 
       #{step.keyword} #{step.text}
 
-    in scenario "#{scenario_name}" (#{feature_file}:#{step.line + 1})
+    in scenario "#{scenario_name}" (#{location})
     matching pattern: "#{pattern}"
 
     #{format_failure_reason(failure_reason)}
@@ -195,7 +215,28 @@ defmodule Cucumber.StepError do
   defp format_step_history(step_history) do
     """
     Step execution history:
-    #{Enum.map_join(step_history, "\n", fn {status, step} -> "  [#{status}] #{step.keyword} #{step.text}" end)}
+    #{Enum.map_join(step_history, "\n", &format_step_history_item/1)}
     """
   end
+
+  defp format_step_history_item({status, step}) do
+    "  [#{status}] #{step.keyword} #{step.text}"
+  end
+
+  defp format_step_history_item({status, step, _context}) do
+    "  [#{status}] #{step.keyword} #{step.text}"
+  end
+
+  defp extract_scenario_line(step_history) when is_list(step_history) do
+    # Step history might have the scenario line in the context
+    case step_history do
+      [{_, _, context} | _] when is_map(context) ->
+        Map.get(context, :scenario_line)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extract_scenario_line(_), do: nil
 end

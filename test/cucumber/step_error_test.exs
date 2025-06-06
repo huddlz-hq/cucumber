@@ -12,12 +12,13 @@ defmodule Cucumber.StepErrorTest do
         line: 10
       }
 
-      error = StepError.missing_step_definition(
-        step,
-        "test/features/fruit.feature",
-        "Counting fruit",
-        []
-      )
+      error =
+        StepError.missing_step_definition(
+          step,
+          "test/features/fruit.feature",
+          "Counting fruit",
+          []
+        )
 
       assert error.step == step
       assert error.feature_file == "test/features/fruit.feature"
@@ -64,14 +65,15 @@ defmodule Cucumber.StepErrorTest do
         line: 15
       }
 
-      error = StepError.failed_step(
-        step,
-        "I should see the dashboard",
-        "Element not found",
-        "test/features/auth.feature",
-        "User login",
-        []
-      )
+      error =
+        StepError.failed_step(
+          step,
+          "I should see the dashboard",
+          "Element not found",
+          "test/features/auth.feature",
+          "User login",
+          []
+        )
 
       assert error.step == step
       assert error.pattern == "I should see the dashboard"
@@ -99,14 +101,15 @@ defmodule Cucumber.StepErrorTest do
         {:failed, current_step}
       ]
 
-      error = StepError.failed_step(
-        current_step,
-        "I should be logged in",
-        "Unexpected redirect",
-        "test.feature",
-        "Login flow",
-        step_history
-      )
+      error =
+        StepError.failed_step(
+          current_step,
+          "I should be logged in",
+          "Unexpected redirect",
+          "test.feature",
+          "Login flow",
+          step_history
+        )
 
       assert error.message =~ "Step execution history:"
       assert error.message =~ "[passed] Given I am on the login page"
@@ -119,14 +122,15 @@ defmodule Cucumber.StepErrorTest do
 
       exception = %RuntimeError{message: "Button not found"}
 
-      error = StepError.failed_step(
-        step,
-        "I click submit",
-        exception,
-        "test.feature",
-        "Form submission",
-        []
-      )
+      error =
+        StepError.failed_step(
+          step,
+          "I click submit",
+          exception,
+          "test.feature",
+          "Form submission",
+          []
+        )
 
       assert error.message =~ "Button not found"
     end
@@ -134,14 +138,15 @@ defmodule Cucumber.StepErrorTest do
     test "formats binary reasons" do
       step = %Step{keyword: "Then", text: "it works", line: 1}
 
-      error = StepError.failed_step(
-        step,
-        "it works",
-        "Simple failure message",
-        "test.feature",
-        "Test",
-        []
-      )
+      error =
+        StepError.failed_step(
+          step,
+          "it works",
+          "Simple failure message",
+          "test.feature",
+          "Test",
+          []
+        )
 
       assert error.message =~ "Simple failure message"
     end
@@ -159,14 +164,15 @@ defmodule Cucumber.StepErrorTest do
         <button>Cancel</button>
       """
 
-      error = StepError.failed_step(
-        step,
-        "I see elements",
-        multi_line_reason,
-        "test.feature",
-        "UI test",
-        []
-      )
+      error =
+        StepError.failed_step(
+          step,
+          "I see elements",
+          multi_line_reason,
+          "test.feature",
+          "UI test",
+          []
+        )
 
       assert error.message =~ "Could not find element"
       assert error.message =~ "Expected:"

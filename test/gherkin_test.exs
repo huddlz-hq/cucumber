@@ -36,6 +36,7 @@ defmodule Gherkin.ParserTest do
         scenarios: [
           %Scenario{
             name: "User joins an event",
+            line: 5,
             steps: [
               %Step{
                 keyword: "Given",
@@ -102,6 +103,7 @@ defmodule Gherkin.ParserTest do
         scenarios: [
           %Scenario{
             name: "First scenario",
+            line: 2,
             steps: [
               %Step{keyword: "Given", text: "something", line: 1, docstring: nil, datatable: nil},
               %Step{
@@ -122,6 +124,7 @@ defmodule Gherkin.ParserTest do
           },
           %Scenario{
             name: "Second scenario",
+            line: 7,
             steps: [
               %Step{
                 keyword: "Given",
