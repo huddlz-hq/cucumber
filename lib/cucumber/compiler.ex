@@ -55,12 +55,12 @@ defmodule Cucumber.Compiler do
           end
 
           # If there's a background, create setup block
-          unquote(generate_setup(feature.background, step_registry))
+          unquote(generate_setup(feature.background, step_registry, feature))
 
           # Generate test for each scenario
           unquote_splicing(
             for scenario <- feature.scenarios do
-              generate_scenario_test(scenario, step_registry, all_hooks, feature.tags, async)
+              generate_scenario_test(scenario, step_registry, all_hooks, feature, async)
             end
           )
         end
@@ -93,15 +93,16 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp generate_setup(nil, _step_registry), do: nil
+  defp generate_setup(nil, _step_registry, _feature), do: nil
 
-  defp generate_setup(background, step_registry) do
+  defp generate_setup(background, step_registry, feature) do
     quote do
       setup context do
         # Initialize cucumber context
         context =
           Map.merge(context, %{
-            step_history: []
+            step_history: [],
+            feature_file: unquote(feature.file)
           })
 
         # Execute background steps
@@ -116,7 +117,7 @@ defmodule Cucumber.Compiler do
     end
   end
 
-  defp generate_scenario_test(scenario, step_registry, all_hooks, feature_tags, async) do
+  defp generate_scenario_test(scenario, step_registry, all_hooks, feature, async) do
     # Generate tags for the scenario
     tags =
       scenario.tags
@@ -124,7 +125,7 @@ defmodule Cucumber.Compiler do
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
     # Collect all tags for this scenario
-    scenario_tags = feature_tags ++ scenario.tags
+    scenario_tags = feature.tags ++ scenario.tags
 
     quote do
       unquote_splicing(tags)
@@ -135,6 +136,7 @@ defmodule Cucumber.Compiler do
         context =
           Map.merge(context, %{
             scenario_name: unquote(scenario.name),
+            feature_file: unquote(feature.file),
             async: unquote(async),
             step_history: []
           })
