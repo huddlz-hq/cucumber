@@ -2,7 +2,7 @@ defmodule Cucumber.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/huddlz-hq/cucumber"
-  @version "0.4.0"
+  @version "0.4.1"
   @description "Cucumber for Elixir: BDD testing framework with Gherkin syntax"
 
   def project do
