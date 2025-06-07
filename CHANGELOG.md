@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- **Enhanced Error Formatting**: Significantly improved error messages for better debugging experience
+  - Added scenario line numbers to error messages with clickable file:line format (e.g., `test/features/example.feature:9`)
+  - Display contextual information including feature file path and scenario name
+  - Show step execution history with clear pass/fail indicators
+  - Improved PhoenixTest HTML element formatting with proper indentation
+  - Better assertion error extraction and formatting for readability
+  - Preserve stack traces with reraise for comprehensive debugging
+
+### Internal Improvements
+
+- Added comprehensive test coverage for error formatting scenarios
+- Added unit tests for StepError module covering all error cases
+- Added tests for Runtime error handling and formatting
+
 ## v0.4.0 (2025-05-28)
 
 ### New Features

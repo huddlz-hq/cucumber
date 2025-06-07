@@ -161,11 +161,19 @@ Step Files → Discovery → Registry
 
 ## Error Handling
 
-Cucumber provides detailed error messages for common issues:
+Cucumber provides enhanced error messages with rich context:
 
-1. **Undefined Steps**: Shows the exact step text and suggests implementation
-2. **Step Failures**: Shows the error, step location, and execution history
+1. **Undefined Steps**: Shows the exact step text with clickable file:line references and suggests implementation
+2. **Step Failures**: Displays comprehensive error information including:
+   - The failing step text with proper formatting
+   - Clickable file:line reference to the scenario location (e.g., `test/features/example.feature:25`)
+   - Visual step execution history with ✓ for passed and ✗ for failed steps
+   - Formatted assertion errors extracted from ExUnit
+   - Properly indented HTML output for PhoenixTest errors
+   - Full stack traces for debugging
 3. **Duplicate Steps**: Detected at load time with file/line information
+
+The StepError module handles all error formatting, ensuring consistent and helpful error messages throughout the framework.
 
 ## Extensibility
 

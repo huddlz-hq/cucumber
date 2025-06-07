@@ -225,10 +225,12 @@ end
 
 ## Debugging Tips
 
-1. **Use IO.inspect in steps**: Temporarily add `IO.inspect(context)` to see the current state
-2. **Run single scenarios**: Focus on one test at a time during debugging
-3. **Check step history**: Error messages show which steps ran before failure
-4. **Use meaningful assertions**: Include context in assertion messages
+1. **Leverage Enhanced Error Messages**: The framework now provides clickable file:line references in error messages that take you directly to the failing scenario
+2. **Review Step Execution History**: Error messages include a visual history (✓ for passed, ✗ for failed) showing which steps executed before the failure
+3. **Use IO.inspect in steps**: Temporarily add `IO.inspect(context)` to see the current state
+4. **Run single scenarios**: Focus on one test at a time during debugging
+5. **Use meaningful assertions**: Include context in assertion messages
+6. **Take advantage of formatted HTML output**: When debugging PhoenixTest failures, the error messages now display HTML elements with proper indentation
 
 ```elixir
 step "the order should be completed", context do
@@ -238,3 +240,22 @@ step "the order should be completed", context do
   context
 end
 ```
+
+When an error occurs, you'll see output like:
+```
+** (Cucumber.StepError) Step failed:
+
+  Then the order should be completed
+
+in scenario "Order Processing" at test/features/orders.feature:25
+matching pattern: "the order should be completed"
+
+Expected order 12345 to be completed, but was pending
+
+Step execution history:
+  ✓ Given I have items in my cart
+  ✓ When I submit the order
+  ✗ Then the order should be completed
+```
+
+The file reference `test/features/orders.feature:25` is clickable in most editors and terminals.

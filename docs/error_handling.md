@@ -2,18 +2,27 @@
 
 Cucumber for Elixir provides detailed error reporting to help debug test failures. This document explains how to handle and understand errors in your Cucumber tests.
 
+## Enhanced Error Messages
+
+The latest version of Cucumber for Elixir provides significantly enhanced error messages with:
+
+- **Clickable file:line references** - Error messages include clickable links to the exact location in your feature files
+- **Contextual information** - Feature file path, scenario name, and line numbers
+- **Step execution history** - See which steps passed before the failure
+- **Improved formatting** - Better readability for assertion errors and HTML elements
+
 ## Types of Errors
 
 ### Missing Step Definition
 
-When a step in your feature file has no matching definition, the framework will provide a helpful error message:
+When a step in your feature file has no matching definition, the framework will provide a helpful error message with a clickable file reference:
 
 ```
 ** (Cucumber.StepError) No matching step definition found for step:
 
   When I try to use a step with no definition
 
-in scenario "Missing Step Example" (test/features/example.feature:6)
+in scenario "Missing Step Example" at test/features/example.feature:6
 
 Please define this step with:
 
@@ -23,34 +32,89 @@ step "I try to use a step with no definition", context do
 end
 ```
 
-This error not only tells you which step is missing, but also provides a template for implementing the missing step definition.
+The file:line format (e.g., `test/features/example.feature:6`) is clickable in most editors and terminals, taking you directly to the problematic line.
 
 ### Failed Step
 
-When a step fails during execution (due to a failed assertion or an exception), you'll get an error like this:
+When a step fails during execution (due to a failed assertion or an exception), you'll get an enhanced error message:
 
 ```
 ** (Cucumber.StepError) Step failed:
 
   Then the validation should succeed
 
-in scenario "Form Submission" (test/features/forms.feature:12)
+in scenario "Form Submission" at test/features/forms.feature:12
 matching pattern: "the validation should succeed"
 
 Validation failed: invalid input data
 
 Step execution history:
-  [passed] Given a form to fill out
-  [passed] When I submit invalid data
-  [failed] Then the validation should succeed
+  ✓ Given a form to fill out
+  ✓ When I submit invalid data
+  ✗ Then the validation should succeed
+
+Stacktrace:
+  test/features/step_definitions/form_steps.exs:45: FormSteps."step: the validation should succeed"/1
 ```
 
-The error message includes:
-- Which step failed
-- The scenario and file where the failure occurred
+The enhanced error message includes:
+- Which step failed with the exact text from the feature file
+- **Clickable file:line reference** to the scenario location (e.g., `test/features/forms.feature:12`)
 - The step pattern that matched
-- The error message from the step implementation
-- The execution history, showing which steps passed and which failed
+- Clear error message from the step implementation
+- **Visual step execution history** with ✓ for passed and ✗ for failed steps
+- Full stacktrace for debugging
+
+### Improved Assertion Error Formatting
+
+When using ExUnit assertions that fail, the error messages are now extracted and formatted for better readability:
+
+```
+** (Cucumber.StepError) Step failed:
+
+  Then I should see "Welcome" in the header
+
+in scenario "Homepage Visit" at test/features/homepage.feature:8
+matching pattern: "I should see {string} in the header"
+
+Assertion failed:
+Expected to find "Welcome" in:
+<header>
+  <h1>Hello World</h1>
+</header>
+
+Step execution history:
+  ✓ Given I visit the homepage
+  ✗ Then I should see "Welcome" in the header
+```
+
+### PhoenixTest HTML Element Formatting
+
+When working with PhoenixTest and HTML elements, error messages now display HTML with proper indentation:
+
+```
+** (Cucumber.StepError) Step failed:
+
+  When I click the "Submit" button
+
+in scenario "Form Submission" at test/features/forms.feature:15
+matching pattern: "I click the {string} button"
+
+Element not found: button with text "Submit"
+
+Available buttons in the page:
+  <button class="btn-primary">
+    Save Draft
+  </button>
+  <button class="btn-secondary" disabled>
+    Cancel
+  </button>
+
+Step execution history:
+  ✓ Given I am on the registration page
+  ✓ When I fill in the form
+  ✗ When I click the "Submit" button
+```
 
 ### Syntax Errors in Feature Files
 
@@ -108,7 +172,16 @@ end
 
 ## Debugging Tips
 
-### 1. Use IO.inspect for Debug Output
+### 1. Leverage the Enhanced Error Messages
+
+The new error formatting provides several features to help you debug:
+
+- **Click the file:line references** to jump directly to the failing scenario
+- **Review the step execution history** to understand what happened before the failure
+- **Check the formatted HTML output** when debugging UI interactions
+- **Read the extracted assertion messages** for clear failure reasons
+
+### 2. Use IO.inspect for Debug Output
 
 Insert `IO.inspect` calls to see the values of variables during test execution:
 
@@ -120,7 +193,7 @@ step "I should see my order summary", context do
 end
 ```
 
-### 2. Add Step Execution Logs
+### 3. Add Step Execution Logs
 
 Log information about step execution:
 
@@ -133,7 +206,7 @@ step "I complete the checkout process", context do
 end
 ```
 
-### 3. Examine the Full Context
+### 4. Examine the Full Context
 
 Print the full context at any point to see the accumulated state:
 
@@ -144,7 +217,7 @@ step "I check my context", context do
 end
 ```
 
-### 4. Create Debug-Only Steps
+### 5. Create Debug-Only Steps
 
 Add steps specifically for debugging:
 

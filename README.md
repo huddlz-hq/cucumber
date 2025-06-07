@@ -14,7 +14,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 - **Async Test Execution**: Run feature tests concurrently with the `@async` tag
 - **Hooks**: Before/After scenario hooks with tag-based filtering
 - **Context Passing**: Share state between steps with a simple context map
-- **Rich Error Reporting**: Clear error messages with step execution history
+- **Enhanced Error Reporting**: Detailed error messages with clickable file:line references, step execution history, and formatted HTML output
 - **ExUnit Integration**: Seamlessly integrates with Elixir's built-in test framework
 
 ## Installation
