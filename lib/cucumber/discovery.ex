@@ -95,8 +95,6 @@ defmodule Cucumber.Discovery do
     |> Enum.find(fn module ->
       function_exported?(module, :__cucumber_steps__, 0)
     end)
-  rescue
-    _ -> nil
   end
 
   defp build_step_registry(modules) do
