@@ -159,4 +159,52 @@ defmodule Cucumber.Hooks do
     |> Enum.reverse()
     |> Enum.each(fn {module, func_name} -> apply(module, func_name, [context]) end)
   end
+
+  @doc false
+  def run_scenario_before_hooks(hooks, context, scenario_tags, feature_tags) do
+    # Only run hooks that are specific to scenario tags, not feature tags
+    hooks
+    |> filter_scenario_only_hooks(:before_scenario, scenario_tags, feature_tags)
+    |> Enum.reduce({:ok, context}, fn
+      _hook, {:error, _} = error ->
+        error
+
+      {module, func_name}, {:ok, context} ->
+        case apply(module, func_name, [context]) do
+          :ok -> {:ok, context}
+          {:ok, new_context} -> {:ok, new_context}
+          %{} = new_context -> {:ok, Map.merge(context, new_context)}
+          {:error, _} = error -> error
+        end
+    end)
+  end
+
+  @doc false
+  def run_scenario_after_hooks(hooks, context, scenario_tags, feature_tags) do
+    hooks
+    |> filter_scenario_only_hooks(:after_scenario, scenario_tags, feature_tags)
+    # After hooks run in reverse order
+    |> Enum.reverse()
+    |> Enum.each(fn {module, func_name} -> apply(module, func_name, [context]) end)
+  end
+
+  defp filter_scenario_only_hooks(hooks, type, scenario_tags, feature_tags) do
+    hooks
+    |> Enum.filter(fn
+      {^type, nil, _fun} ->
+        # Global hooks always run
+        true
+
+      {^type, tag, _fun} ->
+        # Only run if tag is in scenario tags but NOT in feature tags
+        normalized_tag = String.trim_leading(tag, "@")
+        tag_in_scenario = tag in scenario_tags or normalized_tag in scenario_tags
+        tag_in_feature = tag in feature_tags or normalized_tag in feature_tags
+        tag_in_scenario and not tag_in_feature
+
+      _ ->
+        false
+    end)
+    |> Enum.map(fn {_type, _tag, hook_ref} -> hook_ref end)
+  end
 end
