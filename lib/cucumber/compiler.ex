@@ -93,63 +93,26 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp needs_async_context?(feature) do
-    "async" in feature.tags
-  end
-
   defp generate_setup(nil, _step_registry, feature, all_hooks) do
-    # Even without background, we may need setup for feature-level hooks
-    if feature.tags != [] or needs_async_context?(feature) do
-      generate_setup_with_hooks([], feature, all_hooks)
+    # Even without background, we may need setup for feature-level hooks or async context
+    if feature.tags != [] or "async" in feature.tags do
+      build_setup_block([], feature, all_hooks)
     else
       nil
     end
   end
 
   defp generate_setup(background, step_registry, feature, all_hooks) do
-    async = "async" in feature.tags
-
-    quote do
-      setup context do
-        # Initialize cucumber context
-        context =
-          Map.merge(context, %{
-            step_history: [],
-            feature_file: unquote(feature.file),
-            feature_tags: unquote(feature.tags),
-            async: unquote(async)
-          })
-
-        # Run feature-level before hooks
-        {:ok, context} =
-          Cucumber.Hooks.run_before_hooks(
-            unquote(Macro.escape(all_hooks)),
-            context,
-            unquote(feature.tags)
-          )
-
-        # Execute background steps
-        unquote_splicing(
-          for step <- background.steps do
-            generate_step_execution(step, step_registry)
-          end
-        )
-
-        # Register cleanup for feature-level after hooks
-        on_exit(fn ->
-          Cucumber.Hooks.run_after_hooks(
-            unquote(Macro.escape(all_hooks)),
-            context,
-            unquote(feature.tags)
-          )
-        end)
-
-        {:ok, context}
+    background_steps =
+      for step <- background.steps do
+        generate_step_execution(step, step_registry)
       end
-    end
+
+    build_setup_block(background_steps, feature, all_hooks)
   end
 
-  defp generate_setup_with_hooks(_background_steps, feature, all_hooks) do
+  # Shared helper to build the setup block with hooks and optional background steps
+  defp build_setup_block(background_steps, feature, all_hooks) do
     async = "async" in feature.tags
 
     quote do
@@ -164,23 +127,32 @@ defmodule Cucumber.Compiler do
           })
 
         # Run feature-level before hooks
-        {:ok, context} =
+        result =
           Cucumber.Hooks.run_before_hooks(
             unquote(Macro.escape(all_hooks)),
             context,
             unquote(feature.tags)
           )
 
-        # Register cleanup for feature-level after hooks
-        on_exit(fn ->
-          Cucumber.Hooks.run_after_hooks(
-            unquote(Macro.escape(all_hooks)),
-            context,
-            unquote(feature.tags)
-          )
-        end)
+        case result do
+          {:ok, context} ->
+            # Execute background steps if any
+            unquote_splicing(background_steps)
 
-        {:ok, context}
+            # Register cleanup for feature-level after hooks
+            on_exit(fn ->
+              Cucumber.Hooks.run_after_hooks(
+                unquote(Macro.escape(all_hooks)),
+                context,
+                unquote(feature.tags)
+              )
+            end)
+
+            {:ok, context}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
   end
@@ -191,8 +163,6 @@ defmodule Cucumber.Compiler do
       scenario.tags
       |> Enum.map(&String.to_atom/1)
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
-
-    # Collect all tags for this scenario (removed - no longer needed since we pass tags separately)
 
     quote do
       unquote_splicing(tags)

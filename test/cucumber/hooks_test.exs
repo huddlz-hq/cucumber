@@ -22,12 +22,6 @@ defmodule Cucumber.HooksTest do
         ]
       }
       
-      # The hooks for this test
-      hooks = [
-        {:before_scenario, "@database", {:test_module, :database_hook}},
-        {:before_scenario, "@special", {:test_module, :special_hook}}
-      ]
-      
       # Test that run_scenario_before_hooks excludes feature-level tags
       # Mock context
       context = %{feature_tags: ["database"]}
@@ -38,7 +32,7 @@ defmodule Cucumber.HooksTest do
         def special_hook(context), do: {:ok, Map.put(context, :special_hook_ran, true)}
       end
       
-      # Update hooks to use the test module
+      # The hooks for this test
       hooks = [
         {:before_scenario, "@database", {TestHookModule, :database_hook}},
         {:before_scenario, "@special", {TestHookModule, :special_hook}}
