@@ -94,8 +94,8 @@ defmodule Cucumber.Compiler do
   end
 
   defp generate_setup(nil, _step_registry, feature, all_hooks) do
-    # Even without background, we may need setup for feature-level hooks or async context
-    if feature.tags != [] or "async" in feature.tags do
+    # Even without background, we may need setup for feature-level hooks
+    if feature.tags != [] do
       build_setup_block([], feature, all_hooks)
     else
       nil

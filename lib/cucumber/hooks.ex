@@ -121,7 +121,8 @@ defmodule Cucumber.Hooks do
     hooks
     |> Enum.filter(fn
       {^type, nil, _fun} ->
-        true
+        # Global hooks run per-scenario via run_scenario_before_hooks, not in setup
+        false
 
       {^type, tag, _fun} ->
         # Handle both with and without @ prefix

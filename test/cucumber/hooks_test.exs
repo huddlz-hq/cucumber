@@ -62,27 +62,37 @@ defmodule Cucumber.HooksTest do
       refute Map.has_key?(result_context_2, :db_hook_ran)
     end
     
-    test "feature setup includes async flag when @async tag is present" do
-      # This test verifies that the async flag is properly set in the context
-      # when a feature has the @async tag
-      feature = %{
-        name: "Async Feature",
-        tags: ["async", "database"],
-        file: "async_test.feature",
-        scenarios: [
-          %{
-            name: "Test Scenario",
-            tags: [],
-            steps: []
-          }
-        ]
-      }
-      
-      # The compiled test module should have async: true in ExUnit.Case
-      # and the setup block should pass async: true in the context
-      # This is what our fix ensures
-      assert "async" in feature.tags
+    test "global hooks run per-scenario, not in feature setup" do
+      # Define a test module with a global hook function
+      defmodule GlobalHookModule do
+        def global_hook(context) do
+          count = Map.get(context, :global_hook_count, 0)
+          {:ok, Map.put(context, :global_hook_count, count + 1)}
+        end
+      end
+
+      hooks = [
+        {:before_scenario, nil, {GlobalHookModule, :global_hook}},
+        {:before_scenario, "@database", {GlobalHookModule, :global_hook}}
+      ]
+
+      context = %{}
+
+      # filter_hooks (used in setup) should NOT include global hooks
+      setup_hooks = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, ["database"])
+
+      # Only the @database hook should be returned, not the global hook
+      assert length(setup_hooks) == 1
+
+      # run_before_hooks (setup) should not run global hooks
+      {:ok, setup_context} = Cucumber.Hooks.run_before_hooks(hooks, context, ["database"])
+      assert Map.get(setup_context, :global_hook_count, 0) == 1
+
+      # run_scenario_before_hooks should run global hooks
+      {:ok, scenario_context} =
+        Cucumber.Hooks.run_scenario_before_hooks(hooks, context, [], ["database"])
+
+      assert scenario_context.global_hook_count == 1
     end
   end
-  
 end
