@@ -1,6 +1,67 @@
 defmodule Cucumber.HooksTest do
   use ExUnit.Case, async: true
 
+  describe "duplicate hook detection" do
+    test "raises CompileError when defining duplicate tagged hooks" do
+      code = """
+      defmodule DuplicateTaggedHooks do
+        use Cucumber.Hooks
+
+        before_scenario "@database", context do
+          {:ok, context}
+        end
+
+        before_scenario "@database", context do
+          {:ok, context}
+        end
+      end
+      """
+
+      assert_raise CompileError, ~r/Duplicate hook: before_scenario_database/, fn ->
+        Code.compile_string(code)
+      end
+    end
+
+    test "raises CompileError when defining duplicate global hooks" do
+      code = """
+      defmodule DuplicateGlobalHooks do
+        use Cucumber.Hooks
+
+        before_scenario context do
+          {:ok, context}
+        end
+
+        before_scenario context do
+          {:ok, context}
+        end
+      end
+      """
+
+      assert_raise CompileError, ~r/Duplicate hook: before_scenario_global/, fn ->
+        Code.compile_string(code)
+      end
+    end
+
+    test "allows different tags without error" do
+      code = """
+      defmodule DifferentTagsHooks do
+        use Cucumber.Hooks
+
+        before_scenario "@database", context do
+          {:ok, context}
+        end
+
+        before_scenario "@admin", context do
+          {:ok, context}
+        end
+      end
+      """
+
+      # Should compile without error
+      assert [{DifferentTagsHooks, _}] = Code.compile_string(code)
+    end
+  end
+
   describe "hook filtering and execution" do
     test "filter_hooks returns global hooks and hooks matching tags" do
       defmodule FilterTestModule do
