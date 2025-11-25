@@ -94,12 +94,8 @@ defmodule Cucumber.Compiler do
   end
 
   defp generate_setup(nil, _step_registry, feature, all_hooks) do
-    # Even without background, we may need setup for feature-level hooks
-    if feature.tags != [] do
-      build_setup_block([], feature, all_hooks)
-    else
-      nil
-    end
+    # Always generate setup to run hooks for all scenarios
+    build_setup_block([], feature, all_hooks)
   end
 
   defp generate_setup(background, step_registry, feature, all_hooks) do
@@ -117,21 +113,39 @@ defmodule Cucumber.Compiler do
 
     quote do
       setup context do
+        # ExUnit puts @tag values directly in context as keys
+        # Filter out standard ExUnit keys to get scenario tags
+        exunit_keys = [
+          :async, :line, :module, :registered, :file, :test, :describe,
+          :describe_line, :test_type, :test_pid, :test_group
+        ]
+
+        scenario_tags =
+          context
+          |> Map.keys()
+          |> Enum.filter(&is_atom/1)
+          |> Enum.reject(&(&1 in exunit_keys))
+          |> Enum.map(&to_string/1)
+
+        # Combine feature tags + scenario tags for hook matching
+        all_tags = Enum.uniq(unquote(feature.tags) ++ scenario_tags)
+
         # Initialize cucumber context
         context =
           Map.merge(context, %{
             step_history: [],
             feature_file: unquote(feature.file),
             feature_tags: unquote(feature.tags),
+            scenario_tags: scenario_tags,
             async: unquote(async)
           })
 
-        # Run feature-level before hooks
+        # Run ALL matching hooks (global + feature + scenario tags)
         result =
           Cucumber.Hooks.run_before_hooks(
             unquote(Macro.escape(all_hooks)),
             context,
-            unquote(feature.tags)
+            all_tags
           )
 
         case result do
@@ -139,12 +153,12 @@ defmodule Cucumber.Compiler do
             # Execute background steps if any
             unquote_splicing(background_steps)
 
-            # Register cleanup for feature-level after hooks
+            # Register cleanup for after hooks
             on_exit(fn ->
               Cucumber.Hooks.run_after_hooks(
                 unquote(Macro.escape(all_hooks)),
                 context,
-                unquote(feature.tags)
+                all_tags
               )
             end)
 
@@ -157,7 +171,7 @@ defmodule Cucumber.Compiler do
     end
   end
 
-  defp generate_scenario_test(scenario, step_registry, all_hooks, feature, async) do
+  defp generate_scenario_test(scenario, step_registry, _all_hooks, feature, _async) do
     # Generate tags for the scenario
     tags =
       scenario.tags
@@ -170,38 +184,19 @@ defmodule Cucumber.Compiler do
       @tag scenario_line: unquote((scenario.line || 0) + 1)
 
       test unquote(scenario.name), context do
-        # Initialize cucumber context
+        # Add scenario-specific context (hooks already ran in setup)
         context =
           Map.merge(context, %{
             scenario_name: unquote(scenario.name),
             feature_file: unquote(feature.file),
-            scenario_line: unquote((scenario.line || 0) + 1),
-            async: unquote(async),
-            step_history: []
+            scenario_line: unquote((scenario.line || 0) + 1)
           })
-
-        # Run scenario-specific before hooks (excluding feature-level hooks)
-        {:ok, context} =
-          Cucumber.Hooks.run_scenario_before_hooks(
-            unquote(Macro.escape(all_hooks)),
-            context,
-            unquote(scenario.tags),
-            unquote(feature.tags)
-          )
 
         # Execute scenario steps
         unquote_splicing(
           for step <- scenario.steps do
             generate_step_execution(step, step_registry)
           end
-        )
-
-        # Run scenario-specific after hooks (excluding feature-level hooks)
-        Cucumber.Hooks.run_scenario_after_hooks(
-          unquote(Macro.escape(all_hooks)),
-          context,
-          unquote(scenario.tags),
-          unquote(feature.tags)
         )
       end
     end

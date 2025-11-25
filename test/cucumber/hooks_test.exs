@@ -1,98 +1,80 @@
 defmodule Cucumber.HooksTest do
   use ExUnit.Case, async: true
-  
-  describe "feature-level vs scenario-level hooks" do
-    test "feature-level hooks run in setup, scenario-level hooks run per test" do
-      # Create a test feature with database tag at feature level
-      feature = %{
-        name: "Test Feature",
-        tags: ["database"],
-        file: "test.feature",
-        scenarios: [
-          %{
-            name: "Scenario 1",
-            tags: [],
-            steps: []
-          },
-          %{
-            name: "Scenario 2", 
-            tags: ["special"],
-            steps: []
-          }
-        ]
-      }
-      
-      # Test that run_scenario_before_hooks excludes feature-level tags
-      # Mock context
-      context = %{feature_tags: ["database"]}
-      
-      # Define a test module with hook functions
-      defmodule TestHookModule do
-        def database_hook(context), do: {:ok, Map.put(context, :db_hook_ran, true)}
-        def special_hook(context), do: {:ok, Map.put(context, :special_hook_ran, true)}
+
+  describe "hook filtering and execution" do
+    test "filter_hooks returns global hooks and hooks matching tags" do
+      defmodule FilterTestModule do
+        def global_hook(context), do: {:ok, context}
+        def database_hook(context), do: {:ok, context}
+        def special_hook(context), do: {:ok, context}
       end
-      
-      # The hooks for this test
+
       hooks = [
-        {:before_scenario, "@database", {TestHookModule, :database_hook}},
-        {:before_scenario, "@special", {TestHookModule, :special_hook}}
+        {:before_scenario, nil, {FilterTestModule, :global_hook}},
+        {:before_scenario, "@database", {FilterTestModule, :database_hook}},
+        {:before_scenario, "@special", {FilterTestModule, :special_hook}}
       ]
-      
-      # Run scenario hooks for scenario 1 (no tags)
-      {:ok, result_context} = Cucumber.Hooks.run_scenario_before_hooks(
-        hooks,
-        context,
-        [],  # scenario 1 tags
-        ["database"]  # feature tags
-      )
-      
-      # Database hook should NOT have run because it's a feature-level tag
-      refute Map.has_key?(result_context, :db_hook_ran)
-      
-      # Run scenario hooks for scenario 2 (with @special tag)
-      {:ok, result_context_2} = Cucumber.Hooks.run_scenario_before_hooks(
-        hooks,
-        context,
-        ["special"],  # scenario 2 tags  
-        ["database"]  # feature tags
-      )
-      
-      # Only special hook should have run
-      assert result_context_2[:special_hook_ran] == true
-      refute Map.has_key?(result_context_2, :db_hook_ran)
+
+      # With ["database"] tags, should get global + @database hooks
+      filtered = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, ["database"])
+      assert length(filtered) == 2
+
+      # With ["database", "special"] tags, should get all 3 hooks
+      filtered_all = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, ["database", "special"])
+      assert length(filtered_all) == 3
+
+      # With [] tags, should only get global hook
+      filtered_empty = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, [])
+      assert length(filtered_empty) == 1
     end
-    
-    test "global hooks run per-scenario, not in feature setup" do
-      # Define a test module with a global hook function
-      defmodule GlobalHookModule do
-        def global_hook(context) do
-          count = Map.get(context, :global_hook_count, 0)
-          {:ok, Map.put(context, :global_hook_count, count + 1)}
+
+    test "run_before_hooks executes matching hooks and updates context" do
+      defmodule RunTestModule do
+        def hook_a(context), do: {:ok, Map.put(context, :hook_a, true)}
+        def hook_b(context), do: {:ok, Map.put(context, :hook_b, true)}
+      end
+
+      hooks = [
+        {:before_scenario, nil, {RunTestModule, :hook_a}},
+        {:before_scenario, "@database", {RunTestModule, :hook_b}}
+      ]
+
+      # With database tag, both hooks run
+      {:ok, result} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database"])
+      assert result.hook_a == true
+      assert result.hook_b == true
+
+      # Without database tag, only global hook runs
+      {:ok, result_no_tag} = Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
+      assert result_no_tag.hook_a == true
+      refute Map.has_key?(result_no_tag, :hook_b)
+    end
+
+    test "hooks run once per scenario with combined feature and scenario tags" do
+      defmodule CombinedTagsModule do
+        def count_hook(context) do
+          count = Map.get(context, :hook_count, 0)
+          {:ok, Map.put(context, :hook_count, count + 1)}
         end
       end
 
       hooks = [
-        {:before_scenario, nil, {GlobalHookModule, :global_hook}},
-        {:before_scenario, "@database", {GlobalHookModule, :global_hook}}
+        {:before_scenario, nil, {CombinedTagsModule, :count_hook}},
+        {:before_scenario, "@database", {CombinedTagsModule, :count_hook}},
+        {:before_scenario, "@special", {CombinedTagsModule, :count_hook}}
       ]
 
-      context = %{}
+      # Scenario 1: feature has @database, scenario has no extra tags
+      # Combined tags: ["database"]
+      # Should run: global + @database = 2 hooks
+      {:ok, scenario1} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database"])
+      assert scenario1.hook_count == 2
 
-      # filter_hooks (used in setup) should NOT include global hooks
-      setup_hooks = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, ["database"])
-
-      # Only the @database hook should be returned, not the global hook
-      assert length(setup_hooks) == 1
-
-      # run_before_hooks (setup) should not run global hooks
-      {:ok, setup_context} = Cucumber.Hooks.run_before_hooks(hooks, context, ["database"])
-      assert Map.get(setup_context, :global_hook_count, 0) == 1
-
-      # run_scenario_before_hooks should run global hooks
-      {:ok, scenario_context} =
-        Cucumber.Hooks.run_scenario_before_hooks(hooks, context, [], ["database"])
-
-      assert scenario_context.global_hook_count == 1
+      # Scenario 2: feature has @database, scenario has @special
+      # Combined tags: ["database", "special"]
+      # Should run: global + @database + @special = 3 hooks
+      {:ok, scenario2} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database", "special"])
+      assert scenario2.hook_count == 3
     end
   end
 end
