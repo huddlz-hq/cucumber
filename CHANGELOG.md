@@ -4,11 +4,11 @@
 
 ### Bug Fixes
 
-- **Feature-Level Tag Hook Execution**: Fixed timing issue where hooks triggered by feature-level tags (e.g., `@database`) were running after background steps
-  - Feature-level hooks now execute in the ExUnit setup block, ensuring they run before background steps
-  - Scenario-specific hooks continue to run within individual tests
+- **Hook Execution Order**: Fixed timing issue where hooks were running after background steps
+  - All hooks (global, feature-level, and scenario-specific) now execute in ExUnit's setup block
+  - Hooks run before background steps, ensuring database connections are ready
+  - Simplified architecture: hooks match against combined feature + scenario tags
   - Prevents database connection errors when background steps require database access
-  - Added comprehensive test coverage for hook execution order
 
 ## v0.4.1 (2025-06-06)
 

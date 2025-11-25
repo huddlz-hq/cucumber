@@ -170,51 +170,59 @@ Features marked with `@async` will run concurrently with other async tests, impr
 
 Note: Database tests can safely run async when using Ecto's SQL sandbox in shared mode.
 
-## Hooks and Feature-Level Tags
+## Hooks
 
-Cucumber supports hooks that run before and after scenarios. A key feature is that hooks triggered by feature-level tags (like `@database`) run in the ExUnit setup block, ensuring they execute before any background steps:
+Cucumber supports hooks that run before and after scenarios. All hooks execute in ExUnit's setup block, **before** background steps:
 
 ```elixir
 # test/features/support/database_hooks.exs
 defmodule DatabaseHooks do
   use Cucumber.Hooks
 
-  # This hook runs in setup for features tagged with @database
+  # Global hook - runs for all scenarios
+  before_scenario context do
+    {:ok, Map.put(context, :started_at, DateTime.utc_now())}
+  end
+
+  # Tagged hook - runs for @database features/scenarios
   before_scenario "@database", context do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Repo)
-    
+
     if context.async do
       Ecto.Adapters.SQL.Sandbox.mode(MyApp.Repo, {:shared, self()})
     end
-    
+
     {:ok, Map.put(context, :database_ready, true)}
   end
 
-  # Cleanup happens automatically with Ecto sandbox
   after_scenario "@database", _context do
     :ok
   end
 end
 ```
 
-With this hook, you can use feature-level tags to ensure database access in background steps:
+Hooks match against the combined tags from both the feature and the scenario:
 
 ```gherkin
 @database
 Feature: User Management
   Background:
-    Given a user exists with email "test@example.com"  # Has DB access
-    
+    Given a user exists  # @database hook already ran, DB is ready
+
   Scenario: User logs in
-    When the user logs in with valid credentials
-    Then they should see the dashboard
+    When the user logs in
+
+  @admin
+  Scenario: Admin manages users
+    # Both @database and @admin hooks run for this scenario
+    When the admin views all users
 ```
 
-This ensures proper initialization order:
-1. Feature-level hooks run in ExUnit setup
-2. Background steps execute with necessary resources
-3. Scenario-specific hooks run for individual scenarios
-4. All scenarios have access to initialized resources
+Execution order:
+1. All matching hooks run in ExUnit setup (global + feature tags + scenario tags)
+2. Background steps execute
+3. Scenario steps execute
+4. After hooks run via `on_exit`
 
 ## Documentation
 
