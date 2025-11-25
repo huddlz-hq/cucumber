@@ -170,6 +170,60 @@ Features marked with `@async` will run concurrently with other async tests, impr
 
 Note: Database tests can safely run async when using Ecto's SQL sandbox in shared mode.
 
+## Hooks
+
+Cucumber supports hooks that run before and after scenarios. All hooks execute in ExUnit's setup block, **before** background steps:
+
+```elixir
+# test/features/support/database_hooks.exs
+defmodule DatabaseHooks do
+  use Cucumber.Hooks
+
+  # Global hook - runs for all scenarios
+  before_scenario context do
+    {:ok, Map.put(context, :started_at, DateTime.utc_now())}
+  end
+
+  # Tagged hook - runs for @database features/scenarios
+  before_scenario "@database", context do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Repo)
+
+    if context.async do
+      Ecto.Adapters.SQL.Sandbox.mode(MyApp.Repo, {:shared, self()})
+    end
+
+    {:ok, Map.put(context, :database_ready, true)}
+  end
+
+  after_scenario "@database", _context do
+    :ok
+  end
+end
+```
+
+Hooks match against the combined tags from both the feature and the scenario:
+
+```gherkin
+@database
+Feature: User Management
+  Background:
+    Given a user exists  # @database hook already ran, DB is ready
+
+  Scenario: User logs in
+    When the user logs in
+
+  @admin
+  Scenario: Admin manages users
+    # Both @database and @admin hooks run for this scenario
+    When the admin views all users
+```
+
+Execution order:
+1. All matching hooks run in ExUnit setup (global + feature tags + scenario tags)
+2. Background steps execute
+3. Scenario steps execute
+4. After hooks run via `on_exit`
+
 ## Documentation
 
 For comprehensive documentation and guides, please visit [HexDocs](https://hexdocs.pm/cucumber).

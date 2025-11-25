@@ -55,16 +55,33 @@ defmodule Cucumber.Hooks do
   - map (merged into context)
   """
   defmacro before_scenario(context_var, do: block) do
-    func_name = :"before_scenario_#{:erlang.unique_integer([:positive])}"
+    func_name = :before_scenario_global
+    defined = Module.get_attribute(__CALLER__.module, :cucumber_hook_names) || []
+
+    if func_name in defined do
+      raise CompileError,
+        description: "Duplicate hook: before_scenario_global already defined"
+    end
+
+    Module.put_attribute(__CALLER__.module, :cucumber_hook_names, [func_name | defined])
 
     quote do
-      def unquote(func_name)(unquote(context_var)), do: unquote(block)
-      @cucumber_hooks {:before_scenario, nil, {__MODULE__, unquote(func_name)}}
+      def before_scenario_global(unquote(context_var)), do: unquote(block)
+      @cucumber_hooks {:before_scenario, nil, {__MODULE__, :before_scenario_global}}
     end
   end
 
   defmacro before_scenario(tag, context_var, do: block) when is_binary(tag) do
-    func_name = :"before_scenario_#{:erlang.unique_integer([:positive])}"
+    tag_name = tag |> String.trim_leading("@") |> String.downcase()
+    func_name = :"before_scenario_#{tag_name}"
+    defined = Module.get_attribute(__CALLER__.module, :cucumber_hook_names) || []
+
+    if func_name in defined do
+      raise CompileError,
+        description: "Duplicate hook: #{func_name} already defined for tag #{tag}"
+    end
+
+    Module.put_attribute(__CALLER__.module, :cucumber_hook_names, [func_name | defined])
 
     quote do
       def unquote(func_name)(unquote(context_var)), do: unquote(block)
@@ -79,16 +96,33 @@ defmodule Cucumber.Hooks do
   of definition. The hook receives the test context.
   """
   defmacro after_scenario(context_var, do: block) do
-    func_name = :"after_scenario_#{:erlang.unique_integer([:positive])}"
+    func_name = :after_scenario_global
+    defined = Module.get_attribute(__CALLER__.module, :cucumber_hook_names) || []
+
+    if func_name in defined do
+      raise CompileError,
+        description: "Duplicate hook: after_scenario_global already defined"
+    end
+
+    Module.put_attribute(__CALLER__.module, :cucumber_hook_names, [func_name | defined])
 
     quote do
-      def unquote(func_name)(unquote(context_var)), do: unquote(block)
-      @cucumber_hooks {:after_scenario, nil, {__MODULE__, unquote(func_name)}}
+      def after_scenario_global(unquote(context_var)), do: unquote(block)
+      @cucumber_hooks {:after_scenario, nil, {__MODULE__, :after_scenario_global}}
     end
   end
 
   defmacro after_scenario(tag, context_var, do: block) when is_binary(tag) do
-    func_name = :"after_scenario_#{:erlang.unique_integer([:positive])}"
+    tag_name = tag |> String.trim_leading("@") |> String.downcase()
+    func_name = :"after_scenario_#{tag_name}"
+    defined = Module.get_attribute(__CALLER__.module, :cucumber_hook_names) || []
+
+    if func_name in defined do
+      raise CompileError,
+        description: "Duplicate hook: #{func_name} already defined for tag #{tag}"
+    end
+
+    Module.put_attribute(__CALLER__.module, :cucumber_hook_names, [func_name | defined])
 
     quote do
       def unquote(func_name)(unquote(context_var)), do: unquote(block)
@@ -121,6 +155,7 @@ defmodule Cucumber.Hooks do
     hooks
     |> Enum.filter(fn
       {^type, nil, _fun} ->
+        # Global hooks always run
         true
 
       {^type, tag, _fun} ->

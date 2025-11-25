@@ -54,8 +54,8 @@ defmodule Cucumber.Compiler do
             unquote(Macro.escape(Map.new(step_registry)))
           end
 
-          # If there's a background, create setup block
-          unquote(generate_setup(feature.background, step_registry, feature))
+          # If there's a background or feature-level tags, create setup block
+          unquote(generate_setup(feature.background, step_registry, feature, all_hooks))
 
           # Generate test for each scenario
           unquote_splicing(
@@ -93,39 +93,90 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp generate_setup(nil, _step_registry, _feature), do: nil
+  defp generate_setup(nil, _step_registry, feature, all_hooks) do
+    # Always generate setup to run hooks for all scenarios
+    build_setup_block([], feature, all_hooks)
+  end
 
-  defp generate_setup(background, step_registry, feature) do
+  defp generate_setup(background, step_registry, feature, all_hooks) do
+    background_steps =
+      for step <- background.steps do
+        generate_step_execution(step, step_registry)
+      end
+
+    build_setup_block(background_steps, feature, all_hooks)
+  end
+
+  # Shared helper to build the setup block with hooks and optional background steps
+  defp build_setup_block(background_steps, feature, all_hooks) do
+    async = "async" in feature.tags
+
     quote do
       setup context do
+        # ExUnit puts @tag values directly in context as keys
+        # Filter out standard ExUnit keys to get scenario tags
+        exunit_keys = [
+          :async, :line, :module, :registered, :file, :test, :describe,
+          :describe_line, :test_type, :test_pid, :test_group
+        ]
+
+        scenario_tags =
+          context
+          |> Map.keys()
+          |> Enum.filter(&is_atom/1)
+          |> Enum.reject(&(&1 in exunit_keys))
+          |> Enum.map(&to_string/1)
+
+        # Combine feature tags + scenario tags for hook matching
+        all_tags = Enum.uniq(unquote(feature.tags) ++ scenario_tags)
+
         # Initialize cucumber context
         context =
           Map.merge(context, %{
             step_history: [],
-            feature_file: unquote(feature.file)
+            feature_file: unquote(feature.file),
+            feature_tags: unquote(feature.tags),
+            scenario_tags: scenario_tags,
+            async: unquote(async)
           })
 
-        # Execute background steps
-        unquote_splicing(
-          for step <- background.steps do
-            generate_step_execution(step, step_registry)
-          end
-        )
+        # Run ALL matching hooks (global + feature + scenario tags)
+        result =
+          Cucumber.Hooks.run_before_hooks(
+            unquote(Macro.escape(all_hooks)),
+            context,
+            all_tags
+          )
 
-        {:ok, context}
+        case result do
+          {:ok, context} ->
+            # Execute background steps if any
+            unquote_splicing(background_steps)
+
+            # Register cleanup for after hooks
+            on_exit(fn ->
+              Cucumber.Hooks.run_after_hooks(
+                unquote(Macro.escape(all_hooks)),
+                context,
+                all_tags
+              )
+            end)
+
+            {:ok, context}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
   end
 
-  defp generate_scenario_test(scenario, step_registry, all_hooks, feature, async) do
+  defp generate_scenario_test(scenario, step_registry, _all_hooks, feature, _async) do
     # Generate tags for the scenario
     tags =
       scenario.tags
       |> Enum.map(&String.to_atom/1)
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
-
-    # Collect all tags for this scenario
-    scenario_tags = feature.tags ++ scenario.tags
 
     quote do
       unquote_splicing(tags)
@@ -133,36 +184,19 @@ defmodule Cucumber.Compiler do
       @tag scenario_line: unquote((scenario.line || 0) + 1)
 
       test unquote(scenario.name), context do
-        # Initialize cucumber context
+        # Add scenario-specific context (hooks already ran in setup)
         context =
           Map.merge(context, %{
             scenario_name: unquote(scenario.name),
             feature_file: unquote(feature.file),
-            scenario_line: unquote((scenario.line || 0) + 1),
-            async: unquote(async),
-            step_history: []
+            scenario_line: unquote((scenario.line || 0) + 1)
           })
-
-        # Run before hooks
-        {:ok, context} =
-          Cucumber.Hooks.run_before_hooks(
-            unquote(Macro.escape(all_hooks)),
-            context,
-            unquote(scenario_tags)
-          )
 
         # Execute scenario steps
         unquote_splicing(
           for step <- scenario.steps do
             generate_step_execution(step, step_registry)
           end
-        )
-
-        # Run after hooks
-        Cucumber.Hooks.run_after_hooks(
-          unquote(Macro.escape(all_hooks)),
-          context,
-          unquote(scenario_tags)
         )
       end
     end

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.2 (2025-11-25)
+
+### Bug Fixes
+
+- **Hook Execution Order**: Fixed timing issue where hooks were running after background steps
+  - All hooks (global, feature-level, and scenario-specific) now execute in ExUnit's setup block
+  - Hooks run before background steps, ensuring database connections are ready
+  - Simplified architecture: hooks match against combined feature + scenario tags
+  - Prevents database connection errors when background steps require database access
+
+### Improvements
+
+- **Descriptive Hook Function Names**: Hook functions now use readable names like `before_scenario_database` instead of numeric IDs
+- **Duplicate Hook Detection**: Compile-time error when defining the same hook twice
+- **Updated Dependencies**: mix_test_watch 1.4.0, credo, ex_doc
+
 ## v0.4.1 (2025-06-06)
 
 ### New Features
