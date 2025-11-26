@@ -1,7 +1,7 @@
 defmodule Gherkin.ParserTest do
   use ExUnit.Case, async: true
 
-  alias Gherkin.{Background, Feature, Scenario, Step}
+  alias Gherkin.{Background, Feature, Scenario, ScenarioOutline, Step}
 
   describe "parse/1" do
     test "parses a minimal feature file with one scenario and background" do
@@ -153,6 +153,197 @@ defmodule Gherkin.ParserTest do
       }
 
       assert Gherkin.Parser.parse(gherkin) == expected
+    end
+  end
+
+  describe "parse/1 with Scenario Outlines" do
+    test "parses a simple scenario outline with one Examples block" do
+      gherkin = """
+      Feature: Calculator
+
+      Scenario Outline: Adding numbers
+        Given I have <a> and <b>
+        When I add them
+        Then the result is <sum>
+
+        Examples:
+          | a | b | sum |
+          | 1 | 2 | 3   |
+          | 5 | 3 | 8   |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.name == "Calculator"
+      assert length(result.scenarios) == 1
+
+      [outline] = result.scenarios
+      assert %ScenarioOutline{} = outline
+      assert outline.name == "Adding numbers"
+      assert length(outline.steps) == 3
+      assert length(outline.examples) == 1
+
+      [examples] = outline.examples
+      assert examples.name == ""
+      assert examples.table_header == ["a", "b", "sum"]
+      assert examples.table_body == [["1", "2", "3"], ["5", "3", "8"]]
+    end
+
+    test "parses scenario outline with named Examples block" do
+      gherkin = """
+      Feature: Calculator
+
+      Scenario Outline: Adding numbers
+        Given I have <a> and <b>
+        When I add them
+        Then the result is <sum>
+
+        Examples: positive numbers
+          | a | b | sum |
+          | 1 | 2 | 3   |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+      [outline] = result.scenarios
+      [examples] = outline.examples
+
+      assert examples.name == "positive numbers"
+    end
+
+    test "parses scenario outline with multiple Examples blocks" do
+      gherkin = """
+      Feature: Calculator
+
+      Scenario Outline: Adding numbers
+        Given I have <a> and <b>
+        When I add them
+        Then the result is <sum>
+
+        Examples: positive
+          | a | b | sum |
+          | 1 | 2 | 3   |
+
+        Examples: negative
+          | a  | b  | sum |
+          | -1 | -2 | -3  |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+      [outline] = result.scenarios
+
+      assert length(outline.examples) == 2
+      [ex1, ex2] = outline.examples
+
+      assert ex1.name == "positive"
+      assert ex1.table_body == [["1", "2", "3"]]
+
+      assert ex2.name == "negative"
+      assert ex2.table_body == [["-1", "-2", "-3"]]
+    end
+
+    test "parses scenario outline with tagged Examples blocks" do
+      gherkin = """
+      Feature: Calculator
+
+      @outline-tag
+      Scenario Outline: Adding numbers
+        Given I have <a> and <b>
+        Then the result is <sum>
+
+        @positive
+        Examples: positive
+          | a | b | sum |
+          | 1 | 2 | 3   |
+
+        @negative @slow
+        Examples: negative
+          | a  | b  | sum |
+          | -1 | -2 | -3  |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+      [outline] = result.scenarios
+
+      assert outline.tags == ["outline-tag"]
+      assert length(outline.examples) == 2
+
+      [ex1, ex2] = outline.examples
+      assert ex1.tags == ["positive"]
+      assert ex2.tags == ["negative", "slow"]
+    end
+
+    test "parses feature with both scenarios and scenario outlines" do
+      gherkin = """
+      Feature: Mixed scenarios
+
+      Scenario: Regular scenario
+        Given something
+        Then something else
+
+      Scenario Outline: Outline scenario
+        Given I have <value>
+        Then I see <result>
+
+        Examples:
+          | value | result |
+          | 1     | one    |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert length(result.scenarios) == 2
+      [scenario, outline] = result.scenarios
+
+      assert %Scenario{} = scenario
+      assert scenario.name == "Regular scenario"
+
+      assert %ScenarioOutline{} = outline
+      assert outline.name == "Outline scenario"
+    end
+
+    test "parses scenario outline with docstring containing placeholder" do
+      gherkin = """
+      Feature: Templates
+
+      Scenario Outline: Greeting
+        Given a template with content
+          \"\"\"
+          Hello <name>!
+          \"\"\"
+        Then the greeting is correct
+
+        Examples:
+          | name  |
+          | Alice |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+      [outline] = result.scenarios
+      [step | _] = outline.steps
+
+      assert step.docstring == "Hello <name>!"
+    end
+
+    test "parses scenario outline with datatable containing placeholder" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario Outline: User data
+        Given a user with attributes
+          | name   | <name>   |
+          | age    | <age>    |
+        Then the user is valid
+
+        Examples:
+          | name  | age |
+          | Alice | 30  |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+      [outline] = result.scenarios
+      [step | _] = outline.steps
+
+      assert step.datatable == [["name", "<name>"], ["age", "<age>"]]
     end
   end
 end

@@ -4,6 +4,7 @@ defmodule Cucumber.Compiler do
   """
 
   alias Cucumber.Discovery
+  alias Gherkin.{Examples, Scenario, ScenarioOutline, Step}
 
   @doc """
   Compiles all discovered features into ExUnit test modules.
@@ -57,9 +58,9 @@ defmodule Cucumber.Compiler do
           # If there's a background or feature-level tags, create setup block
           unquote(generate_setup(feature.background, step_registry, feature, all_hooks))
 
-          # Generate test for each scenario
+          # Expand scenario outlines and generate test for each scenario
           unquote_splicing(
-            for scenario <- feature.scenarios do
+            for scenario <- expand_all_scenarios(feature.scenarios) do
               generate_scenario_test(scenario, step_registry, all_hooks, feature, async)
             end
           )
@@ -231,5 +232,77 @@ defmodule Cucumber.Compiler do
           __MODULE__.__step_registry__()
         )
     end
+  end
+
+  # Scenario Outline expansion functions
+
+  @doc false
+  # Public for testing - expands scenario outlines into concrete scenarios
+  def expand_all_scenarios(scenarios) do
+    Enum.flat_map(scenarios, fn
+      %Scenario{} = scenario -> [scenario]
+      %ScenarioOutline{} = outline -> expand_outline(outline)
+    end)
+  end
+
+  defp expand_outline(%ScenarioOutline{examples: []} = outline) do
+    raise """
+    Scenario Outline '#{outline.name}' has no Examples section.
+
+    Every Scenario Outline must have at least one Examples block with data rows.
+    """
+  end
+
+  defp expand_outline(%ScenarioOutline{} = outline) do
+    outline.examples
+    |> Enum.flat_map(fn %Examples{} = examples ->
+      examples.table_body
+      |> Enum.with_index(1)
+      |> Enum.map(fn {row, row_num} ->
+        substitutions = Enum.zip(examples.table_header, row) |> Map.new()
+
+        %Scenario{
+          name: generate_test_name(outline.name, examples.name, row_num),
+          steps: substitute_steps(outline.steps, substitutions),
+          tags: Enum.uniq(outline.tags ++ examples.tags),
+          line: outline.line
+        }
+      end)
+    end)
+  end
+
+  defp generate_test_name(outline_name, "", row_num) do
+    "#{outline_name} (row #{row_num})"
+  end
+
+  defp generate_test_name(outline_name, examples_name, row_num) do
+    "#{outline_name} (#{examples_name}: row #{row_num})"
+  end
+
+  defp substitute_steps(steps, substitutions) do
+    Enum.map(steps, fn %Step{} = step ->
+      %{
+        step
+        | text: substitute_placeholders(step.text, substitutions),
+          docstring: substitute_placeholders(step.docstring, substitutions),
+          datatable: substitute_datatable(step.datatable, substitutions)
+      }
+    end)
+  end
+
+  defp substitute_placeholders(nil, _substitutions), do: nil
+
+  defp substitute_placeholders(text, substitutions) do
+    Enum.reduce(substitutions, text, fn {key, value}, acc ->
+      String.replace(acc, "<#{key}>", value)
+    end)
+  end
+
+  defp substitute_datatable(nil, _substitutions), do: nil
+
+  defp substitute_datatable(table, substitutions) do
+    Enum.map(table, fn row ->
+      Enum.map(row, &substitute_placeholders(&1, substitutions))
+    end)
   end
 end
