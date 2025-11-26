@@ -1,12 +1,13 @@
 #!/bin/bash
-# release.sh - Automate the Cucumber release process
+# release.sh - Publish and tag a release
+#
+# Prerequisites: version should already be bumped in mix.exs and CHANGELOG.md updated
 
-set -e  # Exit immediately if a command exits with a non-zero status
+set -e
 
-# Check if a version parameter was provided
 if [ -z "$1" ]; then
   echo "Usage: ./scripts/release.sh <version>"
-  echo "Example: ./scripts/release.sh 0.2.0"
+  echo "Example: ./scripts/release.sh 0.7.0"
   exit 1
 fi
 
@@ -26,42 +27,37 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-echo "Creating release $VERSION_TAG..."
+# Verify version matches
+current_version=$(grep '@version' mix.exs | sed 's/.*"\(.*\)".*/\1/')
+if [ "$current_version" != "$VERSION" ]; then
+  echo "Error: Version in mix.exs ($current_version) doesn't match $VERSION"
+  echo "Please update mix.exs and CHANGELOG.md first."
+  exit 1
+fi
 
-# Update version in mix.exs
-sed -i '' "s/@version \"[0-9.]*\"/@version \"$VERSION\"/g" mix.exs
+echo "Releasing $VERSION_TAG..."
 
-# Update CHANGELOG.md
-today=$(date +"%Y-%m-%d")
-changelog_entry="## v$VERSION ($today)\n\n* [Add changes here]\n\n"
-sed -i '' "s/# Changelog/# Changelog\n\n$changelog_entry/" CHANGELOG.md
-
-# Open the changelog for editing
-echo "Opening CHANGELOG.md for editing..."
-${EDITOR:-vi} CHANGELOG.md
-
-# Build and test
+# Run tests
 echo "Running tests..."
 mix test || { echo "Tests failed"; exit 1; }
 
+# Build docs
 echo "Building docs..."
 mix docs || { echo "Doc generation failed"; exit 1; }
-
-# Commit version bump
-git add mix.exs CHANGELOG.md
-git commit -m "Bump version to $VERSION"
 
 # Publish to Hex
 echo "Publishing to Hex.pm..."
 mix hex.publish
 
-# Create a git tag (only after successful publishing)
+# Tag after successful publish
+echo "Creating tag $VERSION_TAG..."
 git tag $VERSION_TAG
 
-# Push changes and tag to GitHub
-echo "Pushing changes and tag to GitHub..."
+# Push
+echo "Pushing to GitHub..."
 git push origin main
 git push origin $VERSION_TAG
 
+echo ""
 echo "Release $VERSION_TAG complete!"
-echo "Don't forget to create a GitHub release at: https://github.com/huddlz-hq/cucumber/releases/new?tag=$VERSION_TAG"
+echo "Create GitHub release: https://github.com/huddlz-hq/cucumber/releases/new?tag=$VERSION_TAG"
