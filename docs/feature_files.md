@@ -39,6 +39,83 @@ Scenario: Adding an item to an empty cart
   And my cart should contain 1 item
 ```
 
+### Scenario Outlines
+
+Scenario Outlines let you run the same scenario multiple times with different data. Use `<placeholders>` in step text and provide values in an `Examples:` table:
+
+```gherkin
+Scenario Outline: Adding items to cart
+  Given I have <count> items in my cart
+  When I add another <product>
+  Then I should have <total> items
+
+  Examples:
+    | count | product    | total |
+    | 0     | Laptop     | 1     |
+    | 2     | Headphones | 3     |
+```
+
+Each row in the Examples table generates a separate test case.
+
+#### Named Examples
+
+Give Examples blocks descriptive names:
+
+```gherkin
+Scenario Outline: User authentication
+  Given I enter "<username>" and "<password>"
+  Then I should see "<result>"
+
+  Examples: valid credentials
+    | username | password | result  |
+    | alice    | secret   | Welcome |
+
+  Examples: invalid credentials
+    | username | password | result       |
+    | alice    | wrong    | Access denied|
+```
+
+#### Tagged Examples
+
+Apply tags to specific Examples blocks:
+
+```gherkin
+Scenario Outline: Payment processing
+  Given I pay with <method>
+  Then the payment should <status>
+
+  @smoke
+  Examples: common methods
+    | method      | status  |
+    | credit_card | succeed |
+
+  @slow @integration
+  Examples: alternative methods
+    | method  | status  |
+    | paypal  | succeed |
+    | bitcoin | succeed |
+```
+
+Tags on Examples blocks combine with tags on the Scenario Outline.
+
+#### Placeholders in Step Arguments
+
+Placeholders also work in doc strings and data tables:
+
+```gherkin
+Scenario Outline: Email templates
+  Given I send an email with body:
+    """
+    Hello <name>,
+    Your order #<order_id> has shipped.
+    """
+  Then the email should be sent
+
+  Examples:
+    | name  | order_id |
+    | Alice | 12345    |
+```
+
 ### Steps
 
 Steps use keywords like `Given`, `When`, `Then`, `And`, and `But`:
