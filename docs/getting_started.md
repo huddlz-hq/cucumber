@@ -34,6 +34,17 @@ ExUnit.start()
 Cucumber.compile_features!()
 ```
 
+To suppress ExUnit warnings about step definition files not matching the `*_test.exs` pattern, add this to your `mix.exs`:
+
+```elixir
+def project do
+  [
+    # ... other config
+    test_ignore_filters: [~r/step_definitions/]
+  ]
+end
+```
+
 ### 2. Create a Feature File
 
 Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension.

@@ -9,10 +9,6 @@
   - Foundation for future i18n support
   - Improved maintainability with bottom-up combinator composition
 
-### Bug Fixes
-
-- **Test Warning**: Fixed ExUnit warning about step definition files not matching test pattern
-
 ## v0.6.0 (2025-11-26)
 
 ### New Features
