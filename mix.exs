@@ -17,7 +17,13 @@ defmodule Cucumber.MixProject do
       package: package(),
       docs: docs(),
       name: "Cucumber",
-      source_url: @source_url
+      source_url: @source_url,
+      # Only warn about files matching *_test.exs pattern
+      # This ignores step_definitions/*_steps.exs and support/*.exs files
+      test_ignore_filters: [
+        ~r/step_definitions/,
+        ~r/support/
+      ]
     ]
   end
 
