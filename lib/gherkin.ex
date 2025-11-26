@@ -12,7 +12,7 @@ defmodule Gherkin.Feature do
           name: String.t(),
           description: String.t(),
           background: Gherkin.Background.t() | nil,
-          scenarios: [Gherkin.Scenario.t()],
+          scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
           tags: [String.t()]
         }
 end
@@ -45,6 +45,44 @@ defmodule Gherkin.Scenario do
           name: String.t(),
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
+          line: non_neg_integer() | nil
+        }
+end
+
+defmodule Gherkin.ScenarioOutline do
+  @moduledoc """
+  Represents a Gherkin Scenario Outline section.
+
+  A Scenario Outline is a template that runs multiple times with different data
+  from Examples tables. Placeholders in step text use `<name>` syntax and are
+  substituted with values from each row of the Examples table.
+  """
+  defstruct name: "", steps: [], tags: [], examples: [], line: nil
+
+  @type t :: %__MODULE__{
+          name: String.t(),
+          steps: [Gherkin.Step.t()],
+          tags: [String.t()],
+          examples: [Gherkin.Examples.t()],
+          line: non_neg_integer() | nil
+        }
+end
+
+defmodule Gherkin.Examples do
+  @moduledoc """
+  Represents an Examples block within a Scenario Outline.
+
+  Each Examples block contains a table of data used to parameterize the outline.
+  The first row contains headers (placeholder names), and subsequent rows contain
+  values to substitute. Examples blocks can have optional names and tags.
+  """
+  defstruct name: "", tags: [], table_header: [], table_body: [], line: nil
+
+  @type t :: %__MODULE__{
+          name: String.t(),
+          tags: [String.t()],
+          table_header: [String.t()],
+          table_body: [[String.t()]],
           line: non_neg_integer() | nil
         }
 end
@@ -86,7 +124,7 @@ defmodule Gherkin.Parser do
   It implements a subset of the Gherkin language focused on core BDD concepts.
   """
 
-  alias Gherkin.{Background, Feature, Scenario, Step}
+  alias Gherkin.{Background, Examples, Feature, Scenario, ScenarioOutline, Step}
 
   @doc """
   Parses a Gherkin feature file from a string into structured data.
@@ -147,7 +185,9 @@ defmodule Gherkin.Parser do
   defp extract_background(lines) do
     {bg_lines, rest_with_scenarios} =
       Enum.split_while(lines, fn line ->
-        !String.starts_with?(line, "Scenario:") && !String.starts_with?(line, "@")
+        !String.starts_with?(line, "Scenario:") &&
+          !String.starts_with?(line, "Scenario Outline:") &&
+          !String.starts_with?(line, "@")
       end)
 
     background = parse_background(bg_lines)
@@ -249,16 +289,20 @@ defmodule Gherkin.Parser do
   end
 
   # Parse scenarios with line number tracking
+  # State tuple: {scenarios, current_scenario, current_tags, steps, current_step, in_docstring, line_num, outline_state}
+  # outline_state is nil for regular scenarios, or {examples_list, current_examples, examples_tags} for outlines
+  # current_examples is nil or {name, line, header, body}
   defp parse_scenarios_with_lines(lines, all_lines_indexed) do
-    initial_state = {[], nil, [], [], nil, false, nil}
+    initial_state = {[], nil, [], [], nil, false, nil, nil}
 
-    {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _} =
+    {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _,
+     outline_state} =
       Enum.reduce(lines, initial_state, fn line, state ->
         process_line_with_number(line, state, lines, all_lines_indexed)
       end)
 
-    # Add the last scenario if present
-    finalize_scenarios_with_line(scenarios, current_scenario, current_tags, steps)
+    # Add the last scenario/outline if present
+    finalize_scenarios_with_line(scenarios, current_scenario, current_tags, steps, outline_state)
   end
 
   # Extract tags from a line like "@tag1 @tag2 @tag3"
@@ -289,11 +333,24 @@ defmodule Gherkin.Parser do
     {tags, element_line, new_rest}
   end
 
-  defp finalize_scenarios_with_line(scenarios, current_scenario, current_tags, steps) do
+  defp finalize_scenarios_with_line(
+         scenarios,
+         current_scenario,
+         current_tags,
+         steps,
+         outline_state
+       ) do
     if current_scenario do
-      {scenario_line, line_num} = current_scenario
-      scenario = build_scenario_with_line(scenario_line, steps, current_tags, line_num)
-      scenarios ++ [scenario]
+      {scenario_line, line_num, is_outline} = current_scenario
+
+      scenario_or_outline =
+        if is_outline do
+          build_outline_with_line(scenario_line, steps, current_tags, line_num, outline_state)
+        else
+          build_scenario_with_line(scenario_line, steps, current_tags, line_num)
+        end
+
+      scenarios ++ [scenario_or_outline]
     else
       scenarios
     end
@@ -311,35 +368,96 @@ defmodule Gherkin.Parser do
     }
   end
 
+  defp build_outline_with_line(outline_line, steps, tags, line_num, outline_state) do
+    [_, outline_name] = String.split(outline_line, ":", parts: 2)
+    outline_name = String.trim(outline_name)
+
+    # Finalize any in-progress Examples block
+    {examples_list, current_examples, _examples_tags} = outline_state
+    all_examples = finalize_current_examples(examples_list, current_examples)
+
+    %ScenarioOutline{
+      name: outline_name,
+      steps: Enum.reverse(steps),
+      tags: tags,
+      examples: all_examples,
+      line: line_num
+    }
+  end
+
+  defp finalize_current_examples(examples_list, nil), do: examples_list
+
+  defp finalize_current_examples(examples_list, {name, line, tags, header, body}) do
+    examples = %Examples{
+      name: name,
+      tags: tags,
+      table_header: header,
+      table_body: Enum.reverse(body),
+      line: line
+    }
+
+    examples_list ++ [examples]
+  end
+
   defp process_line_with_number(line, state, lines, all_lines_indexed) do
-    {scenarios, current_scenario, current_tags, steps, current_step, in_docstring, _line_num} =
+    {scenarios, current_scenario, current_tags, steps, current_step, in_docstring, _line_num,
+     outline_state} =
       state
 
-    cond do
-      String.starts_with?(line, "@") ->
-        handle_tag_with_line(line, state)
+    # Check if we're currently collecting Examples table rows
+    in_examples_table = in_examples_table?(outline_state)
 
+    cond do
+      # Handle tags - could be for scenario, outline, or Examples
+      String.starts_with?(line, "@") ->
+        handle_tag_with_line(line, state, outline_state)
+
+      # Handle Scenario Outline keyword
+      String.starts_with?(line, "Scenario Outline:") ->
+        line_num = find_line_number(line, all_lines_indexed)
+        handle_scenario_outline_with_line(line, line_num, state)
+
+      # Handle regular Scenario keyword
       String.starts_with?(line, "Scenario:") ->
-        # Find the line number for this scenario
         line_num = find_line_number(line, all_lines_indexed)
         handle_scenario_with_line(line, line_num, state)
 
-      # For step-related lines, delegate to common step processing
+      # Handle Examples keyword (only valid inside a Scenario Outline)
+      String.starts_with?(line, "Examples:") ->
+        line_num = find_line_number(line, all_lines_indexed)
+        handle_examples_with_line(line, line_num, state, outline_state)
+
+      # Handle table rows - could be step datatable or Examples table
+      String.starts_with?(line, "|") ->
+        if in_examples_table do
+          handle_examples_table_row(line, state, outline_state)
+        else
+          # Process as step datatable
+          {new_steps, new_current_step, new_in_docstring} =
+            process_step_line(line, {steps, current_step, in_docstring}, lines)
+
+          {scenarios, current_scenario, current_tags, new_steps, new_current_step,
+           new_in_docstring, nil, outline_state}
+        end
+
+      # For step-related lines (docstrings and steps) - but not inside Examples table
       String.starts_with?(line, ~s(""")) or in_docstring or
-        String.starts_with?(line, "|") or
           Regex.match?(~r/^(Given|When|Then|And|But|\*) /, line) ->
         # Process the step-related line
         {new_steps, new_current_step, new_in_docstring} =
           process_step_line(line, {steps, current_step, in_docstring}, lines)
 
         {scenarios, current_scenario, current_tags, new_steps, new_current_step, new_in_docstring,
-         nil}
+         nil, outline_state}
 
       true ->
         # Ignore other lines
         state
     end
   end
+
+  defp in_examples_table?(nil), do: false
+  defp in_examples_table?({_examples_list, current_examples, _tags}), do: current_examples != nil
 
   defp find_line_number(line, all_lines_indexed) do
     trimmed_line = String.trim(line)
@@ -355,28 +473,143 @@ defmodule Gherkin.Parser do
   defp handle_tag_with_line(
          line,
          {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring,
-          _line_num}
+          _line_num, outline_state},
+         outline_state
        ) do
-    if current_scenario do
-      {scenario_line, line_num} = current_scenario
-      scenario = build_scenario_with_line(scenario_line, steps, current_tags, line_num)
-      {scenarios ++ [scenario], nil, extract_tags(line), [], nil, false, nil}
-    else
-      {scenarios, current_scenario, extract_tags(line), steps, nil, false, nil}
+    new_tags = extract_tags(line)
+
+    # If we're in an outline and have started Examples, tags go to Examples
+    case outline_state do
+      {examples_list, current_examples, _old_examples_tags} when current_examples != nil ->
+        # Finalize current Examples block, start accumulating tags for next one
+        new_examples_list = finalize_current_examples(examples_list, current_examples)
+        new_outline_state = {new_examples_list, nil, new_tags}
+        {scenarios, current_scenario, current_tags, steps, nil, false, nil, new_outline_state}
+
+      {examples_list, nil, _old_examples_tags} ->
+        # In outline but no current Examples - these tags are for Examples
+        new_outline_state = {examples_list, nil, new_tags}
+        {scenarios, current_scenario, current_tags, steps, nil, false, nil, new_outline_state}
+
+      nil ->
+        # Not in outline - handle as before
+        if current_scenario do
+          {scenario_line, line_num, is_outline} = current_scenario
+
+          if is_outline do
+            # Finalize the outline
+            outline =
+              build_outline_with_line(scenario_line, steps, current_tags, line_num, outline_state)
+
+            {scenarios ++ [outline], nil, new_tags, [], nil, false, nil, nil}
+          else
+            scenario = build_scenario_with_line(scenario_line, steps, current_tags, line_num)
+            {scenarios ++ [scenario], nil, new_tags, [], nil, false, nil, nil}
+          end
+        else
+          {scenarios, current_scenario, new_tags, steps, nil, false, nil, nil}
+        end
     end
   end
 
   defp handle_scenario_with_line(
          line,
          line_num,
-         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _}
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _,
+          outline_state}
        ) do
     if current_scenario do
-      {scenario_line, old_line_num} = current_scenario
-      scenario = build_scenario_with_line(scenario_line, steps, current_tags, old_line_num)
-      {scenarios ++ [scenario], {line, line_num}, [], [], nil, false, nil}
+      {scenario_line, old_line_num, is_outline} = current_scenario
+
+      scenario_or_outline =
+        if is_outline do
+          build_outline_with_line(scenario_line, steps, current_tags, old_line_num, outline_state)
+        else
+          build_scenario_with_line(scenario_line, steps, current_tags, old_line_num)
+        end
+
+      {scenarios ++ [scenario_or_outline], {line, line_num, false}, [], [], nil, false, nil, nil}
     else
-      {scenarios, {line, line_num}, current_tags, [], nil, false, nil}
+      {scenarios, {line, line_num, false}, current_tags, [], nil, false, nil, nil}
     end
+  end
+
+  defp handle_scenario_outline_with_line(
+         line,
+         line_num,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _,
+          outline_state}
+       ) do
+    if current_scenario do
+      {scenario_line, old_line_num, is_outline} = current_scenario
+
+      scenario_or_outline =
+        if is_outline do
+          build_outline_with_line(scenario_line, steps, current_tags, old_line_num, outline_state)
+        else
+          build_scenario_with_line(scenario_line, steps, current_tags, old_line_num)
+        end
+
+      # Start new outline with fresh outline_state
+      {scenarios ++ [scenario_or_outline], {line, line_num, true}, [], [], nil, false, nil,
+       {[], nil, []}}
+    else
+      # Start new outline
+      {scenarios, {line, line_num, true}, current_tags, [], nil, false, nil, {[], nil, []}}
+    end
+  end
+
+  defp handle_examples_with_line(
+         line,
+         line_num,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _,
+          _old_outline_state},
+         outline_state
+       ) do
+    # Extract Examples name from line like "Examples: positive numbers" or just "Examples:"
+    examples_name =
+      case String.split(line, ":", parts: 2) do
+        [_, name] -> String.trim(name)
+        _ -> ""
+      end
+
+    {examples_list, current_examples, examples_tags} = outline_state || {[], nil, []}
+
+    # Finalize any previous Examples block
+    new_examples_list = finalize_current_examples(examples_list, current_examples)
+
+    # Start new Examples block (header and body will be filled by table rows)
+    new_current_examples = {examples_name, line_num, examples_tags, [], []}
+    new_outline_state = {new_examples_list, new_current_examples, []}
+
+    {scenarios, current_scenario, current_tags, steps, nil, false, nil, new_outline_state}
+  end
+
+  defp handle_examples_table_row(
+         line,
+         {scenarios, current_scenario, current_tags, steps, _current_step, _in_docstring, _,
+          _old_outline_state},
+         outline_state
+       ) do
+    table_row =
+      line
+      |> String.split("|", trim: true)
+      |> Enum.map(&String.trim/1)
+
+    {examples_list, current_examples, examples_tags} = outline_state
+    {name, ex_line, ex_tags, header, body} = current_examples
+
+    # First row is header, subsequent rows are body
+    {new_header, new_body} =
+      if header == [] do
+        {table_row, body}
+      else
+        {header, [table_row | body]}
+      end
+
+    new_current_examples = {name, ex_line, ex_tags, new_header, new_body}
+    new_outline_state = {examples_list, new_current_examples, examples_tags}
+
+    {scenarios, current_scenario, current_tags, steps, nil, false, nil, new_outline_state}
   end
 end
