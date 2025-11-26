@@ -14,6 +14,7 @@ defmodule Cucumber.Expression do
   * `{int}` - Matches integers (42) and converts to integer
   * `{float}` - Matches floating point numbers (3.14) and converts to float
   * `{word}` - Matches a single word (no whitespace) and converts to string
+  * `{atom}` - Matches a word and converts to atom (pending -> :pending)
 
   ## Examples
 
@@ -55,7 +56,8 @@ defmodule Cucumber.Expression do
       "string" => {~s/"([^"]*)"/, & &1},
       "int" => {~s/(-?\\d+)/, &String.to_integer/1},
       "float" => {~s/(-?\\d+\\.\\d+)/, &String.to_float/1},
-      "word" => {~s/([^\\s]+)/, & &1}
+      "word" => {~s/([^\\s]+)/, & &1},
+      "atom" => {~s/([\\w@]+)/, &String.to_atom/1}
     }
 
     # Find parameter placeholders like {string}, {int}, etc.
