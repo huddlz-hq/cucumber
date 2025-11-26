@@ -12,6 +12,7 @@ defmodule Cucumber.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       description: @description,
       package: package(),
       docs: docs(),
@@ -23,7 +24,8 @@ defmodule Cucumber.MixProject do
   def cli do
     [
       preferred_envs: [
-        "test.watch": :test
+        "test.watch": :test,
+        precommit: :test
       ]
     ]
   end
@@ -68,6 +70,16 @@ defmodule Cucumber.MixProject do
       ],
       groups_for_extras: [
         Guides: Path.wildcard("docs/*.md")
+      ]
+    ]
+  end
+
+  defp aliases do
+    [
+      precommit: [
+        "compile --warnings-as-errors",
+        "format",
+        "test"
       ]
     ]
   end
