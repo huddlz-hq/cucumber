@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.7.0 (2025-11-26)
+
+### New Features
+
+- **NimbleParsec Gherkin Parser**: Replaced line-by-line regex parser with compiled NimbleParsec parser
+  - Better error messages with line and column information
+  - Foundation for future i18n support
+  - Improved maintainability with bottom-up combinator composition
+
+### Bug Fixes
+
+- **Test Warning**: Fixed ExUnit warning about step definition files not matching test pattern
+
 ## v0.6.0 (2025-11-26)
 
 ### New Features
