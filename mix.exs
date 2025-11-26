@@ -18,11 +18,10 @@ defmodule Cucumber.MixProject do
       docs: docs(),
       name: "Cucumber",
       source_url: @source_url,
-      # Only warn about files matching *_test.exs pattern
-      # This ignores step_definitions/*_steps.exs and support/*.exs files
+      # Ignore Cucumber feature files (not *_test.exs pattern)
       test_ignore_filters: [
-        ~r/step_definitions/,
-        ~r/support/
+        ~r/features\/step_definitions/,
+        ~r/features\/support/
       ]
     ]
   end
@@ -86,6 +85,7 @@ defmodule Cucumber.MixProject do
       precommit: [
         "compile --warnings-as-errors",
         "format",
+        "deps.unlock --unused",
         "test"
       ]
     ]

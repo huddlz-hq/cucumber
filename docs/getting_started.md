@@ -34,13 +34,16 @@ ExUnit.start()
 Cucumber.compile_features!()
 ```
 
-To suppress ExUnit warnings about step definition files not matching the `*_test.exs` pattern, add this to your `mix.exs`:
+To suppress ExUnit warnings about step definition and support files not matching the `*_test.exs` pattern, add this to your `mix.exs`:
 
 ```elixir
 def project do
   [
     # ... other config
-    test_ignore_filters: [~r/step_definitions/]
+    test_ignore_filters: [
+      ~r/features\/step_definitions/,
+      ~r/features\/support/
+    ]
   ]
 end
 ```
