@@ -27,7 +27,7 @@ defmodule Gherkin.ParserTest do
             %Step{
               keyword: "Given",
               text: "a logged in user",
-              line: 1,
+              line: 3,
               docstring: nil,
               datatable: nil
             }
@@ -41,35 +41,35 @@ defmodule Gherkin.ParserTest do
               %Step{
                 keyword: "Given",
                 text: "an event titled \"Tech Gathering\"",
-                line: 1,
+                line: 6,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "When",
                 text: "I visit \"/\"",
-                line: 2,
+                line: 7,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "Then",
                 text: "I should see the event",
-                line: 3,
+                line: 8,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "When",
                 text: "I click \"join\" on the first event",
-                line: 4,
+                line: 9,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "Then",
                 text: "I should see \"joined event\"",
-                line: 5,
+                line: 10,
                 docstring: nil,
                 datatable: nil
               }
@@ -105,18 +105,18 @@ defmodule Gherkin.ParserTest do
             name: "First scenario",
             line: 2,
             steps: [
-              %Step{keyword: "Given", text: "something", line: 1, docstring: nil, datatable: nil},
+              %Step{keyword: "Given", text: "something", line: 3, docstring: nil, datatable: nil},
               %Step{
                 keyword: "When",
                 text: "I do something",
-                line: 2,
+                line: 4,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "Then",
                 text: "I see something",
-                line: 3,
+                line: 5,
                 docstring: nil,
                 datatable: nil
               }
@@ -129,21 +129,21 @@ defmodule Gherkin.ParserTest do
               %Step{
                 keyword: "Given",
                 text: "another thing",
-                line: 5,
+                line: 8,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "When",
                 text: "I do another thing",
-                line: 6,
+                line: 9,
                 docstring: nil,
                 datatable: nil
               },
               %Step{
                 keyword: "Then",
                 text: "I see another thing",
-                line: 7,
+                line: 10,
                 docstring: nil,
                 datatable: nil
               }
@@ -344,6 +344,121 @@ defmodule Gherkin.ParserTest do
       [step | _] = outline.steps
 
       assert step.datatable == [["name", "<name>"], ["age", "<age>"]]
+    end
+  end
+
+  describe "parse/1 edge cases" do
+    test "parses feature with description lines" do
+      gherkin = """
+      @async
+      Feature: Async Feature Example
+        This feature demonstrates running scenarios asynchronously
+        Multiple description lines are allowed
+
+      Scenario: First scenario
+        Given a step
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.name == "Async Feature Example"
+      assert result.tags == ["async"]
+      assert length(result.scenarios) == 1
+      assert hd(result.scenarios).name == "First scenario"
+    end
+
+    test "parses multiple scenario outlines with tags between them" do
+      gherkin = """
+      Feature: Multiple outlines
+
+      Scenario Outline: First outline
+        Given I have <a>
+
+        Examples:
+          | a |
+          | 1 |
+
+      @tagged
+      Scenario Outline: Second outline
+        Given I have <b>
+
+        Examples:
+          | b |
+          | 2 |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert length(result.scenarios) == 2
+      [first, second] = result.scenarios
+
+      assert first.name == "First outline"
+      assert first.tags == []
+
+      assert second.name == "Second outline"
+      assert second.tags == ["tagged"]
+    end
+
+    test "parses scenario outline with multiple tagged Examples blocks" do
+      gherkin = """
+      Feature: Tagged examples
+
+      @outline-tag
+      Scenario Outline: Tagged example
+        Given I have value <value>
+
+        @smoke
+        Examples: smoke tests
+          | value |
+          | foo   |
+
+        @regression
+        Examples: regression tests
+          | value |
+          | bar   |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert length(result.scenarios) == 1
+      [outline] = result.scenarios
+
+      assert outline.name == "Tagged example"
+      assert outline.tags == ["outline-tag"]
+      assert length(outline.examples) == 2
+
+      [smoke, regression] = outline.examples
+      assert smoke.name == "smoke tests"
+      assert smoke.tags == ["smoke"]
+      assert regression.name == "regression tests"
+      assert regression.tags == ["regression"]
+    end
+
+    test "all test feature files parse with expected scenario counts" do
+      # This test ensures all feature files are fully parsed
+      # If parsing fails silently, this test will catch it
+      expected_counts = %{
+        "test/features/advanced_features.feature" => 2,
+        "test/features/async_example.feature" => 2,
+        "test/features/database_example.feature" => 2,
+        "test/features/error_reporting.feature" => 2,
+        "test/features/feature_level_tags.feature" => 2,
+        "test/features/hook_execution_order.feature" => 1,
+        "test/features/parameters.feature" => 1,
+        "test/features/return_values.feature" => 4,
+        "test/features/scenario_outline.feature" => 2,
+        "test/features/shared_steps_integration.feature" => 2,
+        "test/features/simple.feature" => 1,
+        "test/features/tagged.feature" => 4
+      }
+
+      for {file, expected_count} <- expected_counts do
+        content = File.read!(file)
+        result = Gherkin.Parser.parse(content)
+
+        assert length(result.scenarios) == expected_count,
+               "#{file}: expected #{expected_count} scenarios, got #{length(result.scenarios)}"
+      end
     end
   end
 end

@@ -27,20 +27,26 @@ Discovery.discover()
 
 ### Gherkin Parser
 
-The Gherkin parser is responsible for parsing `.feature` files into a structured format that can be executed. It handles the syntax of Gherkin, including:
+The Gherkin parser uses NimbleParsec to parse `.feature` files into Elixir structs. It handles the syntax of Gherkin, including:
 
-- Feature declarations
-- Scenario outlines
+- Feature declarations with descriptions and tags
+- Scenario outlines with Examples tables
 - Backgrounds
-- Steps (Given, When, Then)
-- Tables and doc strings
-- Tags
+- Steps (Given, When, Then, And, But, *)
+- Data tables and doc strings
+- Tags at feature, scenario, and examples levels
 
-The parser produces an Abstract Syntax Tree (AST) that represents the structure of the feature file.
+The parser is built using bottom-up combinator composition in six levels:
+1. Primitives (whitespace, newlines)
+2. Keywords (Given, When, Then, Feature:, etc.)
+3. Elements (tags, datatables, docstrings)
+4. Steps (keyword + text + attachments)
+5. Scenarios (Background, Scenario, ScenarioOutline, Examples)
+6. Feature (top-level parser)
 
 ```elixir
-# Simplified representation of the Gherkin parser flow
-Feature File (Text) → Lexer → Tokens → Parser → AST
+# Parser flow
+Feature File (Text) → NimbleParsec Parser → Elixir Structs
 ```
 
 ### Expression Engine
