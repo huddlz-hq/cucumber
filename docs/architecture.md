@@ -45,22 +45,25 @@ Feature File (Text) → Lexer → Tokens → Parser → AST
 
 ### Expression Engine
 
-The Expression engine is responsible for matching step text against step definitions. It supports:
+The Expression engine uses NimbleParsec to parse and match step text against step definitions. It supports:
 
-- Regular expressions
-- Cucumber expressions (a simplified syntax with parameter types)
+- Cucumber expressions with parameter types (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`)
+- Optional parameters (`{int?}`)
+- Alternation (`(click|tap)`)
+- Escape sequences (`\{`, `\}`)
 - Parameter conversion (string to typed values)
 
 ```elixir
 defmodule Cucumber.Expression do
-  # Converts a cucumber expression into a regex and parameter converters
+  # Compiles a cucumber expression into a matchable AST
   def compile(pattern) do
-    # Transforms {string}, {int}, etc. into regex patterns
-    # Returns {regex, converters}
+    # Parses pattern using NimbleParsec
+    # Returns list of AST nodes with embedded parsers
   end
 
   # Matches text against a compiled expression
-  def match(text, {regex, converters}) do
+  def match(text, compiled) do
+    # Uses recursive binary pattern matching
     # Returns {:match, args} or :no_match
   end
 end

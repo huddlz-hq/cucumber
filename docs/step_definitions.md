@@ -91,6 +91,41 @@ step "I transfer {float} from {string} to {string}", %{args: [amount, from_accou
 end
 ```
 
+### Optional Parameters
+
+Use `?` after a parameter type to make it optional. Returns `nil` if not present:
+
+```elixir
+step "I have {int?} items", %{args: [count]} = context do
+  # count is an integer or nil
+  actual_count = count || 0
+  Map.put(context, :item_count, actual_count)
+end
+```
+
+### Alternation
+
+Use `(option1|option2)` to match alternative text. Alternations are not captured:
+
+```elixir
+step "I (click|tap) the {string} button", %{args: [button_name]} = context do
+  # Matches "I click the..." or "I tap the..."
+  # Only button_name is captured, not the click/tap choice
+  Map.put(context, :clicked_button, button_name)
+end
+```
+
+### Escape Sequences
+
+Use `\{` and `\}` to match literal braces in step text:
+
+```elixir
+step "I see \\{placeholder\\} text", context do
+  # Matches "I see {placeholder} text"
+  context
+end
+```
+
 ## Working with Data Tables
 
 In your feature file:

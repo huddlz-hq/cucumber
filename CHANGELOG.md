@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.5.0 (2025-XX-XX)
+
+### New Features
+
+- **Expression Engine Rewrite**: Replaced regex-based expression parsing with NimbleParsec
+  - Pure parser combinators and binary pattern matching (no regex)
+  - Better foundation for future Gherkin parser improvements
+
+- **Optional Parameters**: Use `{int?}` for optional matching
+  - Returns the value if present, `nil` if absent
+  - Example: `"I have {int?} items"` matches both "I have 5 items" and "I have items"
+
+- **Alternation**: Use `(option1|option2)` for alternative text
+  - Matches any option but does not capture
+  - Example: `"I (click|tap) the button"` matches either verb
+
+- **Escape Sequences**: Use `\{` and `\}` for literal braces
+  - Example: `"I see \{placeholder\}"` matches "I see {placeholder}"
+
+- **Atom Parameter Type**: Use `{atom}` to match and convert to atoms
+  - Example: `"status is {atom}"` matches "status is pending" and returns `:pending`
+
+### Breaking Changes
+
+- **Compiled Expression Format**: `Expression.compile/1` now returns an AST list instead of `{Regex.t(), [function]}` tuple
+  - The `match/2` function signature and return values are unchanged
+  - Direct users of `compile/1` return value will need updates
+
 ## v0.4.2 (2025-11-25)
 
 ### Bug Fixes

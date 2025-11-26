@@ -116,8 +116,17 @@ defmodule Cucumber.Compiler do
         # ExUnit puts @tag values directly in context as keys
         # Filter out standard ExUnit keys to get scenario tags
         exunit_keys = [
-          :async, :line, :module, :registered, :file, :test, :describe,
-          :describe_line, :test_type, :test_pid, :test_group
+          :async,
+          :line,
+          :module,
+          :registered,
+          :file,
+          :test,
+          :describe,
+          :describe_line,
+          :test_type,
+          :test_pid,
+          :test_group
         ]
 
         scenario_tags =
