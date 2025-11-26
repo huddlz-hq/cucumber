@@ -70,6 +70,16 @@ step "I should see the {word} dashboard", %{args: [dashboard_type]} = context do
 end
 ```
 
+### Atom Parameters
+
+```elixir
+step "the order status is {atom}", %{args: [status]} = context do
+  # status is an atom like :pending, :shipped, :delivered
+  assert get_order_status(context) == status
+  context
+end
+```
+
 ### Multiple Parameters
 
 When a step has multiple parameters, you can pattern match on all of them:
