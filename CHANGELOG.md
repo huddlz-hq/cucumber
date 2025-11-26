@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.0 (2025-11-26)
+
+### New Features
+
+- **Scenario Outline Support**: Run the same scenario with different data sets
+  - Use `<placeholders>` in step text with values from `Examples:` tables
+  - Each Examples row generates a separate test case
+  - Named Examples blocks for better organization (e.g., `Examples: valid credentials`)
+  - Tagged Examples blocks for selective test execution
+  - Placeholders work in doc strings and data tables
+  - Full tag inheritance from Feature → Scenario Outline → Examples
+
+### Documentation
+
+- Added comprehensive Scenario Outline documentation to feature files guide
+- Examples for named and tagged Examples blocks
+- Placeholder usage in doc strings and data tables
+
 ## v0.5.0 (2025-11-26)
 
 ### New Features

@@ -13,6 +13,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 - **Data Tables**: Pass structured data to your steps
 - **DocStrings**: Include multi-line text blocks in your steps
 - **Background Steps**: Define common setup steps for all scenarios
+- **Scenario Outlines**: Run the same scenario with different data using Examples tables
 - **Tag Filtering**: Run subsets of scenarios using tags
 - **Async Test Execution**: Run feature tests concurrently with the `@async` tag
 - **Hooks**: Before/After scenario hooks with tag-based filtering
@@ -27,7 +28,7 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.5.0"}
+    {:cucumber, "~> 0.6.0"}
   ]
 end
 ```
