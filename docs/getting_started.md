@@ -18,7 +18,7 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.4.2"}
+    {:cucumber, "~> 0.5.0"}
   ]
 end
 ```

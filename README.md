@@ -1,5 +1,8 @@
 # Cucumber for Elixir
 
+[![Hex.pm](https://img.shields.io/hexpm/v/cucumber.svg)](https://hex.pm/packages/cucumber)
+[![Docs](https://img.shields.io/hexpm/v/cucumber.svg?color=blue&label=hexdocs)](https://hexdocs.pm/cucumber)
+
 A behavior-driven development (BDD) testing framework for Elixir that enables writing executable specifications in natural language. Cucumber for Elixir bridges the gap between technical and non-technical stakeholders by allowing tests to be written in plain language while being executed as code.
 
 ## Features
@@ -24,7 +27,7 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.4.2"}
+    {:cucumber, "~> 0.5.0"}
   ]
 end
 ```
