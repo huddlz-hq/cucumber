@@ -34,7 +34,6 @@ defmodule Cucumber.DiscoveryTest do
       end
     end
 
-
     test "successfully discovers valid step definitions" do
       temp_dir = Path.join(System.tmp_dir(), "discover_valid_test_#{:rand.uniform(10000)}")
       step_dir = Path.join(temp_dir, "step_definitions")
@@ -56,7 +55,7 @@ defmodule Cucumber.DiscoveryTest do
       try do
         # Discovery should succeed
         result = Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
-        
+
         assert %Discovery.DiscoveryResult{} = result
         assert length(result.step_modules) == 1
         assert Map.has_key?(result.step_registry, "I am a valid step")
