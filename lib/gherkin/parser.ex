@@ -476,17 +476,28 @@ defmodule Gherkin.NimbleParser do
     }
   end
 
-  defp extract_examples_name(args) do
-    case args do
-      [{:tags, _} | rest] -> extract_examples_name(rest)
-      [{:table, _} | rest] -> extract_examples_name(rest)
-      [{[name], {line, _offset}} | _] -> {String.trim(name), line}
-      [{name, {line, _offset}} | _] when is_binary(name) -> {String.trim(name), line}
-      [[name] | _] when is_binary(name) -> {String.trim(name), nil}
-      [name | _] when is_binary(name) -> {String.trim(name), nil}
-      _ -> {"", nil}
-    end
+  defp extract_examples_name(args), do: extract_name_from_args(args, [:tags, :table])
+  defp extract_scenario_name(args), do: extract_name_from_args(args, [:tags, :steps, :examples])
+
+  defp extract_name_from_args([{tag, _} | rest], skip_tags) when is_atom(tag) do
+    if tag in skip_tags,
+      do: extract_name_from_args(rest, skip_tags),
+      else: {"", nil}
   end
+
+  defp extract_name_from_args([{[name], {line, _}} | _], _) when is_binary(name),
+    do: {String.trim(name), line}
+
+  defp extract_name_from_args([{name, {line, _}} | _], _) when is_binary(name),
+    do: {String.trim(name), line}
+
+  defp extract_name_from_args([[name] | _], _) when is_binary(name),
+    do: {String.trim(name), nil}
+
+  defp extract_name_from_args([name | _], _) when is_binary(name),
+    do: {String.trim(name), nil}
+
+  defp extract_name_from_args(_, _), do: {"", nil}
 
   @doc false
   def build_scenario(args) do
@@ -500,17 +511,6 @@ defmodule Gherkin.NimbleParser do
       tags: tags,
       line: if(line_num, do: line_num - 1, else: nil)
     }
-  end
-
-  defp extract_scenario_name(args) do
-    case args do
-      [{:tags, _} | rest] -> extract_scenario_name(rest)
-      [{:steps, _} | rest] -> extract_scenario_name(rest)
-      [{:examples, _} | rest] -> extract_scenario_name(rest)
-      [{[name], {line, _offset}} | _] -> {String.trim(name), line}
-      [{name, {line, _offset}} | _] when is_binary(name) -> {String.trim(name), line}
-      _ -> {"", nil}
-    end
   end
 
   @doc false
