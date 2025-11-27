@@ -82,37 +82,19 @@ defmodule Cucumber.Runtime do
 
   defp add_datatable(context, nil), do: context
 
+  defp add_datatable(context, [headers | [_ | _] = rows] = datatable) do
+    table_maps =
+      Enum.map(rows, fn row ->
+        headers |> Enum.zip(row) |> Map.new()
+      end)
+
+    table_data = %{headers: headers, rows: rows, maps: table_maps, raw: datatable}
+    Map.put(context, :datatable, table_data)
+  end
+
   defp add_datatable(context, datatable) do
-    # Convert datatable to the expected structure
-    if length(datatable) > 1 do
-      [headers | rows] = datatable
-
-      table_maps =
-        Enum.map(rows, fn row ->
-          headers
-          |> Enum.zip(row)
-          |> Map.new()
-        end)
-
-      table_data = %{
-        headers: headers,
-        rows: rows,
-        maps: table_maps,
-        raw: datatable
-      }
-
-      Map.put(context, :datatable, table_data)
-    else
-      # Single row table
-      table_data = %{
-        headers: [],
-        rows: datatable,
-        maps: [],
-        raw: datatable
-      }
-
-      Map.put(context, :datatable, table_data)
-    end
+    table_data = %{headers: [], rows: datatable, maps: [], raw: datatable}
+    Map.put(context, :datatable, table_data)
   end
 
   defp add_docstring(context, nil), do: context
