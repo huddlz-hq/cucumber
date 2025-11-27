@@ -219,11 +219,10 @@ defmodule Cucumber.StepError do
     """
   end
 
-  defp format_step_history_item({status, step}) do
-    "  [#{status}] #{step.keyword} #{step.text}"
-  end
+  defp format_step_history_item({status, step, _context}),
+    do: format_step_history_item({status, step})
 
-  defp format_step_history_item({status, step, _context}) do
+  defp format_step_history_item({status, step}) do
     "  [#{status}] #{step.keyword} #{step.text}"
   end
 
