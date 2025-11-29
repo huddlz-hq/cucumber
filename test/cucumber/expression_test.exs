@@ -44,8 +44,17 @@ defmodule Cucumber.ExpressionTest do
                compiled
     end
 
+    test "compiles pattern with optional text" do
+      compiled = Expression.compile("I have cucumber(s)")
+
+      assert [
+               {:literal, "I have cucumber"},
+               {:optional, "s"}
+             ] = compiled
+    end
+
     test "compiles pattern with alternation" do
-      compiled = Expression.compile("I (click|tap) the button")
+      compiled = Expression.compile("I click/tap the button")
 
       assert [
                {:literal, "I "},
@@ -54,10 +63,28 @@ defmodule Cucumber.ExpressionTest do
              ] = compiled
     end
 
-    test "compiles pattern with escape sequences" do
+    test "compiles pattern with escape sequences for braces" do
       compiled = Expression.compile("I see \\{literal\\} braces")
 
       assert [{:literal, "I see {literal} braces"}] = compiled
+    end
+
+    test "compiles pattern with escape sequences for parentheses" do
+      compiled = Expression.compile("call\\(\\)")
+
+      assert [{:literal, "call()"}] = compiled
+    end
+
+    test "compiles pattern with escape sequences for slash" do
+      compiled = Expression.compile("path\\/to\\/file")
+
+      assert [{:literal, "path/to/file"}] = compiled
+    end
+
+    test "compiles pattern with escape sequence for backslash" do
+      compiled = Expression.compile("path\\\\file")
+
+      assert [{:literal, "path\\file"}] = compiled
     end
 
     test "raises on unknown parameter type" do
@@ -222,33 +249,68 @@ defmodule Cucumber.ExpressionTest do
     end
   end
 
+  describe "match/2 with optional text" do
+    test "matches with optional text present" do
+      compiled = Expression.compile("I have cucumber(s)")
+
+      assert {:match, []} = Expression.match("I have cucumbers", compiled)
+    end
+
+    test "matches with optional text absent" do
+      compiled = Expression.compile("I have cucumber(s)")
+
+      assert {:match, []} = Expression.match("I have cucumber", compiled)
+    end
+
+    test "optional text with parameter" do
+      compiled = Expression.compile("I have {int} cucumber(s)")
+
+      assert {:match, [1]} = Expression.match("I have 1 cucumber", compiled)
+      assert {:match, [5]} = Expression.match("I have 5 cucumbers", compiled)
+    end
+
+    test "optional text is not captured" do
+      compiled = Expression.compile("the following group(s) exist:")
+
+      assert {:match, []} = Expression.match("the following group exist:", compiled)
+      assert {:match, []} = Expression.match("the following groups exist:", compiled)
+    end
+
+    test "optional text with multiple characters" do
+      compiled = Expression.compile("I (do not )have items")
+
+      assert {:match, []} = Expression.match("I have items", compiled)
+      assert {:match, []} = Expression.match("I do not have items", compiled)
+    end
+  end
+
   describe "match/2 with alternation" do
     test "matches first option" do
-      compiled = Expression.compile("I (click|tap) the button")
+      compiled = Expression.compile("I click/tap the button")
 
       assert {:match, []} = Expression.match("I click the button", compiled)
     end
 
     test "matches second option" do
-      compiled = Expression.compile("I (click|tap) the button")
+      compiled = Expression.compile("I click/tap the button")
 
       assert {:match, []} = Expression.match("I tap the button", compiled)
     end
 
     test "matches with multiple options" do
-      compiled = Expression.compile("I (click|tap|press) it")
+      compiled = Expression.compile("I click/tap/press it")
 
       assert {:match, []} = Expression.match("I press it", compiled)
     end
 
     test "returns no_match for non-matching option" do
-      compiled = Expression.compile("I (click|tap) the button")
+      compiled = Expression.compile("I click/tap the button")
 
       assert :no_match = Expression.match("I push the button", compiled)
     end
 
     test "alternation is not captured" do
-      compiled = Expression.compile("I (have|own) {int} items")
+      compiled = Expression.compile("I have/own {int} items")
 
       assert {:match, [5]} = Expression.match("I have 5 items", compiled)
       assert {:match, [3]} = Expression.match("I own 3 items", compiled)
@@ -266,6 +328,24 @@ defmodule Cucumber.ExpressionTest do
       compiled = Expression.compile("\\{count\\}: {int}")
 
       assert {:match, [42]} = Expression.match("{count}: 42", compiled)
+    end
+
+    test "matches literal parentheses" do
+      compiled = Expression.compile("call\\(\\)")
+
+      assert {:match, []} = Expression.match("call()", compiled)
+    end
+
+    test "matches literal forward slash" do
+      compiled = Expression.compile("path\\/to\\/file")
+
+      assert {:match, []} = Expression.match("path/to/file", compiled)
+    end
+
+    test "matches literal backslash" do
+      compiled = Expression.compile("path\\\\file")
+
+      assert {:match, []} = Expression.match("path\\file", compiled)
     end
   end
 

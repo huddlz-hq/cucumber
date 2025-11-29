@@ -55,8 +55,9 @@ The Expression engine uses NimbleParsec to parse and match step text against ste
 
 - Cucumber expressions with parameter types (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`)
 - Optional parameters (`{int?}`)
-- Alternation (`(click|tap)`)
-- Escape sequences (`\{`, `\}`)
+- Optional text (`(s)` for pluralization)
+- Alternation (`click/tap`)
+- Escape sequences (`\{`, `\}`, `\(`, `\)`, `\/`, `\\`)
 - Parameter conversion (string to typed values)
 
 ```elixir

@@ -103,25 +103,61 @@ step "I have {int?} items", %{args: [count]} = context do
 end
 ```
 
-### Alternation
+### Optional Text
 
-Use `(option1|option2)` to match alternative text. Alternations are not captured:
+Use `(text)` to mark text as optional. Optional text is not captured:
 
 ```elixir
-step "I (click|tap) the {string} button", %{args: [button_name]} = context do
+step "the following group(s) exist:", context do
+  # Matches "the following group exist:" or "the following groups exist:"
+  context
+end
+
+step "I have {int} cucumber(s)", %{args: [count]} = context do
+  # Matches "I have 1 cucumber" or "I have 5 cucumbers"
+  Map.put(context, :cucumber_count, count)
+end
+```
+
+### Alternation
+
+Use `word1/word2` (no spaces around `/`) to match alternative words. Alternations are not captured:
+
+```elixir
+step "I click/tap the {string} button", %{args: [button_name]} = context do
   # Matches "I click the..." or "I tap the..."
   # Only button_name is captured, not the click/tap choice
   Map.put(context, :clicked_button, button_name)
+end
+
+step "I have/own {int} items", %{args: [count]} = context do
+  # Matches "I have 5 items" or "I own 5 items"
+  Map.put(context, :item_count, count)
 end
 ```
 
 ### Escape Sequences
 
-Use `\{` and `\}` to match literal braces in step text:
+Use backslash to escape special characters:
+
+- `\{` and `\}` for literal braces
+- `\(` and `\)` for literal parentheses
+- `\/` for literal forward slash
+- `\\` for literal backslash
 
 ```elixir
 step "I see \\{placeholder\\} text", context do
   # Matches "I see {placeholder} text"
+  context
+end
+
+step "call\\(\\)", context do
+  # Matches "call()"
+  context
+end
+
+step "path\\/to\\/file", context do
+  # Matches "path/to/file" (without treating / as alternation)
   context
 end
 ```

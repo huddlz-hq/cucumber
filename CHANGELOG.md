@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.0 (Unreleased)
+
+### Breaking Changes
+
+- **Official Cucumber Expression Syntax**: Updated to match the official Cucumber Expression syntax
+  - `(text)` now means **optional text** (was alternation with `|`)
+  - `word1/word2` is the new **alternation** syntax (replaces `(a|b)`)
+  - New escape sequences: `\(`, `\)`, `\/`, `\\`
+  - Example: `"I have {int} cucumber(s)"` matches both singular and plural
+  - Example: `"I click/tap the button"` matches either verb
+
+### Migration from v0.7.0
+
+If you were using the old alternation syntax, update your step definitions:
+
+```elixir
+# Old (v0.7.0)
+step "I (click|tap) the button", context do
+
+# New (v0.8.0)
+step "I click/tap the button", context do
+```
+
 ## v0.7.0 (2025-11-26)
 
 ### New Features

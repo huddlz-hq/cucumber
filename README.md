@@ -9,7 +9,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 
 - **Auto-discovery**: Automatically finds and runs feature files and step definitions
 - **Gherkin Support**: Write tests in familiar Given/When/Then format
-- **Parameter Typing**: Define step patterns with typed parameters (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`), optional parameters (`{int?}`), and alternation (`(a|b)`)
+- **Parameter Typing**: Define step patterns with typed parameters (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`), optional parameters (`{int?}`), optional text (`(s)`), and alternation (`a/b`)
 - **Data Tables**: Pass structured data to your steps
 - **DocStrings**: Include multi-line text blocks in your steps
 - **Background Steps**: Define common setup steps for all scenarios

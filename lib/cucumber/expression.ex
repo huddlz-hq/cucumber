@@ -6,6 +6,9 @@ defmodule Cucumber.Expression do
   allowing you to define step patterns with typed parameters. This module handles
   compiling these expressions and extracting/converting parameters using NimbleParsec.
 
+  This implementation follows the official Cucumber Expression syntax from
+  https://github.com/cucumber/cucumber-expressions
+
   ## Parameter Types
 
   The following parameter types are supported:
@@ -18,9 +21,10 @@ defmodule Cucumber.Expression do
 
   ## Advanced Features
 
-  * **Escape sequences**: Use `\\{` and `\\}` for literal braces in patterns
+  * **Optional text**: Use `(text)` for optional text that may or may not be present
+  * **Alternation**: Use `word1/word2` to match alternative words (not captured)
   * **Optional parameters**: Use `{int?}` for optional matching (returns nil if absent)
-  * **Alternation**: Use `(click|tap)` to match either word (not captured)
+  * **Escape sequences**: Use `\\(`, `\\)`, `\\/`, `\\{`, `\\}`, `\\\\` for literal characters
 
   ## Examples
 
@@ -30,11 +34,14 @@ defmodule Cucumber.Expression do
       # Matching a step with multiple parameters
       "I add {int} items to my {word} list" matches "I add 5 items to my shopping list"
 
-      # Optional parameter
-      "I have {int?} items" matches both "I have 5 items" and "I have items"
+      # Optional text (for pluralization)
+      "I have {int} cucumber(s)" matches "I have 1 cucumber" and "I have 5 cucumbers"
 
       # Alternation
-      "I (click|tap) the button" matches "I click the button" or "I tap the button"
+      "I click/tap the button" matches "I click the button" or "I tap the button"
+
+      # Optional parameter
+      "I have {int?} items" matches both "I have 5 items" and "I have items"
   """
 
   import NimbleParsec
@@ -43,11 +50,15 @@ defmodule Cucumber.Expression do
   # Expression Pattern Parser (parses patterns like "I have {int} items")
   # ===========================================================================
 
-  # Escape sequences: \{ and \}
-  escaped_brace =
+  # Escape sequences: \{, \}, \(, \), \/, \\
+  escaped_char =
     choice([
       string("\\{") |> replace("{"),
-      string("\\}") |> replace("}")
+      string("\\}") |> replace("}"),
+      string("\\(") |> replace("("),
+      string("\\)") |> replace(")"),
+      string("\\/") |> replace("/"),
+      string("\\\\") |> replace("\\")
     ])
     |> unwrap_and_tag(:escaped)
 
@@ -65,28 +76,55 @@ defmodule Cucumber.Expression do
     |> ignore(string("}"))
     |> tag(:parameter)
 
-  # Alternation: (option1|option2|option3)
-  alternation_text = utf8_string([{:not, ?|}, {:not, ?)}], min: 1)
+  # Optional: (text) - text is optional, not captured
+  optional_content = utf8_string([{:not, ?)}], min: 1)
+
+  optional =
+    ignore(string("("))
+    |> concat(optional_content)
+    |> ignore(string(")"))
+    |> tag(:optional)
+
+  # Alternation: word1/word2/word3 (no whitespace allowed between alternatives)
+  # Excludes \, {, (, ), /, whitespace to avoid conflicts with other patterns
+  alternation_word =
+    utf8_string(
+      [
+        {:not, ?/},
+        {:not, ?\\},
+        {:not, ?\s},
+        {:not, ?\t},
+        {:not, ?\n},
+        {:not, ?{},
+        {:not, ?(},
+        {:not, ?)}
+      ], min: 1)
 
   alternation =
-    ignore(string("("))
-    |> concat(alternation_text)
-    |> repeat(ignore(string("|")) |> concat(alternation_text))
-    |> ignore(string(")"))
+    alternation_word
+    |> ignore(string("/"))
+    |> concat(alternation_word)
+    |> repeat(ignore(string("/")) |> concat(alternation_word))
     |> tag(:alternation)
 
-  # Literal: any char that's not special
-  literal_char = utf8_char([{:not, ?{}, {:not, ?\\}, {:not, ?(}])
+  # Whitespace: treated as literal but parsed separately so alternation can match after spaces
+  whitespace = utf8_string([?\s, ?\t, ?\n], min: 1) |> unwrap_and_tag(:literal)
 
-  literal =
-    times(literal_char, min: 1)
+  # Non-whitespace literal: any non-space char that's not special
+  # This is separate from whitespace so alternation can match at word boundaries
+  non_ws_literal_char =
+    utf8_char([{:not, ?{}, {:not, ?\\}, {:not, ?(}, {:not, ?\s}, {:not, ?\t}, {:not, ?\n}])
+
+  non_ws_literal =
+    times(non_ws_literal_char, min: 1)
     |> reduce({List, :to_string, []})
     |> unwrap_and_tag(:literal)
 
   # Full expression
+  # Order matters: try alternation before non_ws_literal so word/word patterns are matched
   defparsecp(
     :parse_expression,
-    repeat(choice([escaped_brace, parameter, alternation, literal]))
+    repeat(choice([escaped_char, parameter, optional, alternation, whitespace, non_ws_literal]))
     |> eos()
   )
 
@@ -206,6 +244,9 @@ defmodule Cucumber.Expression do
       {:parameter, [type, true]} ->
         {:parameter, type, get_parser!(type), :optional}
 
+      {:optional, [text]} ->
+        {:optional, text}
+
       {:alternation, options} ->
         {:alternation, options}
     end)
@@ -272,6 +313,11 @@ defmodule Cucumber.Expression do
     do_match("", rest, [nil | acc])
   end
 
+  # Empty text with optional text - skip optional and continue
+  defp do_match("", [{:optional, _text} | rest], acc) do
+    do_match("", rest, acc)
+  end
+
   # Failure: leftover AST nodes (non-optional)
   defp do_match("", [_ | _], _acc), do: :no_match
 
@@ -311,6 +357,21 @@ defmodule Cucumber.Expression do
       _ ->
         # Optional failed, add nil and continue without consuming text
         do_match(text, rest, [nil | acc])
+    end
+  end
+
+  # Match optional: text may or may not be present (not captured)
+  defp do_match(text, [{:optional, opt_text} | rest], acc) do
+    opt_size = byte_size(opt_text)
+
+    case text do
+      <<^opt_text::binary-size(opt_size), remaining::binary>> ->
+        # Text present - consume it and continue
+        do_match(remaining, rest, acc)
+
+      _ ->
+        # Text absent - continue without consuming
+        do_match(text, rest, acc)
     end
   end
 
