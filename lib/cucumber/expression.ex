@@ -98,7 +98,9 @@ defmodule Cucumber.Expression do
         {:not, ?{},
         {:not, ?(},
         {:not, ?)}
-      ], min: 1)
+      ],
+      min: 1
+    )
 
   alternation =
     alternation_word
