@@ -46,6 +46,7 @@ defmodule Cucumber.MixProject do
   defp deps do
     [
       {:nimble_parsec, "~> 1.4"},
+      {:igniter, "~> 0.6", optional: true},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
