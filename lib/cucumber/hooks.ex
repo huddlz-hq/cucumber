@@ -118,7 +118,10 @@ defmodule Cucumber.Hooks do
     end
   end
 
+  @type hook :: {:before_scenario | :after_scenario, String.t() | nil, {module(), atom()}}
+
   @doc false
+  @spec collect_hooks([module()]) :: [hook()]
   def collect_hooks(modules) do
     modules
     |> Enum.flat_map(fn module ->
@@ -131,6 +134,9 @@ defmodule Cucumber.Hooks do
   end
 
   @doc false
+  @spec filter_hooks([hook()], :before_scenario | :after_scenario, [String.t()]) :: [
+          {module(), atom()}
+        ]
   def filter_hooks(hooks, type, tags) do
     hooks
     |> Enum.filter(fn
@@ -149,6 +155,7 @@ defmodule Cucumber.Hooks do
   end
 
   @doc false
+  @spec run_before_hooks([hook()], map(), [String.t()]) :: {:ok, map()} | {:error, term()}
   def run_before_hooks(hooks, context, tags) do
     hooks
     |> filter_hooks(:before_scenario, tags)
@@ -158,15 +165,30 @@ defmodule Cucumber.Hooks do
 
       {module, func_name}, {:ok, context} ->
         case apply(module, func_name, [context]) do
-          :ok -> {:ok, context}
-          {:ok, new_context} -> {:ok, new_context}
-          %{} = new_context -> {:ok, Map.merge(context, new_context)}
-          {:error, _} = error -> error
+          :ok ->
+            {:ok, context}
+
+          {:ok, new_context} ->
+            {:ok, new_context}
+
+          %{} = new_context ->
+            {:ok, Map.merge(context, new_context)}
+
+          keyword when is_list(keyword) ->
+            {:ok, Map.merge(context, Map.new(keyword))}
+
+          {:error, _} = error ->
+            error
+
+          other ->
+            raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
+                    "Expected :ok, {:ok, context}, a map, a keyword list, or {:error, reason}"
         end
     end)
   end
 
   @doc false
+  @spec run_after_hooks([hook()], map(), [String.t()]) :: :ok
   def run_after_hooks(hooks, context, tags) do
     hooks
     |> filter_hooks(:after_scenario, tags)

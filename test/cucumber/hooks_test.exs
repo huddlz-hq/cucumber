@@ -111,6 +111,34 @@ defmodule Cucumber.HooksTest do
       refute Map.has_key?(result_no_tag, :hook_b)
     end
 
+    test "run_before_hooks accepts keyword list return values" do
+      defmodule KeywordReturnModule do
+        def keyword_hook(_context), do: [db_ready: true, cache: :warm]
+      end
+
+      hooks = [
+        {:before_scenario, nil, {KeywordReturnModule, :keyword_hook}}
+      ]
+
+      {:ok, result} = Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
+      assert result.db_ready == true
+      assert result.cache == :warm
+    end
+
+    test "run_before_hooks raises on invalid return values" do
+      defmodule InvalidReturnModule do
+        def bad_hook(_context), do: :something_wrong
+      end
+
+      hooks = [
+        {:before_scenario, nil, {InvalidReturnModule, :bad_hook}}
+      ]
+
+      assert_raise RuntimeError, ~r/Invalid hook return value/, fn ->
+        Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
+      end
+    end
+
     test "hooks run once per scenario with combined feature and scenario tags" do
       defmodule CombinedTagsModule do
         def count_hook(context) do

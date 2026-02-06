@@ -1,6 +1,18 @@
 defmodule Cucumber.Compiler do
   @moduledoc """
   Compiles discovered features and steps into ExUnit test modules.
+
+  The compilation pipeline works as follows:
+
+  1. Discovery finds all feature files and step definitions via `Cucumber.Discovery`
+  2. For each feature file, a unique ExUnit test module is generated
+  3. Module names are derived from the feature file path
+     (e.g., `test/features/auth.feature` becomes `Test.Features.AuthTest`)
+  4. Background steps become ExUnit `setup` blocks
+  5. Each scenario becomes an ExUnit `test` block
+  6. Scenario Outlines are expanded into individual scenarios using Examples data
+  7. Tags from features and scenarios are mapped to ExUnit tags for filtering
+  8. Hooks are wired into setup/teardown via `Cucumber.Hooks`
   """
 
   alias Cucumber.Discovery
@@ -9,6 +21,7 @@ defmodule Cucumber.Compiler do
   @doc """
   Compiles all discovered features into ExUnit test modules.
   """
+  @spec compile_features!(keyword()) :: [module()]
   def compile_features!(opts \\ []) do
     # Discover features and steps
     %Discovery.DiscoveryResult{
@@ -238,6 +251,9 @@ defmodule Cucumber.Compiler do
 
   @doc false
   # Public for testing - expands scenario outlines into concrete scenarios
+  @spec expand_all_scenarios([Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()]) :: [
+          Gherkin.Scenario.t()
+        ]
   def expand_all_scenarios(scenarios) do
     Enum.flat_map(scenarios, fn
       %Scenario{} = scenario -> [scenario]

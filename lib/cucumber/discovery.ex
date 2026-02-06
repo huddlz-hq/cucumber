@@ -1,6 +1,19 @@
 defmodule Cucumber.Discovery do
   @moduledoc """
-  Discovers and loads feature files and step definitions.
+  Discovers and loads feature files, step definitions, and hook modules.
+
+  The discovery algorithm proceeds in this order:
+
+  1. **Support files** are loaded first (default: `test/features/support/**/*.exs`),
+     following the same convention as Ruby Cucumber. These typically define hooks.
+  2. **Step definitions** are loaded next (default: `test/features/step_definitions/**/*.exs`).
+     Each module using `Cucumber.StepDefinition` is registered.
+  3. A **step registry** is built from all loaded step modules, mapping patterns to
+     their implementing module and metadata. Duplicate patterns raise immediately.
+  4. **Feature files** are parsed (default: `test/features/**/*.feature`) using
+     `Gherkin.Parser` and annotated with their source file path.
+
+  All default paths can be overridden via application config or opts passed to `discover/1`.
   """
 
   @default_features_pattern "test/features/**/*.feature"
@@ -10,12 +23,20 @@ defmodule Cucumber.Discovery do
   defmodule DiscoveryResult do
     @moduledoc false
     defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
+
+    @type t :: %__MODULE__{
+            features: [Gherkin.Feature.t()],
+            step_modules: [module()],
+            step_registry: %{String.t() => {module(), map()}},
+            hook_modules: [module()]
+          }
   end
 
   @doc """
   Discovers all features and steps based on configuration.
   Returns a struct containing parsed features and a registry of steps.
   """
+  @spec discover(keyword()) :: DiscoveryResult.t()
   def discover(opts \\ []) do
     features_patterns = get_patterns(:features, opts)
     steps_patterns = get_patterns(:steps, opts)
@@ -66,16 +87,18 @@ defmodule Cucumber.Discovery do
 
   defp load_hook_module(path) do
     # Load the file and get the modules
-    modules = Code.require_file(path)
+    # Code.require_file returns nil if already loaded
+    case Code.require_file(path) do
+      nil ->
+        nil
 
-    # Find hook modules
-    modules
-    |> Enum.map(fn {module, _} -> module end)
-    |> Enum.find(fn module ->
-      function_exported?(module, :__cucumber_hooks__, 0)
-    end)
-  rescue
-    _ -> nil
+      modules ->
+        modules
+        |> Enum.map(fn {module, _} -> module end)
+        |> Enum.find(fn module ->
+          function_exported?(module, :__cucumber_hooks__, 0)
+        end)
+    end
   end
 
   defp load_step_definitions(patterns) do
@@ -137,8 +160,6 @@ defmodule Cucumber.Discovery do
     content = File.read!(path)
     feature = Gherkin.Parser.parse(content)
     Map.put(feature, :file, path)
-  rescue
-    _ -> nil
   end
 
   defp expand_patterns(patterns) do

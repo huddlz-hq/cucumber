@@ -98,7 +98,9 @@ defmodule Cucumber.Expression do
         {:not, ?{},
         {:not, ?(},
         {:not, ?)}
-      ], min: 1)
+      ],
+      min: 1
+    )
 
   alternation =
     alternation_word
@@ -196,6 +198,13 @@ defmodule Cucumber.Expression do
     "atom" => &__MODULE__.parse_atom_param/1
   }
 
+  @type compiled :: [
+          {:literal, String.t()}
+          | {:parameter, String.t(), function(), :required | :optional}
+          | {:optional, String.t()}
+          | {:alternation, [String.t()]}
+        ]
+
   @doc """
   Compiles a Cucumber Expression pattern into a matchable AST.
 
@@ -216,7 +225,22 @@ defmodule Cucumber.Expression do
       iex> is_list(compiled)
       true
   """
+  @spec compile(String.t()) :: compiled()
   def compile(pattern) do
+    cache_key = {__MODULE__, :compiled, pattern}
+
+    case :persistent_term.get(cache_key, :not_found) do
+      :not_found ->
+        compiled = do_compile(pattern)
+        :persistent_term.put(cache_key, compiled)
+        compiled
+
+      compiled ->
+        compiled
+    end
+  end
+
+  defp do_compile(pattern) do
     case parse_expression(pattern) do
       {:ok, ast, "", _, _, _} ->
         normalize_ast(ast)
@@ -298,6 +322,7 @@ defmodule Cucumber.Expression do
       iex> Cucumber.Expression.match("I have no items", compiled)
       :no_match
   """
+  @spec match(String.t(), compiled()) :: {:match, [term()]} | :no_match
   def match(text, compiled) do
     case do_match(text, compiled, []) do
       {:ok, args} -> {:match, args}
