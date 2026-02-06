@@ -19,6 +19,7 @@ defmodule Cucumber.StepDefinition do
 
       # Track step definitions
       Module.register_attribute(__MODULE__, :cucumber_steps, accumulate: true)
+      Module.register_attribute(__MODULE__, :cucumber_step_count, [])
 
       @before_compile Cucumber.StepDefinition
     end
@@ -28,8 +29,10 @@ defmodule Cucumber.StepDefinition do
   Defines a step implementation.
   """
   defmacro step(pattern, context_var \\ {:_, [], nil}, do: block) do
-    # Generate function name at compile time
-    fun_name = :"step_#{:erlang.phash2(pattern)}"
+    # Generate collision-free function name using sequential counter
+    count = Module.get_attribute(__CALLER__.module, :cucumber_step_count) || 0
+    Module.put_attribute(__CALLER__.module, :cucumber_step_count, count + 1)
+    fun_name = :"step_#{count}"
 
     quote do
       # Store metadata about this step

@@ -373,5 +373,39 @@ defmodule Cucumber.ExpressionTest do
 
       assert {:match, []} = Expression.match("price is $100.00", compiled)
     end
+
+    test "compile returns same result on repeated calls (idempotency)" do
+      compiled1 = Expression.compile("I have {int} items")
+      compiled2 = Expression.compile("I have {int} items")
+
+      assert compiled1 == compiled2
+    end
+  end
+
+  describe "match/2 with Unicode and special strings" do
+    test "matches string parameter containing Unicode" do
+      compiled = Expression.compile("I see {string}")
+
+      assert {:match, ["héllo wörld"]} = Expression.match("I see \"héllo wörld\"", compiled)
+    end
+
+    test "matches string parameter containing emoji" do
+      compiled = Expression.compile("I see {string}")
+
+      assert {:match, ["hello 🎉🥒"]} = Expression.match("I see \"hello 🎉🥒\"", compiled)
+    end
+
+    test "matches very long string parameter" do
+      long_text = String.duplicate("a", 500)
+      compiled = Expression.compile("I see {string}")
+
+      assert {:match, [^long_text]} = Expression.match("I see \"#{long_text}\"", compiled)
+    end
+
+    test "matches literal text with Unicode characters" do
+      compiled = Expression.compile("I see café")
+
+      assert {:match, []} = Expression.match("I see café", compiled)
+    end
   end
 end

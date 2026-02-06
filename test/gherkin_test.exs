@@ -434,6 +434,51 @@ defmodule Gherkin.ParserTest do
       assert regression.tags == ["regression"]
     end
 
+    test "parses feature with Windows-style \\r\\n line endings" do
+      gherkin =
+        "Feature: Windows Feature\r\n\r\nScenario: A scenario\r\n  Given a step\r\n  Then another step\r\n"
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.name == "Windows Feature"
+      assert length(result.scenarios) == 1
+      [scenario] = result.scenarios
+      assert scenario.name == "A scenario"
+      assert length(scenario.steps) == 2
+    end
+
+    test "parses feature with Unicode in feature and scenario names" do
+      gherkin = """
+      Feature: Ünïcödé Féàtûrè
+
+      Scenario: Scénàrïö with émojis and àccénts
+        Given a step
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.name == "Ünïcödé Féàtûrè"
+      [scenario] = result.scenarios
+      assert scenario.name == "Scénàrïö with émojis and àccénts"
+    end
+
+    test "parses feature with very long step text" do
+      long_text = String.duplicate("a", 500)
+
+      gherkin = """
+      Feature: Long steps
+
+      Scenario: Long step text
+        Given #{long_text}
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [scenario] = result.scenarios
+      [step] = scenario.steps
+      assert step.text == long_text
+    end
+
     test "all test feature files parse with expected scenario counts" do
       # This test ensures all feature files are fully parsed
       # If parsing fails silently, this test will catch it
@@ -444,7 +489,7 @@ defmodule Gherkin.ParserTest do
         "test/features/error_reporting.feature" => 2,
         "test/features/feature_level_tags.feature" => 2,
         "test/features/hook_execution_order.feature" => 1,
-        "test/features/parameters.feature" => 1,
+        "test/features/parameters.feature" => 4,
         "test/features/return_values.feature" => 4,
         "test/features/scenario_outline.feature" => 2,
         "test/features/shared_steps_integration.feature" => 2,

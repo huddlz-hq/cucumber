@@ -61,6 +61,7 @@ defmodule Cucumber.StepError do
         context
       end
   """
+  @spec missing_step_definition(Gherkin.Step.t(), String.t(), String.t(), list()) :: t()
   def missing_step_definition(step, feature_file, scenario_name, step_history \\ []) do
     # Get scenario line from step history context if available
     scenario_line = extract_scenario_line(step_history)
@@ -135,6 +136,7 @@ defmodule Cucumber.StepError do
         [passed] When I press add
         [failed] Then the result should be 10
   """
+  @spec failed_step(Gherkin.Step.t(), String.t(), term(), String.t(), String.t(), list()) :: t()
   def failed_step(step, pattern, failure_reason, feature_file, scenario_name, step_history \\ []) do
     # Get scenario line from step history context if available
     scenario_line = extract_scenario_line(step_history)

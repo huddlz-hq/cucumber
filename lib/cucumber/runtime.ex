@@ -1,6 +1,21 @@
 defmodule Cucumber.Runtime do
   @moduledoc """
   Runtime execution of cucumber steps.
+
+  This module handles the step execution lifecycle within a running test:
+
+  1. Each step's text is matched against the step registry to find a definition
+  2. Cucumber Expressions are used to extract typed parameters from step text
+  3. The step function is invoked with context containing extracted `args`,
+     optional `datatable`, and optional `docstring`
+  4. Step return values are processed to update the shared context:
+     - `:ok` keeps context unchanged
+     - A map is merged into context
+     - A keyword list is converted to a map and merged
+     - `{:ok, data}` unwraps and merges
+     - `{:error, reason}` fails the step
+  5. On failure, enhanced error messages are generated with step history,
+     file locations, and formatted assertion details
   """
 
   alias Cucumber.Expression
@@ -8,6 +23,7 @@ defmodule Cucumber.Runtime do
   @doc """
   Executes a step with the given context and step registry.
   """
+  @spec execute_step(map(), Gherkin.Step.t(), map()) :: map()
   def execute_step(context, step, step_registry) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
@@ -129,18 +145,25 @@ defmodule Cucumber.Runtime do
   defp format_exception_for_display(exception) do
     # Format the exception with enhanced readability
     case exception do
-      %{__struct__: module} = e
-      when module in [ExUnit.AssertionError, PhoenixTest.AssertionError] ->
-        # Special handling for assertion errors
+      %ExUnit.AssertionError{} = e ->
         format_assertion_error(e)
 
+      %{__struct__: module} = e ->
+        if assertion_error_module?(module),
+          do: format_assertion_error(e),
+          else: Exception.message(e)
+
       %{__exception__: true} = e ->
-        # Standard exception
         Exception.message(e)
 
       other ->
         inspect(other, pretty: true)
     end
+  end
+
+  defp assertion_error_module?(module) do
+    module_str = Atom.to_string(module)
+    String.ends_with?(module_str, "AssertionError") and Code.ensure_loaded?(module)
   end
 
   defp format_assertion_error(error) do

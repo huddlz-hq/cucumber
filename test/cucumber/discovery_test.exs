@@ -266,6 +266,60 @@ defmodule Cucumber.DiscoveryTest do
     end
   end
 
+  describe "discover/1 with hook errors" do
+    test "propagates syntax errors during hook discovery" do
+      temp_dir = Path.join(System.tmp_dir(), "hook_error_test_#{:rand.uniform(10000)}")
+      support_dir = Path.join(temp_dir, "support")
+      File.mkdir_p!(support_dir)
+
+      invalid_file = Path.join(support_dir, "bad_hooks.exs")
+
+      File.write!(invalid_file, """
+      defmodule BadHooks do
+        use Cucumber.Hooks
+
+        before_scenario context
+          {:ok, context}
+        end
+      end
+      """)
+
+      try do
+        assert_raise SyntaxError, fn ->
+          Discovery.discover(
+            support: [Path.join(support_dir, "*.exs")],
+            steps: [],
+            features: []
+          )
+        end
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
+  end
+
+  describe "discover/1 with feature parse errors" do
+    test "propagates parse errors from invalid feature files" do
+      temp_dir = Path.join(System.tmp_dir(), "feature_error_test_#{:rand.uniform(10000)}")
+      File.mkdir_p!(temp_dir)
+
+      invalid_file = Path.join(temp_dir, "invalid.feature")
+      File.write!(invalid_file, "This is not valid Gherkin at all")
+
+      try do
+        assert_raise Gherkin.ParseError, fn ->
+          Discovery.discover(
+            features: [Path.join(temp_dir, "*.feature")],
+            steps: [],
+            support: []
+          )
+        end
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
+  end
+
   describe "discover/1 with empty patterns" do
     test "returns empty results for non-matching patterns" do
       result =

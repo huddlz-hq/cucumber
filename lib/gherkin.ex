@@ -148,5 +148,6 @@ defmodule Gherkin.Parser do
       Gherkin.Parser.parse("Feature: Shopping Cart\\nScenario: Adding an item")
       # Returns %Gherkin.Feature{} struct with parsed data
   """
+  @spec parse(String.t()) :: Gherkin.Feature.t()
   defdelegate parse(gherkin_string), to: Gherkin.NimbleParser
 end

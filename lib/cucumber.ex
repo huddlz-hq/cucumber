@@ -91,6 +91,7 @@ defmodule Cucumber do
         steps: ["test/acceptance/steps/**/*.exs"]
       )
   """
+  @spec compile_features!(keyword()) :: [module()]
   def compile_features!(opts \\ []) do
     modules = Cucumber.Compiler.compile_features!(opts)
 
