@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.0 (2026-02-10)
+
+### New Features
+
+- **Igniter Installer**: Added `mix cucumber.install` task for automated project setup
+  - Adds `Cucumber.compile_features!()` to `test/test_helper.exs`
+  - Configures `test_ignore_filters` in `mix.exs`
+
+### Improvements
+
+- **Expression Caching**: Compiled expressions are now cached with `:persistent_term` for better performance
+- **Elixir 1.20 Compatibility**: Pin operators in bitstring size specifiers for forward compatibility
+- **CI Pipeline**: Added GitHub Actions workflow with Elixir 1.19/OTP 28 and Elixir 1.20-rc allow-failure job
+- **Precommit Alias**: `mix precommit` now includes `credo --strict`
+- **Error Handling**: Improved discovery error propagation — syntax errors in step files and hooks are no longer silenced
+- **Bumped Credo** to 1.7.16
+
 ## v0.8.0 (2025-11-29)
 
 ### Breaking Changes
