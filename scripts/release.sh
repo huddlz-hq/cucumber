@@ -28,7 +28,7 @@ if [ -n "$(git diff --name-only)" ] || [ -n "$(git diff --cached --name-only)" ]
 fi
 
 # Verify version matches
-current_version=$(grep '@version' mix.exs | sed 's/.*"\(.*\)".*/\1/')
+current_version=$(grep '@version "' mix.exs | sed 's/.*"\(.*\)".*/\1/')
 if [ "$current_version" != "$VERSION" ]; then
   echo "Error: Version in mix.exs ($current_version) doesn't match $VERSION"
   echo "Please update mix.exs and CHANGELOG.md first."
