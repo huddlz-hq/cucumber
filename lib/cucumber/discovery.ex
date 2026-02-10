@@ -21,7 +21,7 @@ defmodule Cucumber.Discovery do
   @default_support_pattern "test/features/support/**/*.exs"
 
   defmodule DiscoveryResult do
-    @moduledoc false
+    @moduledoc "Result struct returned by `Cucumber.Discovery.discover/1`."
     defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
 
     @type t :: %__MODULE__{
