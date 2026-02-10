@@ -354,7 +354,7 @@ defmodule Cucumber.Expression do
     lit_size = byte_size(lit)
 
     case text do
-      <<^lit::binary-size(lit_size), remaining::binary>> ->
+      <<^lit::binary-size(^lit_size), remaining::binary>> ->
         do_match(remaining, rest, acc)
 
       _ ->
@@ -390,7 +390,7 @@ defmodule Cucumber.Expression do
     opt_size = byte_size(opt_text)
 
     case text do
-      <<^opt_text::binary-size(opt_size), remaining::binary>> ->
+      <<^opt_text::binary-size(^opt_size), remaining::binary>> ->
         # Text present - consume it and continue
         do_match(remaining, rest, acc)
 
@@ -406,7 +406,7 @@ defmodule Cucumber.Expression do
       opt_size = byte_size(option)
 
       case text do
-        <<^option::binary-size(opt_size), remaining::binary>> ->
+        <<^option::binary-size(^opt_size), remaining::binary>> ->
           # Don't add to acc - alternation is not captured
           do_match(remaining, rest, acc)
 
