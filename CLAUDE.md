@@ -16,6 +16,8 @@ This is a Cucumber implementation for Elixir, providing a behavior-driven develo
 ## Memory
 
 - do not use co-author for claude in commit messages
+- Use `mix precommit` alias when you are done with all changes and fix any pending issues
+  * `mix precommit` to format, lint, and test before committing
 
 ## Commands
 

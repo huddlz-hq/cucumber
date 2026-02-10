@@ -162,8 +162,8 @@ defmodule Cucumber.ExpressionTest do
     test "handles escaped quotes in string" do
       compiled = Expression.compile("I see {string}")
 
-      assert {:match, ["say \"hello\""]} =
-               Expression.match("I see \"say \\\"hello\\\"\"", compiled)
+      assert {:match, [~s(say "hello")]} =
+               Expression.match(~s(I see "say \\"hello\\""), compiled)
     end
 
     test "returns no_match without quotes" do

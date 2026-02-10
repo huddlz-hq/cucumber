@@ -21,6 +21,11 @@ if Code.ensure_loaded?(Igniter) do
 
     use Igniter.Mix.Task
 
+    alias Igniter.Code.Common
+    alias Igniter.Code.Function
+    alias Igniter.Project.MixProject
+    alias Sourceror.Zipper
+
     @impl Igniter.Mix.Task
     def info(_argv, _composing_task) do
       %Igniter.Mix.Task.Info{
@@ -52,23 +57,23 @@ if Code.ensure_loaded?(Igniter) do
     end
 
     defp find_compile_features_call(zipper) do
-      Igniter.Code.Common.move_to(zipper, fn z ->
-        Igniter.Code.Function.function_call?(z, {Cucumber, :compile_features!}, 0)
+      Common.move_to(zipper, fn z ->
+        Function.function_call?(z, {Cucumber, :compile_features!}, 0)
       end)
     end
 
     defp add_compile_features_call(zipper) do
-      case Igniter.Code.Common.move_to(zipper, fn z ->
-             Igniter.Code.Function.function_call?(z, {ExUnit, :start}, [0, 1])
+      case Common.move_to(zipper, fn z ->
+             Function.function_call?(z, {ExUnit, :start}, [0, 1])
            end) do
         {:ok, zipper} ->
           code = quote do: Cucumber.compile_features!()
 
           {:ok,
            zipper
-           |> Sourceror.Zipper.insert_right(code)
-           |> Sourceror.Zipper.root()
-           |> Sourceror.Zipper.zip()}
+           |> Zipper.insert_right(code)
+           |> Zipper.root()
+           |> Zipper.zip()}
 
         :error ->
           code =
@@ -79,9 +84,9 @@ if Code.ensure_loaded?(Igniter) do
 
           {:ok,
            zipper
-           |> Sourceror.Zipper.root()
-           |> Sourceror.Zipper.zip()
-           |> Sourceror.Zipper.append_child(code)}
+           |> Zipper.root()
+           |> Zipper.zip()
+           |> Zipper.append_child(code)}
       end
     end
 
@@ -95,12 +100,17 @@ if Code.ensure_loaded?(Igniter) do
            ]
          end}
 
-      Igniter.Project.MixProject.update(igniter, :project, [:test_ignore_filters], fn zipper ->
-        case zipper do
-          nil -> {:ok, test_ignore_filters}
-          _existing -> {:ok, zipper}
+      MixProject.update(
+        igniter,
+        :project,
+        [:test_ignore_filters],
+        fn zipper ->
+          case zipper do
+            nil -> {:ok, test_ignore_filters}
+            _existing -> {:ok, zipper}
+          end
         end
-      end)
+      )
     end
   end
 end

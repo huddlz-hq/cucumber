@@ -35,8 +35,9 @@ jobs:
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
       - run: mix deps.get
+      - run: mix compile --warnings-as-errors
       - run: mix format --check-formatted
-      - run: mix credo
+      - run: mix credo --strict
       - run: mix test
 
   test-elixir-rc:
@@ -61,6 +62,7 @@ jobs:
             ${{ runner.os }}-mix-1.20-rc-28-
 
       - run: mix deps.get
+      - run: mix compile --warnings-as-errors
       - run: mix format --check-formatted
-      - run: mix credo
+      - run: mix credo --strict
       - run: mix test

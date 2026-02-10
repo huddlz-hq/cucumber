@@ -5,7 +5,7 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 with syntax errors" do
     test "propagates syntax errors during step discovery instead of silencing them" do
-      temp_dir = Path.join(System.tmp_dir(), "discover_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "discover_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "step_definitions")
       File.mkdir_p!(step_dir)
 
@@ -35,7 +35,7 @@ defmodule Cucumber.DiscoveryTest do
     end
 
     test "successfully discovers valid step definitions" do
-      temp_dir = Path.join(System.tmp_dir(), "discover_valid_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "discover_valid_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "step_definitions")
       File.mkdir_p!(step_dir)
 
@@ -67,7 +67,7 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 feature discovery" do
     test "discovers feature files from patterns" do
-      temp_dir = Path.join(System.tmp_dir(), "feature_discover_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "feature_discover_#{:rand.uniform(10_000)}")
       File.mkdir_p!(temp_dir)
 
       feature_file = Path.join(temp_dir, "example.feature")
@@ -91,7 +91,7 @@ defmodule Cucumber.DiscoveryTest do
     end
 
     test "discovers multiple feature files" do
-      temp_dir = Path.join(System.tmp_dir(), "multi_feature_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "multi_feature_#{:rand.uniform(10_000)}")
       File.mkdir_p!(temp_dir)
 
       File.write!(Path.join(temp_dir, "first.feature"), """
@@ -120,12 +120,12 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 step registry" do
     test "builds registry with module and metadata" do
-      temp_dir = Path.join(System.tmp_dir(), "registry_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "registry_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "steps")
       File.mkdir_p!(step_dir)
 
       File.write!(Path.join(step_dir, "my_steps.exs"), """
-      defmodule RegistryTestSteps#{:rand.uniform(10000)} do
+      defmodule RegistryTestSteps#{:rand.uniform(10_000)} do
         use Cucumber.StepDefinition
 
         step "I have {int} items", context do
@@ -149,11 +149,11 @@ defmodule Cucumber.DiscoveryTest do
     end
 
     test "combines steps from multiple modules" do
-      temp_dir = Path.join(System.tmp_dir(), "multi_module_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "multi_module_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "steps")
       File.mkdir_p!(step_dir)
 
-      rand_suffix = :rand.uniform(10000)
+      rand_suffix = :rand.uniform(10_000)
 
       File.write!(Path.join(step_dir, "first_steps.exs"), """
       defmodule FirstModuleSteps#{rand_suffix} do
@@ -189,11 +189,11 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 duplicate step detection" do
     test "raises on duplicate step definitions" do
-      temp_dir = Path.join(System.tmp_dir(), "duplicate_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "duplicate_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "steps")
       File.mkdir_p!(step_dir)
 
-      rand_suffix = :rand.uniform(10000)
+      rand_suffix = :rand.uniform(10_000)
 
       File.write!(Path.join(step_dir, "a_steps.exs"), """
       defmodule DuplicateASteps#{rand_suffix} do
@@ -225,11 +225,11 @@ defmodule Cucumber.DiscoveryTest do
     end
 
     test "duplicate error includes file and line information" do
-      temp_dir = Path.join(System.tmp_dir(), "dup_info_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "dup_info_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "steps")
       File.mkdir_p!(step_dir)
 
-      rand_suffix = :rand.uniform(10000)
+      rand_suffix = :rand.uniform(10_000)
 
       File.write!(Path.join(step_dir, "first.exs"), """
       defmodule DupInfoFirst#{rand_suffix} do
@@ -268,7 +268,7 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 with hook errors" do
     test "propagates syntax errors during hook discovery" do
-      temp_dir = Path.join(System.tmp_dir(), "hook_error_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "hook_error_test_#{:rand.uniform(10_000)}")
       support_dir = Path.join(temp_dir, "support")
       File.mkdir_p!(support_dir)
 
@@ -300,7 +300,7 @@ defmodule Cucumber.DiscoveryTest do
 
   describe "discover/1 with feature parse errors" do
     test "propagates parse errors from invalid feature files" do
-      temp_dir = Path.join(System.tmp_dir(), "feature_error_test_#{:rand.uniform(10000)}")
+      temp_dir = Path.join(System.tmp_dir(), "feature_error_test_#{:rand.uniform(10_000)}")
       File.mkdir_p!(temp_dir)
 
       invalid_file = Path.join(temp_dir, "invalid.feature")

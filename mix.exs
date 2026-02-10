@@ -86,6 +86,7 @@ defmodule Cucumber.MixProject do
       precommit: [
         "compile --warnings-as-errors",
         "format",
+        "credo --strict",
         "deps.unlock --unused",
         "test"
       ]
