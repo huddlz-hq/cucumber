@@ -7,7 +7,7 @@ set -e
 
 if [ -z "$1" ]; then
   echo "Usage: ./scripts/release.sh <version>"
-  echo "Example: ./scripts/release.sh 0.7.0"
+  echo "Example: ./scripts/release.sh 0.9.0"
   exit 1
 fi
 
@@ -21,9 +21,9 @@ if [ "$current_branch" != "main" ]; then
   exit 1
 fi
 
-# Check if the working directory is clean
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Error: Working directory is not clean. Please commit or stash changes first."
+# Check for uncommitted tracked changes (ignores untracked files)
+if [ -n "$(git diff --name-only)" ] || [ -n "$(git diff --cached --name-only)" ]; then
+  echo "Error: You have uncommitted changes. Please commit or stash them first."
   exit 1
 fi
 
@@ -37,26 +37,26 @@ fi
 
 echo "Releasing $VERSION_TAG..."
 
-# Run tests
-echo "Running tests..."
-mix test || { echo "Tests failed"; exit 1; }
+# Run full precommit checks (compile, format, credo, tests)
+echo "Running precommit checks..."
+mix precommit || { echo "Precommit checks failed"; exit 1; }
 
-# Build docs
-echo "Building docs..."
-mix docs || { echo "Doc generation failed"; exit 1; }
-
-# Publish to Hex
+# Publish to Hex (includes docs)
 echo "Publishing to Hex.pm..."
-mix hex.publish
+mix hex.publish || { echo "Hex publish failed"; exit 1; }
 
 # Tag after successful publish
 echo "Creating tag $VERSION_TAG..."
-git tag $VERSION_TAG
+if git rev-parse "$VERSION_TAG" >/dev/null 2>&1; then
+  echo "Tag $VERSION_TAG already exists, skipping tag creation."
+else
+  git tag "$VERSION_TAG"
+fi
 
 # Push
 echo "Pushing to GitHub..."
 git push origin main
-git push origin $VERSION_TAG
+git push origin "$VERSION_TAG"
 
 echo ""
 echo "Release $VERSION_TAG complete!"
