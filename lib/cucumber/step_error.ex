@@ -160,7 +160,7 @@ defmodule Cucumber.StepError do
     """
 
     formatted_message =
-      if step_history && length(step_history) > 0 do
+      if step_history != nil and step_history != [] do
         message <> "\n" <> format_step_history(step_history)
       else
         message
