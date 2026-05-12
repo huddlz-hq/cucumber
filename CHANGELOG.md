@@ -4,7 +4,8 @@
 
 ### Bug Fixes
 
-- **Gherkin parser: comment lines no longer drop scenarios.** Previously, a `# …` line between Background and the first Scenario (or between scenarios) caused **all scenarios in the file to be silently dropped**, with no error raised. The parser now recognizes `#`-prefixed lines as skippable wherever blank lines are valid (between sections, between steps, before Examples, before `Feature:`). Comments inside docstrings remain content (unchanged); comments inside data tables and trailing inline comments are still not supported.
+- **Gherkin parser: comment lines no longer drop scenarios.** Previously, a `# …` line between Background and the first Scenario, between scenarios, between steps, or between a tag and the following `Scenario:` / `Examples:` keyword caused **scenarios in the file to be silently dropped**, with no error raised. The parser now recognizes `#`-prefixed lines as skippable wherever blank lines are valid (including interspersed within tag groups). Comments inside docstrings remain content (unchanged); comments inside data tables and trailing inline comments are still not supported.
+- **Parser no longer silently truncates on partial parses.** `Gherkin.Parser.parse/1` used to return a partial feature when the parser stopped before end of file — masking exactly the kind of bug above. It now raises `Gherkin.ParseError` if any non-whitespace content remains unconsumed.
 
 ### Improvements
 

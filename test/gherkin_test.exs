@@ -601,5 +601,80 @@ defmodule Gherkin.ParserTest do
       [examples] = outline.examples
       assert examples.table_body == [["one"], ["two"]]
     end
+
+    test "comment line between a tag and Scenario: keyword is skipped" do
+      gherkin = """
+      Feature: Commented
+
+      Scenario: First
+        Given a thing
+
+      @wip
+      # comment after tag
+      Scenario: Second
+        Given another thing
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert Enum.map(result.scenarios, & &1.name) == ["First", "Second"]
+      [_first, second] = result.scenarios
+      assert second.tags == ["wip"]
+    end
+
+    test "comment line between two tags on the same scenario is skipped" do
+      gherkin = """
+      Feature: Commented
+
+      @wip
+      # between tags
+      @smoke
+      Scenario: Double-tagged
+        Given a thing
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [scenario] = result.scenarios
+      assert scenario.tags == ["wip", "smoke"]
+    end
+
+    test "raises when parser stops before consuming end of file" do
+      # Trailing junk after the last scenario should not silently disappear.
+      gherkin = """
+      Feature: F
+
+      Scenario: First
+        Given a step
+
+      this is not valid gherkin
+      """
+
+      assert_raise Gherkin.ParseError, ~r/Unexpected content/, fn ->
+        Gherkin.Parser.parse(gherkin)
+      end
+    end
+
+    test "comment line between an Examples tag and Examples: keyword is skipped" do
+      gherkin = """
+      Feature: Commented Outline
+
+      Scenario Outline: With tagged examples
+        Given I have <value>
+
+        @smoke
+        # tagged examples
+        Examples:
+          | value |
+          | one   |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [outline] = result.scenarios
+      [examples] = outline.examples
+      assert examples.tags == ["smoke"]
+      assert examples.table_body == [["one"]]
+    end
   end
 end
