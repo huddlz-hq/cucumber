@@ -47,8 +47,19 @@ defmodule Gherkin.NimbleParser do
     |> concat(newline)
     |> ignore()
 
-  # Zero or more blank lines
-  blank_lines = repeat(blank_line)
+  # Comment line (optional whitespace, then # and the rest of the line).
+  # Gherkin treats these as content-less, so we skip them anywhere a blank line is valid.
+  comment_line =
+    optional_ws
+    |> concat(ignore(string("#")))
+    |> concat(ignore(utf8_string([not: ?\n, not: ?\r], min: 0)))
+    |> concat(eol)
+
+  # Non-content line: blank or comment. Both are skipped between meaningful tokens.
+  skippable_line = choice([blank_line, comment_line])
+
+  # Zero or more blank or comment lines
+  blank_lines = repeat(skippable_line)
 
   # ============================================================
   # LEVEL 2: KEYWORDS
@@ -195,12 +206,12 @@ defmodule Gherkin.NimbleParser do
     |> reduce({__MODULE__, :build_step, []})
     |> label("step")
 
-  # Multiple steps (also skip blank lines between steps)
+  # Multiple steps (also skip blank/comment lines between steps)
   steps =
     repeat(
       choice([
         step,
-        lookahead_not(section_marker) |> concat(blank_line)
+        lookahead_not(section_marker) |> concat(skippable_line)
       ])
     )
     |> reduce({__MODULE__, :filter_steps, []})
