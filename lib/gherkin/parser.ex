@@ -122,9 +122,12 @@ defmodule Gherkin.NimbleParser do
     |> wrap()
     |> label("tag line")
 
-  # Multiple tag lines (before features, scenarios, examples)
+  # Multiple tag lines (before features, scenarios, examples).
+  # Blank and comment lines may be interspersed (e.g. between two @tag lines,
+  # or between the last @tag and the following keyword). flatten_tags filters
+  # to binaries so skippable_line's empty output is harmless.
   tags =
-    repeat(tag_line)
+    repeat(choice([tag_line, skippable_line]))
     |> reduce({__MODULE__, :flatten_tags, []})
 
   # --- Data Tables ---
@@ -243,10 +246,11 @@ defmodule Gherkin.NimbleParser do
     ignore(examples_keyword)
     |> concat(rest_of_line)
 
-  # Lookahead to verify Examples: keyword follows tags
+  # Lookahead to verify Examples: keyword follows tags (with optional
+  # interspersed blank/comment lines, matching the `tags` combinator above).
   examples_lookahead =
     lookahead(
-      repeat(tag_line)
+      repeat(choice([tag_line, skippable_line]))
       |> concat(optional_ws)
       |> concat(examples_keyword)
     )
@@ -366,9 +370,19 @@ defmodule Gherkin.NimbleParser do
       {:ok, [feature], "", _context, _line, _offset} ->
         feature
 
-      {:ok, [feature], _rest, _context, _line, _offset} ->
-        # Partial parse - return what we have
-        feature
+      {:ok, [feature], rest, _context, {line, col}, _offset} ->
+        # Trailing whitespace is benign; non-whitespace content means the
+        # parser silently stopped mid-file (e.g. on a malformed line).
+        # Raising prevents scenarios from being dropped without notice.
+        if String.trim(rest) == "" do
+          feature
+        else
+          raise Gherkin.ParseError,
+            message: "Unexpected content; parser stopped before end of file",
+            line: line,
+            column: col,
+            rest: String.slice(rest, 0, 80)
+        end
 
       {:error, message, rest, _context, {line, col}, _offset} ->
         raise Gherkin.ParseError,
