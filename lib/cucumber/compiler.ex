@@ -37,6 +37,8 @@ defmodule Cucumber.Compiler do
   end
 
   defp compile_feature(feature, step_registry, hook_modules) do
+    warn_on_empty_feature(feature)
+
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
 
@@ -84,6 +86,16 @@ defmodule Cucumber.Compiler do
     [{^module_name, _}] = Code.compile_quoted(ast, feature.file)
     module_name
   end
+
+  defp warn_on_empty_feature(%{scenarios: []} = feature) do
+    IO.warn(
+      "Cucumber: feature file #{feature.file} parsed with zero scenarios — " <>
+        "scenarios may have been silently dropped by the parser.",
+      []
+    )
+  end
+
+  defp warn_on_empty_feature(_feature), do: :ok
 
   defp generate_module_name(file_path) do
     # Convert path like "test/features/authentication.feature"

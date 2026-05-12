@@ -506,4 +506,100 @@ defmodule Gherkin.ParserTest do
       end
     end
   end
+
+  describe "parse/1 with comment lines" do
+    test "comment line between Background and first Scenario is skipped" do
+      gherkin = """
+      Feature: Commented
+
+        Background:
+          Given a user exists
+
+        # ===== Section Marker =====
+
+        Scenario: First
+          Given a thing
+          Then it works
+
+        Scenario: Second
+          Given another thing
+          Then it also works
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert length(result.scenarios) == 2
+      assert Enum.map(result.scenarios, & &1.name) == ["First", "Second"]
+    end
+
+    test "comment line between scenarios is skipped" do
+      gherkin = """
+      Feature: Commented
+
+      Scenario: First
+        Given a thing
+
+      # divider comment
+
+      Scenario: Second
+        Given another thing
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert Enum.map(result.scenarios, & &1.name) == ["First", "Second"]
+    end
+
+    test "comment line between steps is skipped" do
+      gherkin = """
+      Feature: Commented
+
+      Scenario: Steps with comments
+        Given step one
+        # an explanatory comment
+        When step two
+        Then step three
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [scenario] = result.scenarios
+      assert Enum.map(scenario.steps, & &1.text) == ["step one", "step two", "step three"]
+    end
+
+    test "comment line before Feature keyword is skipped" do
+      gherkin = """
+      # top-of-file note
+      Feature: Commented
+        Scenario: x
+          Given a thing
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.name == "Commented"
+      assert length(result.scenarios) == 1
+    end
+
+    test "comment line before Examples block is skipped" do
+      gherkin = """
+      Feature: Commented Outline
+
+      Scenario Outline: With comments
+        Given I have <value>
+
+        # values to try
+        Examples:
+          | value |
+          | one   |
+          | two   |
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [outline] = result.scenarios
+      [examples] = outline.examples
+      assert examples.table_body == [["one"], ["two"]]
+    end
+  end
 end
