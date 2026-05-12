@@ -8,7 +8,7 @@
 
 ### Improvements
 
-- **Empty-feature warning at compile time.** `Cucumber.Compiler` now emits `IO.warn` if a feature file parses to zero scenarios — a defensive net for parser regressions of the shape above. **Heads-up for `--warnings-as-errors`:** projects that check in scaffold `.feature` files with no scenarios will now fail to compile until at least one scenario is added.
+- **Empty-feature warning.** `Cucumber.Compiler` now emits `IO.warn` if a feature file parses to zero scenarios — a defensive net for parser regressions of the shape above. The warning fires when `Cucumber.compile_features!/1` runs (typically from `test/test_helper.exs` at `mix test` time). **Heads-up for `mix test --warnings-as-errors`:** projects that check in scaffold `.feature` files with no scenarios will trip this and abort the test suite until at least one scenario is added. (`mix compile --warnings-as-errors` is unaffected — the warning is not emitted during `.ex` compilation.)
 
 ## v0.9.0 (2026-02-10)
 
