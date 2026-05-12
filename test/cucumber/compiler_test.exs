@@ -1,7 +1,9 @@
 defmodule Cucumber.CompilerTest do
   use ExUnit.Case, async: true
 
-  alias Gherkin.{Examples, Scenario, ScenarioOutline, Step}
+  import ExUnit.CaptureIO
+
+  alias Gherkin.{Examples, Feature, Scenario, ScenarioOutline, Step}
 
   describe "expand_all_scenarios/1" do
     test "passes through regular scenarios unchanged" do
@@ -205,6 +207,32 @@ defmodule Cucumber.CompilerTest do
       assert Enum.at(result, 0).name == "Multi-examples (first: row 1)"
       assert Enum.at(result, 1).name == "Multi-examples (second: row 1)"
       assert Enum.at(result, 2).name == "Multi-examples (second: row 2)"
+    end
+  end
+
+  describe "warn_on_empty_feature/1" do
+    test "warns when the feature has zero scenarios" do
+      feature = %Feature{name: "empty", scenarios: [], tags: []}
+      feature = Map.put(feature, :file, "test/features/empty.feature")
+
+      stderr = capture_io(:stderr, fn -> Cucumber.Compiler.warn_on_empty_feature(feature) end)
+
+      assert stderr =~ "test/features/empty.feature"
+      assert stderr =~ "zero scenarios"
+    end
+
+    test "is silent when the feature has at least one scenario" do
+      feature = %Feature{
+        name: "non-empty",
+        scenarios: [%Scenario{name: "a", steps: [], tags: [], line: 1}],
+        tags: []
+      }
+
+      feature = Map.put(feature, :file, "test/features/non_empty.feature")
+
+      stderr = capture_io(:stderr, fn -> Cucumber.Compiler.warn_on_empty_feature(feature) end)
+
+      assert stderr == ""
     end
   end
 end
