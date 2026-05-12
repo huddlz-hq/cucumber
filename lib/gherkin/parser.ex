@@ -51,9 +51,10 @@ defmodule Gherkin.NimbleParser do
   # Gherkin treats these as content-less, so we skip them anywhere a blank line is valid.
   comment_line =
     optional_ws
-    |> concat(ignore(string("#")))
-    |> concat(ignore(utf8_string([not: ?\n, not: ?\r], min: 0)))
+    |> concat(string("#"))
+    |> concat(utf8_string([not: ?\n, not: ?\r], min: 0))
     |> concat(eol)
+    |> ignore()
 
   # Non-content line: blank or comment. Both are skipped between meaningful tokens.
   skippable_line = choice([blank_line, comment_line])

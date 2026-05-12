@@ -87,15 +87,24 @@ defmodule Cucumber.Compiler do
     module_name
   end
 
-  defp warn_on_empty_feature(%{scenarios: []} = feature) do
+  @doc false
+  # Public for testing. Emits a compile-time warning when a feature parses with
+  # zero scenarios — usually a sign the parser silently dropped them. The
+  # synthetic stacktrace makes editors highlight the warning on the feature
+  # file itself rather than inside the cucumber library.
+  def warn_on_empty_feature(%{scenarios: []} = feature) do
+    stacktrace = [
+      {__MODULE__, :compile_feature, 3, [file: String.to_charlist(feature.file), line: 1]}
+    ]
+
     IO.warn(
       "Cucumber: feature file #{feature.file} parsed with zero scenarios — " <>
         "scenarios may have been silently dropped by the parser.",
-      []
+      stacktrace
     )
   end
 
-  defp warn_on_empty_feature(_feature), do: :ok
+  def warn_on_empty_feature(_feature), do: :ok
 
   defp generate_module_name(file_path) do
     # Convert path like "test/features/authentication.feature"

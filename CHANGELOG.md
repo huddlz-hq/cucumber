@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- **Gherkin parser: comment lines no longer drop scenarios.** Previously, a `# …` line between Background and the first Scenario (or between scenarios) caused **all scenarios in the file to be silently dropped**, with no error raised. The parser now recognizes `#`-prefixed lines as skippable wherever blank lines are valid (between sections, between steps, before Examples, before `Feature:`). Comments inside docstrings remain content (unchanged); comments inside data tables and trailing inline comments are still not supported.
+
+### Improvements
+
+- **Empty-feature warning at compile time.** `Cucumber.Compiler` now emits `IO.warn` if a feature file parses to zero scenarios — a defensive net for parser regressions of the shape above. **Heads-up for `--warnings-as-errors`:** projects that check in scaffold `.feature` files with no scenarios will now fail to compile until at least one scenario is added.
+
 ## v0.9.0 (2026-02-10)
 
 ### New Features
