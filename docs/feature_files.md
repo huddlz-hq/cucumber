@@ -154,6 +154,38 @@ Scenario: Submit feedback
   Then my feedback should be recorded
 ```
 
+Backticks work as an alternative delimiter, and either delimiter may carry a
+media type annotation after the opening line:
+
+````gherkin
+Scenario: Submit structured feedback
+  When I submit the following feedback:
+    ```json
+    {"rating": 5, "comment": "Keep up the good work!"}
+    ```
+  Then my feedback should be recorded
+````
+
+The content arrives in your step as `context.docstring`; the media type (if
+given) as `context.docstring_media_type`.
+
+### Descriptions
+
+Free-form description text can follow any section header — `Feature:`,
+`Background:`, `Scenario:`, `Scenario Outline:`, or `Examples:` — until the
+first step, tag, or table row. Descriptions are purely informational and never
+affect execution:
+
+```gherkin
+Scenario: Adding an item to an empty cart
+  Carts start empty for new sessions, so this is the
+  most common path through checkout.
+
+  Given I am on the product page for "Ergonomic Keyboard"
+  When I click "Add to Cart"
+  Then my cart should contain 1 item
+```
+
 ## File Organization
 
 Feature files should be placed in a `test/features/` directory and have a `.feature` extension. Organize them logically by feature or domain area:

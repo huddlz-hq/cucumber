@@ -141,6 +141,15 @@ defmodule Cucumber.CckBehaviorTest do
     end
   end
 
+  defmodule DocStringSteps do
+    use Cucumber.StepDefinition
+
+    step "a doc string:", context do
+      Collector.record({:docstring, context.docstring, context[:docstring_media_type]})
+      :ok
+    end
+  end
+
   defmodule StackTraceSteps do
     use Cucumber.StepDefinition
 
@@ -264,6 +273,39 @@ defmodule Cucumber.CckBehaviorTest do
              |> Enum.all?(fn [b, _step, a] ->
                b == :before and a == :after
              end)
+    end
+  end
+
+  describe "CCK: doc-strings" do
+    test "standard, backtick, and media-typed docstrings all reach the step" do
+      run = run_feature(fixture("doc-strings"), steps: [DocStringSteps])
+
+      assert %{total: 3, passed: 3, failures: 0} = run
+
+      # Scenario order within the nested run depends on the seed, so assert
+      # on the collected set rather than sequence.
+      contents = for {:docstring, content, _media} <- run.events, do: content
+      medias = for {:docstring, _content, media} <- run.events, do: media
+
+      assert Enum.count(contents, &(&1 == "Here is some content\nAnd some more on another line")) ==
+               2
+
+      assert Enum.count(medias, &is_nil/1) == 2
+      assert "application/json" in medias
+      assert Enum.any?(contents, &(&1 =~ ~s("foo": "bar")))
+    end
+  end
+
+  describe "CCK: hooks-skipped (parse-only until skip semantics land)" do
+    test "the feature with scenario descriptions parses and undefined skip steps fail" do
+      # Full skip behavior arrives with issue #21; today this fixture proves
+      # the parser handles its scenario descriptions (issue #17) and the
+      # undefined skip steps fail rather than silently pass.
+      run = run_feature(fixture("hooks-skipped"), steps: [])
+
+      assert run.total == 3
+      assert run.failures == 3
+      assert run.output =~ "No matching step definition found"
     end
   end
 

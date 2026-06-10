@@ -93,7 +93,7 @@ defmodule Cucumber.Runtime do
     context
     |> Map.put(:args, args)
     |> add_datatable(step.datatable)
-    |> add_docstring(step.docstring)
+    |> add_docstring(step.docstring, step.docstring_media_type)
   end
 
   defp add_datatable(context, nil), do: context
@@ -113,10 +113,16 @@ defmodule Cucumber.Runtime do
     Map.put(context, :datatable, table_data)
   end
 
-  defp add_docstring(context, nil), do: context
+  defp add_docstring(context, nil, _media_type), do: context
 
-  defp add_docstring(context, docstring) do
+  defp add_docstring(context, docstring, nil) do
     Map.put(context, :docstring, docstring)
+  end
+
+  defp add_docstring(context, docstring, media_type) do
+    context
+    |> Map.put(:docstring, docstring)
+    |> Map.put(:docstring_media_type, media_type)
   end
 
   defp process_step_result(result, context) do

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- **Descriptions under any section header now parse** (#17). Standard Gherkin allows free-form description text after `Background:`, `Scenario:`, `Scenario Outline:`, and `Examples:` headers; previously such lines caused a parse error that made the whole feature file unusable. Descriptions are now captured on the corresponding structs (`description` field, default `""`), and the feature-level description — previously discarded — is captured on `Gherkin.Feature.description`. Descriptions never affect execution.
+- **Parser no longer hangs on a feature ending in a description.** A latent zero-width repeat in the description combinator could loop forever at end of input (e.g. a feature whose last line is description text, or a scenario with no steps at EOF).
+
+### New Features
+
+- **Backtick docstrings and media types** (#18). Docstrings can be delimited with ``` ``` ``` as an alternative to `"""`; the closing delimiter must match the opening one, and either delimiter style is plain content inside the other. An optional media type may follow the opening delimiter (e.g. ` ```json `) and is available as `Gherkin.Step.docstring_media_type` and `context.docstring_media_type` in step definitions. `context.docstring` remains a plain string.
+
 ### Improvements
 
 - **Behavior test harness.** New `Cucumber.BehaviorCase` test-case template (test-only, in `test/support/`) runs a Gherkin source against explicit step/hook modules through the real compile pipeline in a nested ExUnit run and reports the outcome — making failing, undefined, and otherwise broken scenarios assertable in the test suite. Behavior fixtures from the [Cucumber Compatibility Kit](https://github.com/cucumber/compatibility-kit) are vendored under `test/fixtures/cck/` (MIT) and backed by behavior tests asserting reference outcomes.
