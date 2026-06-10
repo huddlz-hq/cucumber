@@ -25,11 +25,13 @@ defmodule Cucumber.Discovery do
     defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
 
     @typedoc """
-    Registry keys identify the pattern kind and source — `{:expression, source}`
-    for cucumber expressions (regex patterns are planned to join as
-    `{:regex, source}`).
+    Registry keys identify the pattern kind and pattern — `{:expression, source}`
+    for cucumber expressions, `{:regex, {source, opts}}` for regular
+    expressions. Regexes are keyed by source and options rather than the
+    `%Regex{}` struct because identical regexes do not compile to
+    structurally-equal `re_pattern` binaries.
     """
-    @type registry_key :: {:expression, String.t()}
+    @type registry_key :: {:expression, String.t()} | {:regex, {String.t(), term()}}
 
     @type t :: %__MODULE__{
             features: [Gherkin.Feature.t()],
@@ -134,9 +136,17 @@ defmodule Cucumber.Discovery do
     end)
   end
 
+  @doc false
+  # Shared key derivation so every registry builder (discovery, test
+  # harnesses) produces the same shape. Identical regexes (same source and
+  # flags) produce equal keys, so duplicate detection covers them too.
+  @spec registry_key(String.t() | Regex.t()) :: DiscoveryResult.registry_key()
+  def registry_key(%Regex{} = regex), do: {:regex, {Regex.source(regex), Regex.opts(regex)}}
+  def registry_key(pattern) when is_binary(pattern), do: {:expression, pattern}
+
   defp add_module_steps_to_registry(registry, module, steps) do
     Enum.reduce(steps, registry, fn {pattern, metadata}, acc ->
-      key = {:expression, pattern}
+      key = registry_key(pattern)
 
       # Check for exact duplicates at load time (overlapping-but-different
       # patterns are detected per step text at runtime as ambiguity)
@@ -144,7 +154,7 @@ defmodule Cucumber.Discovery do
         {existing_module, existing_meta} = acc[key]
 
         raise """
-        Duplicate step definition: '#{pattern}'
+        Duplicate step definition: '#{display_pattern(pattern)}'
 
         First defined in:
           #{existing_module} at #{existing_meta.file}:#{existing_meta.line}
@@ -158,6 +168,9 @@ defmodule Cucumber.Discovery do
       Map.put(acc, key, {module, metadata})
     end)
   end
+
+  defp display_pattern(%Regex{} = regex), do: inspect(regex)
+  defp display_pattern(pattern), do: pattern
 
   defp discover_features(patterns) do
     patterns

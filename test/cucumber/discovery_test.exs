@@ -224,6 +224,42 @@ defmodule Cucumber.DiscoveryTest do
       end
     end
 
+    test "raises on duplicate regex step definitions" do
+      temp_dir = Path.join(System.tmp_dir(), "duplicate_regex_test_#{:rand.uniform(10_000)}")
+      step_dir = Path.join(temp_dir, "steps")
+      File.mkdir_p!(step_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+
+      File.write!(Path.join(step_dir, "a_steps.exs"), """
+      defmodule DuplicateRegexASteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step ~r/^I am duplicated$/, context do
+          context
+        end
+      end
+      """)
+
+      File.write!(Path.join(step_dir, "b_steps.exs"), """
+      defmodule DuplicateRegexBSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step ~r/^I am duplicated$/, context do
+          context
+        end
+      end
+      """)
+
+      try do
+        assert_raise RuntimeError, ~r/Duplicate step definition.*I am duplicated/s, fn ->
+          Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
+        end
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
+
     test "duplicate error includes file and line information" do
       temp_dir = Path.join(System.tmp_dir(), "dup_info_test_#{:rand.uniform(10_000)}")
       step_dir = Path.join(temp_dir, "steps")

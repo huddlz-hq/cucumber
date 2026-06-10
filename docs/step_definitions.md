@@ -162,6 +162,24 @@ step "path\\/to\\/file", context do
 end
 ```
 
+## Regular Expression Patterns
+
+Steps can also be defined with a regular expression instead of a cucumber
+expression. The regex must match the entire step text (add your own `^`/`$`
+anchors or not — full-text matching is enforced either way). Capture groups
+arrive in `context.args` in order, always as strings — regexes do no type
+conversion — and unmatched optional groups are `nil`:
+
+```elixir
+step ~r/^a basket holding (\d+) apples(?: and (\d+) pears)?$/, %{args: [apples, pears]} = context do
+  total = String.to_integer(apples) + String.to_integer(pears || "0")
+  Map.put(context, :basket_total, total)
+end
+```
+
+If a step's text matches both a regex and a cucumber expression (or any two
+definitions), the step fails as ambiguous.
+
 ## Working with Data Tables
 
 In your feature file:

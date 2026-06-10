@@ -92,12 +92,9 @@ defmodule Cucumber.Runtime do
 
   defp find_step_definition(step_text, step_registry) do
     matches =
-      Enum.flat_map(step_registry, fn {{:expression, pattern_text}, definition} ->
-        # Compile pattern on the fly (cached via :persistent_term)
-        compiled_pattern = Expression.compile(pattern_text)
-
-        case Expression.match(step_text, compiled_pattern) do
-          {:match, args} -> [{pattern_text, definition, args}]
+      Enum.flat_map(step_registry, fn {key, definition} ->
+        case match_pattern(key, step_text) do
+          {:match, args} -> [{display_pattern(key), definition, args}]
           :no_match -> []
         end
       end)
@@ -113,6 +110,83 @@ defmodule Cucumber.Runtime do
         # Stable listing order regardless of map iteration order
         {:ambiguous, Enum.sort_by(multiple, fn {pattern_text, _, _} -> pattern_text end)}
     end
+  end
+
+  defp match_pattern({:expression, pattern_text}, step_text) do
+    # Compile pattern on the fly (cached via :persistent_term)
+    Expression.match(step_text, Expression.compile(pattern_text))
+  end
+
+  defp match_pattern({:regex, {source, opts}}, step_text) do
+    # Cucumber regexes must match the entire step text. Captures become args
+    # as strings (no type conversion — that's a cucumber-expressions feature);
+    # unmatched optional groups become nil. The capture list is explicit
+    # because PCRE silently drops *trailing* unmatched groups otherwise.
+    {anchored, group_count} = anchored_regex(source, opts)
+    capture_spec = if group_count == 0, do: [0], else: Enum.to_list(1..group_count)
+
+    case :re.run(step_text, anchored.re_pattern, [{:capture, capture_spec, :index}]) do
+      :nomatch ->
+        :no_match
+
+      {:match, _indexes} when group_count == 0 ->
+        {:match, []}
+
+      {:match, indexes} ->
+        {:match, extract_group_values(indexes, step_text)}
+    end
+  end
+
+  defp display_pattern({:expression, pattern_text}), do: pattern_text
+  defp display_pattern({:regex, {source, opts}}), do: "~r/#{source}/#{opts}"
+
+  # Wraps a regex so it must match the whole step text, mirroring how
+  # Cucumber implementations treat regex step definitions. Author-supplied
+  # ^/$ anchors still work inside the non-capturing group. The anchored
+  # variant and its capture-group count are cached since steps are matched
+  # on every execution.
+  defp anchored_regex(source, opts) do
+    cache_key = {__MODULE__, :anchored, source, opts}
+
+    case :persistent_term.get(cache_key, :not_found) do
+      :not_found ->
+        anchored = Regex.compile!("\\A(?:#{source})\\z", opts)
+        entry = {anchored, count_capture_groups(source)}
+        :persistent_term.put(cache_key, entry)
+        entry
+
+      entry ->
+        entry
+    end
+  end
+
+  # Counts capturing groups in a regex source: plain `(`, named `(?<name>`,
+  # `(?'name'`, and `(?P<name>` capture; other `(?...)` constructs don't.
+  # Escapes and character classes are skipped.
+  defp count_capture_groups(source), do: count_groups(source, :normal, 0)
+
+  defp count_groups(<<>>, _state, count), do: count
+  defp count_groups(<<?\\, _, rest::binary>>, state, count), do: count_groups(rest, state, count)
+  defp count_groups(<<?[, rest::binary>>, :normal, count), do: count_groups(rest, :class, count)
+  defp count_groups(<<?], rest::binary>>, :class, count), do: count_groups(rest, :normal, count)
+
+  defp count_groups(<<?(, rest::binary>>, :normal, count) do
+    case rest do
+      <<"?<", c, _::binary>> when c != ?= and c != ?! -> count_groups(rest, :normal, count + 1)
+      <<"?'", _::binary>> -> count_groups(rest, :normal, count + 1)
+      <<"?P<", _::binary>> -> count_groups(rest, :normal, count + 1)
+      <<"?", _::binary>> -> count_groups(rest, :normal, count)
+      _ -> count_groups(rest, :normal, count + 1)
+    end
+  end
+
+  defp count_groups(<<_, rest::binary>>, state, count), do: count_groups(rest, state, count)
+
+  defp extract_group_values(indexes, step_text) do
+    Enum.map(indexes, fn
+      {-1, 0} -> nil
+      {start, length} -> binary_part(step_text, start, length)
+    end)
   end
 
   # Builds the stacktrace reported for a step failure: the first frame points
