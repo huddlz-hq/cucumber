@@ -24,10 +24,17 @@ defmodule Cucumber.Discovery do
     @moduledoc "Result struct returned by `Cucumber.Discovery.discover/1`."
     defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
 
+    @typedoc """
+    Registry keys identify the pattern kind and source — `{:expression, source}`
+    for cucumber expressions (regex patterns are planned to join as
+    `{:regex, source}`).
+    """
+    @type registry_key :: {:expression, String.t()}
+
     @type t :: %__MODULE__{
             features: [Gherkin.Feature.t()],
             step_modules: [module()],
-            step_registry: %{String.t() => {module(), map()}},
+            step_registry: %{registry_key() => {module(), map()}},
             hook_modules: [module()]
           }
   end
@@ -129,9 +136,12 @@ defmodule Cucumber.Discovery do
 
   defp add_module_steps_to_registry(registry, module, steps) do
     Enum.reduce(steps, registry, fn {pattern, metadata}, acc ->
-      # Check for duplicates using pattern as key
-      if Map.has_key?(acc, pattern) do
-        {existing_module, existing_meta} = acc[pattern]
+      key = {:expression, pattern}
+
+      # Check for exact duplicates at load time (overlapping-but-different
+      # patterns are detected per step text at runtime as ambiguity)
+      if Map.has_key?(acc, key) do
+        {existing_module, existing_meta} = acc[key]
 
         raise """
         Duplicate step definition: '#{pattern}'
@@ -145,7 +155,7 @@ defmodule Cucumber.Discovery do
       end
 
       # Store with pattern as key (compile at runtime)
-      Map.put(acc, pattern, {module, metadata})
+      Map.put(acc, key, {module, metadata})
     end)
   end
 

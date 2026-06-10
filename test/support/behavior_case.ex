@@ -155,7 +155,7 @@ defmodule Cucumber.BehaviorCase do
     for module <- step_modules,
         {pattern, metadata} <- module.__cucumber_steps__(),
         into: %{} do
-      {pattern, {module, metadata}}
+      {{:expression, pattern}, {module, metadata}}
     end
   end
 

@@ -1,6 +1,18 @@
 defmodule Cucumber.StepDefinitionTest do
   use ExUnit.Case, async: true
 
+  # Runs a single step text against a module's definitions through the real
+  # runtime dispatch (the same path generated feature tests use).
+  defp run_step(module, text, context \\ %{}) do
+    registry =
+      for {pattern, metadata} <- module.__cucumber_steps__(), into: %{} do
+        {{:expression, pattern}, {module, metadata}}
+      end
+
+    step = %Gherkin.Step{keyword: "Given", text: text, line: 1}
+    Cucumber.Runtime.execute_step(context, step, registry)
+  end
+
   describe "step macro" do
     test "registers step with pattern and metadata" do
       defmodule RegisterTestSteps do
@@ -81,13 +93,13 @@ defmodule Cucumber.StepDefinitionTest do
       steps = NoContextModule.__cucumber_steps__()
       assert length(steps) == 1
 
-      result = NoContextModule.step(%{some: "data"}, "I have no context")
-      assert result == :ok
+      result = run_step(NoContextModule, "I have no context", %{some: "data"})
+      assert result.some == "data"
     end
   end
 
-  describe "generated step/2 function" do
-    test "matches step text and returns result" do
+  describe "dispatch through Cucumber.Runtime" do
+    test "matches step text and merges the result into context" do
       defmodule MatchingSteps do
         use Cucumber.StepDefinition
 
@@ -96,8 +108,9 @@ defmodule Cucumber.StepDefinitionTest do
         end
       end
 
-      result = MatchingSteps.step(%{existing: "data"}, "I return a value")
-      assert result == %{returned: true}
+      result = run_step(MatchingSteps, "I return a value", %{existing: "data"})
+      assert result.returned == true
+      assert result.existing == "data"
     end
 
     test "extracts parameters and passes via context.args" do
@@ -110,8 +123,9 @@ defmodule Cucumber.StepDefinitionTest do
         end
       end
 
-      result = ParameterSteps.step(%{}, "I have 5 items costing 19.99")
-      assert result == %{count: 5, price: 19.99}
+      result = run_step(ParameterSteps, "I have 5 items costing 19.99")
+      assert result.count == 5
+      assert result.price == 19.99
     end
 
     test "extracts string parameters" do
@@ -124,8 +138,8 @@ defmodule Cucumber.StepDefinitionTest do
         end
       end
 
-      result = StringParamSteps.step(%{}, "I enter \"john_doe\" as username")
-      assert result == %{username: "john_doe"}
+      result = run_step(StringParamSteps, "I enter \"john_doe\" as username")
+      assert result.username == "john_doe"
     end
 
     test "raises when no step matches" do
@@ -137,13 +151,13 @@ defmodule Cucumber.StepDefinitionTest do
         end
       end
 
-      assert_raise RuntimeError, ~r/No step definition found/, fn ->
-        NoMatchSteps.step(%{}, "I do not exist")
+      assert_raise Cucumber.StepError, ~r/No matching step definition found/, fn ->
+        run_step(NoMatchSteps, "I do not exist")
       end
     end
 
-    test "matches first defined step when multiple could match" do
-      defmodule FirstMatchSteps do
+    test "raises AmbiguousStepError when multiple definitions match" do
+      defmodule OverlappingSteps do
         use Cucumber.StepDefinition
 
         step "I have {int} items", context do
@@ -155,8 +169,13 @@ defmodule Cucumber.StepDefinitionTest do
         end
       end
 
-      result = FirstMatchSteps.step(%{}, "I have 5 items")
-      assert result.matched == :first
+      error =
+        assert_raise Cucumber.AmbiguousStepError, fn ->
+          run_step(OverlappingSteps, "I have 5 items")
+        end
+
+      assert error.message =~ ~s("I have {int} items")
+      assert error.message =~ ~s("I have 5 items")
     end
   end
 

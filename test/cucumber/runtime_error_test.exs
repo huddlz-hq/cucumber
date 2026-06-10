@@ -4,13 +4,20 @@ defmodule Cucumber.RuntimeErrorTest do
   alias Cucumber.Runtime
   alias Gherkin.Step
 
+  defmodule FailingSteps do
+    use Cucumber.StepDefinition
+
+    step "I fail with an error", _context do
+      raise "deliberate failure"
+    end
+  end
+
   describe "error formatting in execute_step/3" do
     setup do
-      # Create a simple step registry for testing
-      step_registry = %{
-        "I fail with an error" => {FailingStepModule, %{}},
-        "I fail with {string}" => {FailingStepModule, %{}}
-      }
+      step_registry =
+        for {pattern, metadata} <- FailingSteps.__cucumber_steps__(), into: %{} do
+          {{:expression, pattern}, {FailingSteps, metadata}}
+        end
 
       {:ok, step_registry: step_registry}
     end
@@ -48,43 +55,46 @@ defmodule Cucumber.RuntimeErrorTest do
         step_history: []
       }
 
-      # This will fail because FailingStepModule doesn't exist
-      # but we're testing the error handling
-      assert_raise Cucumber.StepError, fn ->
-        Runtime.execute_step(context, step, step_registry)
-      end
+      error =
+        assert_raise Cucumber.StepError, fn ->
+          Runtime.execute_step(context, step, step_registry)
+        end
+
+      assert error.message =~ "deliberate failure"
     end
   end
 
   describe "PhoenixTest error formatting" do
-    test "formats HTML elements with proper indentation" do
-      # Create a mock module that can handle our test step
-      defmodule MockPhoenixTestStep do
-        def step(_context, _text) do
-          # Simulate a PhoenixTest error
-          raise """
-          Could not find any elements with selector "button" and text "Submit"
+    defmodule MockPhoenixTestSteps do
+      use Cucumber.StepDefinition
 
-          Found these elements matching the selector "button":
+      step "I click the submit button", _context do
+        # Simulate a PhoenixTest error
+        raise """
+        Could not find any elements with selector "button" and text "Submit"
 
-          <button class="btn btn-primary">
-            Save Draft
-          </button>
+        Found these elements matching the selector "button":
 
-          <button class="btn btn-secondary">
-            Cancel
-          </button>
+        <button class="btn btn-primary">
+          Save Draft
+        </button>
 
-          <button type="submit" disabled>
-            Submit (disabled)
-          </button>
-          """
-        end
+        <button class="btn btn-secondary">
+          Cancel
+        </button>
+
+        <button type="submit" disabled>
+          Submit (disabled)
+        </button>
+        """
       end
+    end
 
-      step_registry = %{
-        "I click the submit button" => {MockPhoenixTestStep, %{}}
-      }
+    test "formats HTML elements with proper indentation" do
+      step_registry =
+        for {pattern, metadata} <- MockPhoenixTestSteps.__cucumber_steps__(), into: %{} do
+          {{:expression, pattern}, {MockPhoenixTestSteps, metadata}}
+        end
 
       step = %Step{
         keyword: "When",

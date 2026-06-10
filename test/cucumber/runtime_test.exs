@@ -52,18 +52,10 @@ defmodule Cucumber.RuntimeTest do
   end
 
   setup do
-    step_registry = %{
-      "I return ok" => {TestSteps, %{}},
-      "I return a map with {string}" => {TestSteps, %{}},
-      "I return a keyword list" => {TestSteps, %{}},
-      "I return ok tuple with map" => {TestSteps, %{}},
-      "I return ok tuple with keyword" => {TestSteps, %{}},
-      "I return error tuple" => {TestSteps, %{}},
-      "I return invalid value" => {TestSteps, %{}},
-      "I have {int} items" => {TestSteps, %{}},
-      "I access the datatable" => {TestSteps, %{}},
-      "I access the docstring" => {TestSteps, %{}}
-    }
+    step_registry =
+      for {pattern, metadata} <- TestSteps.__cucumber_steps__(), into: %{} do
+        {{:expression, pattern}, {TestSteps, metadata}}
+      end
 
     base_context = %{
       feature_file: "test/features/example.feature",

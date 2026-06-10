@@ -55,49 +55,14 @@ defmodule Cucumber.StepDefinition do
       Module.get_attribute(env.module, :cucumber_steps, [])
       |> Enum.reverse()
 
-    # Generate the step/2 function body
-    match_clauses =
-      for {pattern, metadata} <- steps do
-        quote do
-          {unquote(pattern), unquote(metadata.function)}
-        end
-      end
-
-    step_function =
-      quote do
-        def step(context, step_text) do
-          # List of patterns and their functions
-          patterns = unquote(match_clauses)
-
-          # Find the first matching pattern
-          result =
-            Enum.find_value(patterns, fn {pattern, fun_name} ->
-              case Cucumber.Expression.match(step_text, Cucumber.Expression.compile(pattern)) do
-                {:match, args} ->
-                  # Add args to context and call the step function
-                  context_with_args = Map.put(context, :args, args)
-                  {:ok, apply(__MODULE__, fun_name, [context_with_args])}
-
-                :no_match ->
-                  nil
-              end
-            end)
-
-          case result do
-            {:ok, value} -> value
-            nil -> raise "No step definition found for: #{step_text}"
-          end
-        end
-      end
-
+    # Note: step matching and dispatch happen in Cucumber.Runtime via the
+    # step registry — there is deliberately no per-module dispatcher, so
+    # matching semantics (including ambiguity detection) live in one place.
     quote do
       # Make steps available for discovery
       def __cucumber_steps__ do
         unquote(Macro.escape(steps))
       end
-
-      # Define the step/2 function
-      unquote(step_function)
     end
   end
 end
