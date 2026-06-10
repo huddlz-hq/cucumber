@@ -486,6 +486,7 @@ defmodule Gherkin.ParserTest do
         "test/features/advanced_features.feature" => 2,
         "test/features/async_example.feature" => 2,
         "test/features/database_example.feature" => 2,
+        "test/features/descriptions.feature" => 3,
         "test/features/error_reporting.feature" => 2,
         "test/features/feature_level_tags.feature" => 2,
         "test/features/hook_execution_order.feature" => 1,
@@ -496,6 +497,11 @@ defmodule Gherkin.ParserTest do
         "test/features/simple.feature" => 1,
         "test/features/tagged.feature" => 4
       }
+
+      # Every live feature file must have an entry, so a new file can't
+      # silently skip this check.
+      assert Path.wildcard("test/features/**/*.feature") |> Enum.sort() ==
+               expected_counts |> Map.keys() |> Enum.sort()
 
       for {file, expected_count} <- expected_counts do
         content = File.read!(file)

@@ -156,27 +156,34 @@ defmodule Gherkin.NimbleParser do
     |> label("data table")
 
   # --- DocStrings ---
-  docstring_delimiter = string(~s("""))
+  # Gherkin supports two docstring delimiters: """ and ``` (backticks).
+  # The closing delimiter must match the opening one, so each delimiter gets
+  # its own combinator — which also makes the other delimiter style plain
+  # content for free. An optional media type (e.g. json in ```json) may
+  # follow the opening delimiter.
+  docstring_for = fn delimiter ->
+    # Content line (anything that's not this docstring's closing delimiter)
+    content_line =
+      lookahead_not(
+        optional_ws
+        |> concat(string(delimiter))
+      )
+      |> concat(utf8_string([not: ?\n, not: ?\r], min: 0))
+      |> ignore(newline)
 
-  # Content line (anything that's not the closing delimiter)
-  docstring_content_line =
-    lookahead_not(
-      optional_ws
-      |> concat(docstring_delimiter)
-    )
-    |> concat(utf8_string([not: ?\n, not: ?\r], min: 0))
-    |> ignore(newline)
-
-  # Full docstring
-  docstring =
     optional_ws
-    |> ignore(docstring_delimiter)
+    |> ignore(string(delimiter))
+    |> concat(rest_of_line |> unwrap_and_tag(:media_type))
     |> concat(eol)
-    |> repeat(docstring_content_line)
+    |> repeat(content_line)
     |> concat(optional_ws)
-    |> ignore(docstring_delimiter)
+    |> ignore(string(delimiter))
     |> concat(eol)
-    |> reduce({__MODULE__, :join_docstring, []})
+  end
+
+  docstring =
+    choice([docstring_for.(~s(""")), docstring_for.("```")])
+    |> reduce({__MODULE__, :build_docstring, []})
     |> unwrap_and_tag(:docstring)
     |> label("docstring")
 
@@ -221,6 +228,72 @@ defmodule Gherkin.NimbleParser do
     |> reduce({__MODULE__, :filter_steps, []})
 
   # ============================================================
+  # LEVEL 4.5: DESCRIPTIONS
+  # ============================================================
+  # Free-form description text may follow any section header (Feature:,
+  # Background:, Scenario:, Scenario Outline:, Examples:) until the first
+  # step, tag, table row, docstring, or next section keyword. Blank lines
+  # are part of the description region (captured as empty lines); comment
+  # lines are skipped. The builder dedents and trims the collected lines.
+
+  # A description line must consume at least one byte — content or a bare
+  # newline — or repeat() would loop forever on a zero-width match at the
+  # end of input.
+  description_line_content =
+    choice([
+      utf8_string([not: ?\n, not: ?\r], min: 1) |> concat(eol),
+      newline |> replace("")
+    ])
+
+  # At feature level there are no steps yet, so lines starting with step
+  # keywords (including * bullets) are still description.
+  feature_description_line =
+    lookahead_not(
+      optional_ws
+      |> choice([
+        background_keyword,
+        scenario_keyword,
+        scenario_outline_keyword,
+        examples_keyword,
+        string("@")
+      ])
+    )
+    |> lookahead_not(optional_ws |> concat(string("#")))
+    |> concat(description_line_content)
+
+  feature_description =
+    repeat(choice([comment_line, feature_description_line]))
+    |> reduce({__MODULE__, :build_description, []})
+    |> unwrap_and_tag(:description)
+
+  # Inside a section, a line starting with a step keyword belongs to the
+  # steps (the keyword must be followed by whitespace, so words like
+  # "Givenness" stay description). Table rows and docstring delimiters
+  # terminate the description so malformed placement still errors.
+  section_description_line =
+    lookahead_not(
+      optional_ws
+      |> choice([
+        step_keyword |> concat(horizontal_ws),
+        background_keyword,
+        scenario_keyword,
+        scenario_outline_keyword,
+        examples_keyword,
+        string("@"),
+        string("|"),
+        string(~s(""")),
+        string("```")
+      ])
+    )
+    |> lookahead_not(optional_ws |> concat(string("#")))
+    |> concat(description_line_content)
+
+  section_description =
+    repeat(choice([comment_line, section_description_line]))
+    |> reduce({__MODULE__, :build_description, []})
+    |> unwrap_and_tag(:description)
+
+  # ============================================================
   # LEVEL 5: SCENARIOS
   # ============================================================
 
@@ -235,7 +308,7 @@ defmodule Gherkin.NimbleParser do
   background =
     optional_ws
     |> concat(background_name)
-    |> ignore(blank_lines)
+    |> concat(section_description)
     |> concat(steps |> tag(:steps))
     |> reduce({__MODULE__, :build_background, []})
     |> unwrap_and_tag(:background)
@@ -255,7 +328,7 @@ defmodule Gherkin.NimbleParser do
       |> concat(examples_keyword)
     )
 
-  # Examples block (tags + name + table)
+  # Examples block (tags + name + description + table)
   examples_block =
     ignore(blank_lines)
     |> concat(examples_lookahead)
@@ -263,7 +336,7 @@ defmodule Gherkin.NimbleParser do
     |> concat(optional_ws)
     |> line(examples_name)
     |> concat(eol)
-    |> ignore(blank_lines)
+    |> concat(section_description)
     |> concat(times(table_row, min: 1) |> tag(:table))
     |> reduce({__MODULE__, :build_examples, []})
     |> label("examples block")
@@ -280,7 +353,7 @@ defmodule Gherkin.NimbleParser do
     |> concat(optional_ws)
     |> line(scenario_name)
     |> concat(eol)
-    |> ignore(blank_lines)
+    |> concat(section_description)
     |> concat(steps |> tag(:steps))
     |> reduce({__MODULE__, :build_scenario, []})
     |> label("scenario")
@@ -297,7 +370,7 @@ defmodule Gherkin.NimbleParser do
     |> concat(optional_ws)
     |> line(outline_name)
     |> concat(eol)
-    |> ignore(blank_lines)
+    |> concat(section_description)
     |> concat(steps |> tag(:steps))
     |> concat(times(examples_block, min: 1) |> tag(:examples))
     |> reduce({__MODULE__, :build_scenario_outline, []})
@@ -322,29 +395,13 @@ defmodule Gherkin.NimbleParser do
     |> concat(rest_of_line)
     |> concat(eol)
 
-  # Feature description (lines between feature name and first scenario/background)
-  # A description line is any line that's not a section start or tag
-  description_line =
-    lookahead_not(
-      optional_ws
-      |> choice([
-        background_keyword,
-        scenario_keyword,
-        scenario_outline_keyword,
-        string("@")
-      ])
-    )
-    |> concat(rest_of_line)
-    |> concat(eol)
-    |> ignore()
-
   # Full feature file parser
   feature =
     ignore(blank_lines)
     |> concat(tags |> tag(:tags))
     |> concat(optional_ws)
     |> concat(feature_name |> unwrap_and_tag(:name))
-    |> ignore(repeat(choice([blank_line, description_line])))
+    |> concat(feature_description)
     |> optional(background)
     |> concat(repeat(scenario_definition) |> tag(:scenarios))
     |> reduce({__MODULE__, :build_feature, []})
@@ -398,6 +455,15 @@ defmodule Gherkin.NimbleParser do
   # ============================================================
 
   @doc false
+  # Builds the {content, media_type} pair for a docstring from the parser
+  # output: a tagged media type (text after the opening delimiter) followed
+  # by the raw content lines.
+  def build_docstring([{:media_type, media_type} | lines]) do
+    media_type = if media_type == "", do: nil, else: media_type
+    {join_docstring(lines), media_type}
+  end
+
+  @doc false
   def join_docstring(lines) do
     # Find minimum indentation of non-empty lines
     min_indent =
@@ -410,6 +476,17 @@ defmodule Gherkin.NimbleParser do
     lines
     |> Enum.map_join("\n", &strip_indent(&1, min_indent))
     |> String.trim_trailing()
+  end
+
+  @doc false
+  # Joins captured description lines: dedents to the minimum indentation of
+  # non-blank lines, preserves interior blank lines, and drops leading and
+  # trailing blank lines.
+  def build_description(lines) do
+    lines
+    |> Enum.map(&String.trim_trailing/1)
+    |> join_docstring()
+    |> String.trim_leading("\n")
   end
 
   defp count_leading_spaces(line) do
@@ -452,17 +529,18 @@ defmodule Gherkin.NimbleParser do
     {step_data, attachment} = extract_step_parts(args)
     {[keyword, text], {line_num, _offset}} = step_data
 
-    {docstring, datatable} =
+    {docstring, docstring_media_type, datatable} =
       case attachment do
-        {:docstring, ds} -> {ds, nil}
-        {:datatable, dt} -> {nil, dt}
-        nil -> {nil, nil}
+        {:docstring, {content, media_type}} -> {content, media_type, nil}
+        {:datatable, dt} -> {nil, nil, dt}
+        nil -> {nil, nil, nil}
       end
 
     %Step{
       keyword: keyword,
       text: text,
       docstring: docstring,
+      docstring_media_type: docstring_media_type,
       datatable: datatable,
       line: line_num - 1
     }
@@ -481,7 +559,8 @@ defmodule Gherkin.NimbleParser do
     steps = extract_tagged(args, :steps)
 
     %Background{
-      steps: steps
+      steps: steps,
+      description: extract_tagged_single(args, :description) || ""
     }
   end
 
@@ -495,6 +574,7 @@ defmodule Gherkin.NimbleParser do
 
     %Examples{
       name: name,
+      description: extract_tagged_single(args, :description) || "",
       tags: tags,
       table_header: header,
       table_body: body,
@@ -502,8 +582,11 @@ defmodule Gherkin.NimbleParser do
     }
   end
 
-  defp extract_examples_name(args), do: extract_name_from_args(args, [:tags, :table])
-  defp extract_scenario_name(args), do: extract_name_from_args(args, [:tags, :steps, :examples])
+  defp extract_examples_name(args),
+    do: extract_name_from_args(args, [:tags, :table, :description])
+
+  defp extract_scenario_name(args),
+    do: extract_name_from_args(args, [:tags, :steps, :examples, :description])
 
   defp extract_name_from_args([{tag, _} | rest], skip_tags) when is_atom(tag) do
     if tag in skip_tags,
@@ -533,6 +616,7 @@ defmodule Gherkin.NimbleParser do
 
     %Scenario{
       name: name,
+      description: extract_tagged_single(args, :description) || "",
       steps: steps,
       tags: tags,
       line: if(line_num, do: line_num - 1, else: nil)
@@ -548,6 +632,7 @@ defmodule Gherkin.NimbleParser do
 
     %ScenarioOutline{
       name: name,
+      description: extract_tagged_single(args, :description) || "",
       steps: steps,
       tags: tags,
       examples: examples,
@@ -564,7 +649,7 @@ defmodule Gherkin.NimbleParser do
 
     %Feature{
       name: name,
-      description: "",
+      description: extract_tagged_single(args, :description) || "",
       tags: tags,
       background: background,
       scenarios: scenarios

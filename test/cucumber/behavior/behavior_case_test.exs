@@ -277,6 +277,32 @@ defmodule Cucumber.BehaviorCaseTest do
     end
   end
 
+  describe "descriptions" do
+    test "scenarios with descriptions at every level execute their steps normally" do
+      run =
+        run_feature(
+          """
+          Feature: described feature
+            The feature description does not affect execution.
+
+            Background:
+              Background descriptions do not affect execution either.
+
+              Given a passing step
+
+            Scenario: described scenario
+              Nor do scenario descriptions.
+
+              Given another passing step
+          """,
+          steps: [BasicSteps]
+        )
+
+      assert run.passed == 1
+      assert run.events == [:passing_step, :another_passing_step]
+    end
+  end
+
   describe "undefined steps" do
     test "an undefined step fails with a definition suggestion" do
       run =

@@ -24,10 +24,11 @@ defmodule Gherkin.Background do
   A Background contains steps that are run before each scenario in the feature.
   It allows you to define common setup steps that apply to all scenarios.
   """
-  defstruct steps: []
+  defstruct steps: [], description: ""
 
   @type t :: %__MODULE__{
-          steps: [Gherkin.Step.t()]
+          steps: [Gherkin.Step.t()],
+          description: String.t()
         }
 end
 
@@ -36,13 +37,15 @@ defmodule Gherkin.Scenario do
   Represents a Gherkin Scenario section.
 
   A Scenario is a concrete example that illustrates a business rule.
-  It consists of a name, a list of steps, optional tags for filtering,
-  and the line number where it appears in the source file.
+  It consists of a name, an optional free-form description, a list of steps,
+  optional tags for filtering, and the line number where it appears in the
+  source file.
   """
-  defstruct name: "", steps: [], tags: [], line: nil
+  defstruct name: "", description: "", steps: [], tags: [], line: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
+          description: String.t(),
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           line: non_neg_integer() | nil
@@ -57,10 +60,11 @@ defmodule Gherkin.ScenarioOutline do
   from Examples tables. Placeholders in step text use `<name>` syntax and are
   substituted with values from each row of the Examples table.
   """
-  defstruct name: "", steps: [], tags: [], examples: [], line: nil
+  defstruct name: "", description: "", steps: [], tags: [], examples: [], line: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
+          description: String.t(),
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           examples: [Gherkin.Examples.t()],
@@ -74,12 +78,14 @@ defmodule Gherkin.Examples do
 
   Each Examples block contains a table of data used to parameterize the outline.
   The first row contains headers (placeholder names), and subsequent rows contain
-  values to substitute. Examples blocks can have optional names and tags.
+  values to substitute. Examples blocks can have optional names, descriptions,
+  and tags.
   """
-  defstruct name: "", tags: [], table_header: [], table_body: [], line: nil
+  defstruct name: "", description: "", tags: [], table_header: [], table_body: [], line: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
+          description: String.t(),
           tags: [String.t()],
           table_header: [String.t()],
           table_body: [[String.t()]],
@@ -94,16 +100,24 @@ defmodule Gherkin.Step do
   A Step is a single action or assertion in a scenario. It consists of:
   - keyword: The step type (Given, When, Then, And, But, or *)
   - text: The step text that matches step definitions
-  - docstring: Optional multi-line text block (triple-quoted)
+  - docstring: Optional multi-line text block (delimited by `\"\"\"` or triple backticks)
+  - docstring_media_type: Optional media type annotation on the opening
+    docstring delimiter (e.g. `json` in `\"\"\"json`)
   - datatable: Optional table data (pipe-delimited)
   - line: Line number in the source file
   """
-  defstruct keyword: "", text: "", docstring: nil, datatable: nil, line: nil
+  defstruct keyword: "",
+            text: "",
+            docstring: nil,
+            docstring_media_type: nil,
+            datatable: nil,
+            line: nil
 
   @type t :: %__MODULE__{
           keyword: String.t(),
           text: String.t(),
           docstring: String.t() | nil,
+          docstring_media_type: String.t() | nil,
           datatable: [[String.t()]] | nil,
           line: non_neg_integer() | nil
         }
