@@ -158,6 +158,8 @@ Step definitions must return one of the following values (matching ExUnit's setu
 3. A keyword list - Merged into the existing context
 4. `{:ok, map_or_keyword_list}` - Merged into the existing context
 5. `{:error, reason}` - Fails the step with the given reason
+6. `:pending` / `{:pending, message}` - Skips remaining steps, fails the scenario with `Cucumber.PendingStepError`
+7. `:skipped` / `{:skipped, reason}` - Skips remaining steps without failing the scenario
 
 ## Advanced Features
 
