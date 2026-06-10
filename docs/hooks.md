@@ -1,6 +1,6 @@
 # Hooks
 
-Cucumber for Elixir provides hooks that allow you to run code before and after scenarios. This is useful for setup and teardown operations like database transactions, authentication, or any other cross-cutting concerns.
+Cucumber for Elixir provides hooks that allow you to run code around the whole run (`before_all`/`after_all`), around each scenario (`before_scenario`/`after_scenario`), and around each step (`before_step`/`after_step`). This is useful for setup and teardown operations like database transactions, authentication, or any other cross-cutting concerns.
 
 ## Overview
 
@@ -79,6 +79,76 @@ after_scenario "@api", context do
 end
 ```
 
+### Run-Level Hooks (BeforeAll/AfterAll)
+
+`before_all` hooks run lazily, exactly once per test run, before the first
+scenario that executes — serialized through a run coordinator, so they are
+safe with `@async` features. Their accumulated context map is merged into
+every scenario's context. If a `before_all` hook fails, the remaining
+`before_all` hooks still run (to set up as much as possible for cleanup),
+but every scenario in the run fails with the original error.
+
+`after_all` hooks run once after the whole suite, in reverse definition
+order, receiving the `before_all` context with the ExUnit suite summary
+merged under `:suite_result`. A failing `after_all` hook fails the run; the
+remaining `after_all` hooks still run.
+
+Run-level hooks cannot be tagged (they don't belong to any scenario):
+
+```elixir
+before_all context do
+  {:ok, server} = start_external_service()
+  {:ok, Map.put(context, :service, server)}
+end
+
+after_all context do
+  stop_external_service(context.service)
+  :ok
+end
+```
+
+### Step Hooks
+
+`before_step` and `after_step` hooks bracket every step of matching
+scenarios, including background steps. They receive the step's prepared
+context — `:step` (the `Gherkin.Step` struct), `:args`, and any
+`:datatable`/`:docstring`. `after_step` additionally sees `:step_status`
+(`:passed`, `:failed`, `:pending`, or `:skipped`) and runs for failing
+steps too.
+
+A `{:error, reason}` from a `before_step` hook fails the scenario without
+running the step body; `:skipped`/`:pending` signals from `before_step`
+halt the scenario just like the step itself returning them. `after_step`
+return values are ignored.
+
+```elixir
+before_step "@traced", context do
+  IO.puts("→ #{context.step.keyword} #{context.step.text}")
+  :ok
+end
+
+after_step "@traced", context do
+  IO.puts("← #{context.step.text}: #{context.step_status}")
+  :ok
+end
+```
+
+### Named Hooks
+
+Any hook can be given a `name:`, which appears in failure output. Names
+also lift the one-hook-per-kind restriction, so a module can define any
+number of distinctly-named hooks of the same kind:
+
+```elixir
+before_scenario context, name: "prepare database" do
+  {:ok, context}
+end
+
+before_scenario "@admin", context, name: "sign in as admin" do
+  {:ok, context}
+end
+```
+
 ## Return Values
 
 Hooks support the same return values as step definitions:
@@ -99,10 +169,13 @@ Return values from after hooks are ignored, so an after hook returning
 
 ## Hook Execution Order
 
-1. Before hooks run in the order they are defined
-2. After hooks run in reverse order (last defined runs first)
-3. Tagged hooks only run for scenarios with matching tags
-4. Global hooks run for all scenarios
+1. `before_all` hooks run once, in definition order, before the first scenario
+2. Before hooks run in the order they are defined
+3. `before_step`/`after_step` hooks bracket each step (after-step in reverse order)
+4. After hooks run in reverse order (last defined runs first)
+5. `after_all` hooks run once, in reverse order, after the whole suite
+6. Tagged hooks only run for scenarios with matching tags
+7. Global hooks run for all scenarios
 
 ## Tag Inheritance
 

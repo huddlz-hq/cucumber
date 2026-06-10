@@ -56,7 +56,9 @@ defmodule Cucumber.BehaviorCase do
 
   using do
     quote do
-      import Cucumber.BehaviorCase, only: [run_feature: 1, run_feature: 2]
+      import Cucumber.BehaviorCase,
+        only: [run_feature: 1, run_feature: 2, run_features: 1, run_features: 2]
+
       alias Cucumber.BehaviorCase.Collector
     end
   end
@@ -104,26 +106,52 @@ defmodule Cucumber.BehaviorCase do
     * `:module` - the generated test module
   """
   def run_feature(source, opts \\ []) do
+    run_features([source], opts)
+  end
+
+  @doc """
+  Like `run_feature/2`, but compiles several feature sources into separate
+  modules and executes them in one nested run — for behaviors that span
+  feature modules (e.g. run-level hooks).
+
+  The `:file` option, when given, names the first source; the rest get
+  unique generated paths. The result's `:module` is the first generated
+  module; `:modules` carries all of them.
+  """
+  def run_features(sources, opts \\ []) when is_list(sources) do
     step_modules = opts |> Keyword.get(:steps, []) |> List.wrap()
     hook_modules = opts |> Keyword.get(:hooks, []) |> List.wrap()
     parameter_types = opts |> Keyword.get(:parameter_types, []) |> List.wrap() |> merge_types()
-    file = Keyword.get_lazy(opts, :file, &unique_feature_path/0)
-
-    feature =
-      source
-      |> Gherkin.Parser.parse()
-      |> Map.put(:file, file)
 
     registry = build_registry(step_modules, parameter_types)
 
+    # Each run_feature call is its own isolated cucumber run: reset the
+    # coordinator so run-level state (before_all/after_all) from a previous
+    # behavior test can't leak in.
+    Cucumber.RunCoordinator.ensure_started()
     Collector.reset()
 
-    module =
-      Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
-        parameter_types: parameter_types
-      )
+    modules =
+      sources
+      |> Enum.with_index()
+      |> Enum.map(fn {source, index} ->
+        file =
+          case {Keyword.fetch(opts, :file), index} do
+            {{:ok, file}, 0} -> file
+            _ -> unique_feature_path()
+          end
 
-    {result, output} = run_isolated(module)
+        feature =
+          source
+          |> Gherkin.Parser.parse()
+          |> Map.put(:file, file)
+
+        Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
+          parameter_types: parameter_types
+        )
+      end)
+
+    {result, output} = run_isolated(modules)
 
     %{
       total: result.total,
@@ -133,7 +161,8 @@ defmodule Cucumber.BehaviorCase do
       passed: result.total - result.failures - result.skipped - result.excluded,
       output: output,
       events: Collector.events(),
-      module: module
+      module: List.first(modules),
+      modules: modules
     }
   end
 
@@ -141,7 +170,7 @@ defmodule Cucumber.BehaviorCase do
   # filters, so outer-suite filters (e.g. `mix test --exclude cucumber`,
   # which would exclude every generated module via its :cucumber moduletag)
   # cannot distort the nested result. Safe to swap globally: see moduledoc.
-  defp run_isolated(module) do
+  defp run_isolated(modules) do
     config = ExUnit.configuration()
 
     try do
@@ -149,7 +178,7 @@ defmodule Cucumber.BehaviorCase do
 
       output =
         capture_io(fn ->
-          Process.put(__MODULE__, ExUnit.run([module]))
+          Process.put(__MODULE__, ExUnit.run(modules))
         end)
 
       {Process.delete(__MODULE__), output}

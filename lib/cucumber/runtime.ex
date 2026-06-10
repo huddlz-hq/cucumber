@@ -101,9 +101,18 @@ defmodule Cucumber.Runtime do
       tags: all_tags
     }
 
+    # Run-level setup happens lazily before the first scenario of the run;
+    # its context reaches every scenario. A BeforeAll failure fails every
+    # scenario before any scenario hook or step runs.
+    context =
+      case Cucumber.RunCoordinator.before_all_context(hooks) do
+        {:ok, before_all_context} -> Map.merge(context, before_all_context)
+        {:error, message} -> raise message
+      end
+
     case Cucumber.Hooks.run_before_hooks(hooks, context, all_tags) do
-      {:error, reason} ->
-        raise "Before hook failed: #{inspect(reason)}"
+      {:error, reason, hook_name} ->
+        raise "Before hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
 
       {:halted, status, reason} ->
         # Pending/skipped from a before hook: every step (background and
@@ -191,7 +200,7 @@ defmodule Cucumber.Runtime do
     steps
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, context}, fn {step, index}, {:ok, ctx} ->
-      case execute_step(ctx, step, exec.step_registry, exec.parameter_types) do
+      case do_execute_step(ctx, step, exec) do
         {:halted, status, reason, ctx} ->
           {:halt, {:halted, status, reason, step, Enum.drop(steps, index + 1), ctx}}
 
@@ -210,44 +219,37 @@ defmodule Cucumber.Runtime do
   Returns the updated context, or `{:halted, status, reason, context}` when
   the step signaled `:pending` or `:skipped` — the caller owns what happens
   to the rest of the scenario.
+
+  Step hooks do not run through this entry point; they require the scenario
+  runner's hook list (see `run_scenario/3`).
   """
   @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) ::
           map() | {:halted, :pending | :skipped, String.t() | nil, map()}
   def execute_step(context, step, step_registry, parameter_types \\ %{}) do
+    do_execute_step(context, step, %{
+      step_registry: step_registry,
+      parameter_types: parameter_types,
+      hooks: [],
+      tags: []
+    })
+  end
+
+  defp do_execute_step(context, step, exec) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
     context = update_in(context, [:step_history], &(&1 ++ [step]))
 
     # Find matching step definition
-    case find_step_definition(step.text, step_registry, parameter_types) do
+    case find_step_definition(step.text, exec.step_registry, exec.parameter_types) do
       {:ok, {module, metadata}, args, pattern_text} ->
-        # Prepare context with step arguments
-        context = prepare_context(context, args, step)
+        # Prepare context with step arguments; :step is visible to step
+        # hooks and the step body alike
+        context =
+          context
+          |> prepare_context(args, step)
+          |> Map.put(:step, step)
 
-        # Execute the step
-        try do
-          result = apply(module, metadata.function, [context])
-          process_step_result(result, context)
-        rescue
-          e ->
-            # Extract meaningful information from the error
-            feature_file = Map.get(context, :feature_file, "unknown")
-            scenario_name = Map.get(context, :scenario_name, "unknown scenario")
-            step_history = Map.get(context, :step_history, [])
-
-            # Create enhanced error with better formatting
-            enhanced_error =
-              Cucumber.StepError.failed_step(
-                step,
-                pattern_text,
-                format_exception_for_display(e),
-                feature_file,
-                scenario_name,
-                format_step_history_with_status(step_history, step, context)
-              )
-
-            reraise enhanced_error, scenario_stacktrace(context, step, __STACKTRACE__)
-        end
+        run_matched_step(context, step, {module, metadata}, pattern_text, exec)
 
       {:ambiguous, matches} ->
         feature_file = Map.get(context, :feature_file, "unknown")
@@ -278,6 +280,66 @@ defmodule Cucumber.Runtime do
         :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
     end
   end
+
+  # Brackets the matched step definition with before_step/after_step hooks.
+  # A {:error, reason} from a before_step hook fails the scenario without
+  # running the step body; a :pending/:skipped signal halts the scenario
+  # like the step itself returning it.
+  defp run_matched_step(context, step, definition, pattern_text, exec) do
+    case Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags) do
+      {:error, reason, hook_name} ->
+        raise "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
+
+      {:halted, status, reason} ->
+        {:halted, status, reason, context}
+
+      {:ok, context} ->
+        invoke_step(context, step, definition, pattern_text, exec)
+    end
+  end
+
+  defp invoke_step(context, step, {module, metadata}, pattern_text, exec) do
+    outcome =
+      try do
+        result = apply(module, metadata.function, [context])
+        process_step_result(result, context)
+      rescue
+        e ->
+          # After-step hooks see failing steps too (a hook raising here
+          # masks the step's own error — that's the hook author's bug)
+          Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
+
+          # Extract meaningful information from the error
+          feature_file = Map.get(context, :feature_file, "unknown")
+          scenario_name = Map.get(context, :scenario_name, "unknown scenario")
+          step_history = Map.get(context, :step_history, [])
+
+          # Create enhanced error with better formatting
+          enhanced_error =
+            Cucumber.StepError.failed_step(
+              step,
+              pattern_text,
+              format_exception_for_display(e),
+              feature_file,
+              scenario_name,
+              format_step_history_with_status(step_history, step, context)
+            )
+
+          reraise enhanced_error, scenario_stacktrace(context, step, __STACKTRACE__)
+      end
+
+    {status, hook_context} =
+      case outcome do
+        {:halted, status, _reason, ctx} -> {status, ctx}
+        ctx -> {:passed, ctx}
+      end
+
+    Cucumber.Hooks.run_after_step_hooks(exec.hooks, hook_context, exec.tags, status)
+    outcome
+  end
+
+  defp hook_label(nil), do: ""
+  defp hook_label(name), do: ~s( "#{name}")
 
   defp find_step_definition(step_text, step_registry, parameter_types) do
     matches =

@@ -71,9 +71,9 @@ defmodule Cucumber.HooksTest do
       end
 
       hooks = [
-        {:before_scenario, nil, {FilterTestModule, :global_hook}},
-        {:before_scenario, "@database", {FilterTestModule, :database_hook}},
-        {:before_scenario, "@special", {FilterTestModule, :special_hook}}
+        {:before_scenario, nil, nil, {FilterTestModule, :global_hook}},
+        {:before_scenario, "@database", nil, {FilterTestModule, :database_hook}},
+        {:before_scenario, "@special", nil, {FilterTestModule, :special_hook}}
       ]
 
       # With ["database"] tags, should get global + @database hooks
@@ -96,8 +96,8 @@ defmodule Cucumber.HooksTest do
       end
 
       hooks = [
-        {:before_scenario, nil, {RunTestModule, :hook_a}},
-        {:before_scenario, "@database", {RunTestModule, :hook_b}}
+        {:before_scenario, nil, nil, {RunTestModule, :hook_a}},
+        {:before_scenario, "@database", nil, {RunTestModule, :hook_b}}
       ]
 
       # With database tag, both hooks run
@@ -117,7 +117,7 @@ defmodule Cucumber.HooksTest do
       end
 
       hooks = [
-        {:before_scenario, nil, {KeywordReturnModule, :keyword_hook}}
+        {:before_scenario, nil, nil, {KeywordReturnModule, :keyword_hook}}
       ]
 
       {:ok, result} = Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
@@ -131,7 +131,7 @@ defmodule Cucumber.HooksTest do
       end
 
       hooks = [
-        {:before_scenario, nil, {InvalidReturnModule, :bad_hook}}
+        {:before_scenario, nil, nil, {InvalidReturnModule, :bad_hook}}
       ]
 
       assert_raise RuntimeError, ~r/Invalid hook return value/, fn ->
@@ -148,9 +148,9 @@ defmodule Cucumber.HooksTest do
       end
 
       hooks = [
-        {:before_scenario, nil, {CombinedTagsModule, :count_hook}},
-        {:before_scenario, "@database", {CombinedTagsModule, :count_hook}},
-        {:before_scenario, "@special", {CombinedTagsModule, :count_hook}}
+        {:before_scenario, nil, nil, {CombinedTagsModule, :count_hook}},
+        {:before_scenario, "@database", nil, {CombinedTagsModule, :count_hook}},
+        {:before_scenario, "@special", nil, {CombinedTagsModule, :count_hook}}
       ]
 
       # Scenario 1: feature has @database, scenario has no extra tags
