@@ -485,6 +485,7 @@ defmodule Gherkin.ParserTest do
       expected_counts = %{
         "test/features/advanced_features.feature" => 2,
         "test/features/async_example.feature" => 2,
+        "test/features/custom_parameter_types.feature" => 2,
         "test/features/database_example.feature" => 2,
         "test/features/descriptions.feature" => 3,
         "test/features/error_reporting.feature" => 2,

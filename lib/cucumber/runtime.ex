@@ -22,15 +22,18 @@ defmodule Cucumber.Runtime do
 
   @doc """
   Executes a step with the given context and step registry.
+
+  `parameter_types` carries custom parameter type definitions (see
+  `Cucumber.ParameterTypes`) used when matching cucumber expressions.
   """
-  @spec execute_step(map(), Gherkin.Step.t(), map()) :: map()
-  def execute_step(context, step, step_registry) do
+  @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) :: map()
+  def execute_step(context, step, step_registry, parameter_types \\ %{}) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
     context = update_in(context, [:step_history], &(&1 ++ [step]))
 
     # Find matching step definition
-    case find_step_definition(step.text, step_registry) do
+    case find_step_definition(step.text, step_registry, parameter_types) do
       {:ok, {module, metadata}, args, pattern_text} ->
         # Prepare context with step arguments
         context = prepare_context(context, args, step)
@@ -90,10 +93,10 @@ defmodule Cucumber.Runtime do
     end
   end
 
-  defp find_step_definition(step_text, step_registry) do
+  defp find_step_definition(step_text, step_registry, parameter_types) do
     matches =
       Enum.flat_map(step_registry, fn {key, definition} ->
-        case match_pattern(key, step_text) do
+        case match_pattern(key, step_text, parameter_types) do
           {:match, args} -> [{display_pattern(key), definition, args}]
           :no_match -> []
         end
@@ -112,12 +115,12 @@ defmodule Cucumber.Runtime do
     end
   end
 
-  defp match_pattern({:expression, pattern_text}, step_text) do
+  defp match_pattern({:expression, pattern_text}, step_text, parameter_types) do
     # Compile pattern on the fly (cached via :persistent_term)
-    Expression.match(step_text, Expression.compile(pattern_text))
+    Expression.match(step_text, Expression.compile(pattern_text, parameter_types))
   end
 
-  defp match_pattern({:regex, {source, opts}}, step_text) do
+  defp match_pattern({:regex, {source, opts}}, step_text, _parameter_types) do
     # Cucumber regexes must match the entire step text. Captures become args
     # as strings (no type conversion — that's a cucumber-expressions feature);
     # unmatched optional groups become nil. The capture list is explicit
@@ -151,7 +154,7 @@ defmodule Cucumber.Runtime do
     case :persistent_term.get(cache_key, :not_found) do
       :not_found ->
         anchored = Regex.compile!("\\A(?:#{source})\\z", opts)
-        entry = {anchored, count_capture_groups(source)}
+        entry = {anchored, Expression.count_capture_groups(source)}
         :persistent_term.put(cache_key, entry)
         entry
 
@@ -159,28 +162,6 @@ defmodule Cucumber.Runtime do
         entry
     end
   end
-
-  # Counts capturing groups in a regex source: plain `(`, named `(?<name>`,
-  # `(?'name'`, and `(?P<name>` capture; other `(?...)` constructs don't.
-  # Escapes and character classes are skipped.
-  defp count_capture_groups(source), do: count_groups(source, :normal, 0)
-
-  defp count_groups(<<>>, _state, count), do: count
-  defp count_groups(<<?\\, _, rest::binary>>, state, count), do: count_groups(rest, state, count)
-  defp count_groups(<<?[, rest::binary>>, :normal, count), do: count_groups(rest, :class, count)
-  defp count_groups(<<?], rest::binary>>, :class, count), do: count_groups(rest, :normal, count)
-
-  defp count_groups(<<?(, rest::binary>>, :normal, count) do
-    case rest do
-      <<"?<", c, _::binary>> when c != ?= and c != ?! -> count_groups(rest, :normal, count + 1)
-      <<"?'", _::binary>> -> count_groups(rest, :normal, count + 1)
-      <<"?P<", _::binary>> -> count_groups(rest, :normal, count + 1)
-      <<"?", _::binary>> -> count_groups(rest, :normal, count)
-      _ -> count_groups(rest, :normal, count + 1)
-    end
-  end
-
-  defp count_groups(<<_, rest::binary>>, state, count), do: count_groups(rest, state, count)
 
   defp extract_group_values(indexes, step_text) do
     Enum.map(indexes, fn

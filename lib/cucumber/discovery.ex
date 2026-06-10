@@ -22,7 +22,11 @@ defmodule Cucumber.Discovery do
 
   defmodule DiscoveryResult do
     @moduledoc "Result struct returned by `Cucumber.Discovery.discover/1`."
-    defstruct features: [], step_modules: [], step_registry: %{}, hook_modules: []
+    defstruct features: [],
+              step_modules: [],
+              step_registry: %{},
+              hook_modules: [],
+              parameter_types: %{}
 
     @typedoc """
     Registry keys identify the pattern kind and pattern — `{:expression, source}`
@@ -37,7 +41,8 @@ defmodule Cucumber.Discovery do
             features: [Gherkin.Feature.t()],
             step_modules: [module()],
             step_registry: %{registry_key() => {module(), map()}},
-            hook_modules: [module()]
+            hook_modules: [module()],
+            parameter_types: Cucumber.Expression.custom_types()
           }
   end
 
@@ -51,14 +56,16 @@ defmodule Cucumber.Discovery do
     steps_patterns = get_patterns(:steps, opts)
     support_patterns = get_patterns(:support, opts)
 
-    # Load support files first (like Ruby cucumber)
-    hook_modules = load_support_files(support_patterns)
+    # Load support files first (like Ruby cucumber); they define hooks and
+    # custom parameter types
+    {hook_modules, parameter_type_modules} = load_support_files(support_patterns)
+    parameter_types = build_parameter_types(parameter_type_modules)
 
     # Discover and load step definitions
     step_modules = load_step_definitions(steps_patterns)
 
     # Build step registry from loaded modules
-    step_registry = build_step_registry(step_modules)
+    step_registry = build_step_registry(step_modules, parameter_types)
 
     # Discover and parse feature files
     features = discover_features(features_patterns)
@@ -67,7 +74,8 @@ defmodule Cucumber.Discovery do
       features: features,
       step_modules: step_modules,
       step_registry: step_registry,
-      hook_modules: hook_modules
+      hook_modules: hook_modules,
+      parameter_types: parameter_types
     }
   end
 
@@ -88,26 +96,46 @@ defmodule Cucumber.Discovery do
   end
 
   defp load_support_files(patterns) do
-    patterns
-    |> expand_patterns()
-    |> Enum.map(&load_hook_module/1)
-    |> Enum.filter(& &1)
+    modules =
+      patterns
+      |> expand_patterns()
+      |> Enum.flat_map(&load_support_modules/1)
+
+    hook_modules = Enum.filter(modules, &function_exported?(&1, :__cucumber_hooks__, 0))
+
+    parameter_type_modules =
+      Enum.filter(modules, &function_exported?(&1, :__cucumber_parameter_types__, 0))
+
+    {hook_modules, parameter_type_modules}
   end
 
-  defp load_hook_module(path) do
-    # Load the file and get the modules
+  defp load_support_modules(path) do
     # Code.require_file returns nil if already loaded
     case Code.require_file(path) do
-      nil ->
-        nil
-
-      modules ->
-        modules
-        |> Enum.map(fn {module, _} -> module end)
-        |> Enum.find(fn module ->
-          function_exported?(module, :__cucumber_hooks__, 0)
-        end)
+      nil -> []
+      modules -> Enum.map(modules, fn {module, _} -> module end)
     end
+  end
+
+  defp build_parameter_types(modules) do
+    all_types =
+      for module <- modules,
+          {name, definition} <- module.__cucumber_parameter_types__(),
+          do: {name, module, definition}
+
+    Enum.reduce(all_types, %{}, &add_parameter_type/2)
+  end
+
+  defp add_parameter_type({name, module, definition}, acc) do
+    if Map.has_key?(acc, name) do
+      raise """
+      Parameter type {#{name}} is defined in more than one module
+      (#{inspect(module)} among them). Each custom parameter type may
+      only be registered once.
+      """
+    end
+
+    Map.put(acc, name, definition)
   end
 
   defp load_step_definitions(patterns) do
@@ -129,10 +157,10 @@ defmodule Cucumber.Discovery do
     end)
   end
 
-  defp build_step_registry(modules) do
+  defp build_step_registry(modules, parameter_types) do
     Enum.reduce(modules, %{}, fn module, acc ->
       steps = module.__cucumber_steps__()
-      add_module_steps_to_registry(acc, module, steps)
+      add_module_steps_to_registry(acc, module, steps, parameter_types)
     end)
   end
 
@@ -144,29 +172,59 @@ defmodule Cucumber.Discovery do
   def registry_key(%Regex{} = regex), do: {:regex, {Regex.source(regex), Regex.opts(regex)}}
   def registry_key(pattern) when is_binary(pattern), do: {:expression, pattern}
 
-  defp add_module_steps_to_registry(registry, module, steps) do
+  defp add_module_steps_to_registry(registry, module, steps, parameter_types) do
     Enum.reduce(steps, registry, fn {pattern, metadata}, acc ->
       key = registry_key(pattern)
 
-      # Check for exact duplicates at load time (overlapping-but-different
-      # patterns are detected per step text at runtime as ambiguity)
-      if Map.has_key?(acc, key) do
-        {existing_module, existing_meta} = acc[key]
+      cond do
+        not compilable_pattern?(pattern, metadata, parameter_types) ->
+          # Mirrors reference Cucumber: a definition with an undefined
+          # parameter type is excluded (with a warning) rather than aborting
+          # the run; steps that would have used it fail as undefined.
+          acc
 
-        raise """
-        Duplicate step definition: '#{display_pattern(pattern)}'
+        Map.has_key?(acc, key) ->
+          duplicate_definition!(acc[key], pattern, module, metadata)
 
-        First defined in:
-          #{existing_module} at #{existing_meta.file}:#{existing_meta.line}
-
-        Also defined in:
-          #{module} at #{metadata.file}:#{metadata.line}
-        """
+        true ->
+          Map.put(acc, key, {module, metadata})
       end
-
-      # Store with pattern as key (compile at runtime)
-      Map.put(acc, key, {module, metadata})
     end)
+  end
+
+  @doc false
+  # Public so test harnesses building registries directly apply the same
+  # undefined-parameter-type semantics as discovery.
+  def compilable_pattern?(%Regex{}, _metadata, _parameter_types), do: true
+
+  def compilable_pattern?(pattern, metadata, parameter_types) do
+    # Eagerly compile (also warming the cache) so undefined parameter types
+    # surface at load time rather than mid-scenario.
+    Cucumber.Expression.compile(pattern, parameter_types)
+    true
+  rescue
+    e in Cucumber.UndefinedParameterTypeError ->
+      IO.warn(
+        "Cucumber: step definition \"#{pattern}\" " <>
+          "(#{metadata.file}:#{metadata.line}) references undefined parameter " <>
+          "type {#{e.type_name}} and will be ignored. Steps matching it will " <>
+          "be reported as undefined.",
+        []
+      )
+
+      false
+  end
+
+  defp duplicate_definition!({existing_module, existing_meta}, pattern, module, metadata) do
+    raise """
+    Duplicate step definition: '#{display_pattern(pattern)}'
+
+    First defined in:
+      #{existing_module} at #{existing_meta.file}:#{existing_meta.line}
+
+    Also defined in:
+      #{module} at #{metadata.file}:#{metadata.line}
+    """
   end
 
   defp display_pattern(%Regex{} = regex), do: inspect(regex)

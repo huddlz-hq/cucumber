@@ -198,26 +198,38 @@ defmodule Cucumber.Expression do
     "atom" => &__MODULE__.parse_atom_param/1
   }
 
+  @typedoc """
+  A parameter matcher: either a NimbleParsec parser function (built-in
+  types) or a custom-type matcher built from a user-registered regex.
+  """
+  @type parameter_matcher ::
+          function() | {:custom, Regex.t(), non_neg_integer(), function() | nil}
+
   @type compiled :: [
           {:literal, String.t()}
-          | {:parameter, String.t(), function(), :required | :optional}
+          | {:parameter, String.t(), parameter_matcher(), :required | :optional}
           | {:optional, String.t()}
           | {:alternation, [String.t()]}
         ]
+
+  @typedoc """
+  Custom parameter type definitions, keyed by type name — see
+  `Cucumber.ParameterTypes`.
+  """
+  @type custom_types :: %{
+          String.t() => %{required(:regexp) => Regex.t(), optional(atom()) => term()}
+        }
 
   @doc """
   Compiles a Cucumber Expression pattern into a matchable AST.
 
   This function transforms a human-readable pattern with typed parameters
-  into an AST that can be used for matching step text.
+  into an AST that can be used for matching step text. Custom parameter
+  types (see `Cucumber.ParameterTypes`) are passed as the second argument;
+  `compile/1` compiles with the built-in types only.
 
-  ## Parameters
-
-  * `pattern` - A string containing a Cucumber Expression pattern
-
-  ## Returns
-
-  Returns a compiled expression (list of AST nodes) that can be passed to `match/2`.
+  Raises `Cucumber.UndefinedParameterTypeError` if the pattern references a
+  parameter type that is neither built-in nor in `custom_types`.
 
   ## Examples
 
@@ -226,12 +238,18 @@ defmodule Cucumber.Expression do
       true
   """
   @spec compile(String.t()) :: compiled()
-  def compile(pattern) do
-    cache_key = {__MODULE__, :compiled, pattern}
+  def compile(pattern), do: compile(pattern, %{})
+
+  @spec compile(String.t(), custom_types()) :: compiled()
+  def compile(pattern, custom_types) do
+    # The fingerprint includes transform funs: a recompiled support module
+    # produces new fun instances, which correctly invalidates cached
+    # expressions (relevant under mix test.watch).
+    cache_key = {__MODULE__, :compiled, pattern, :erlang.phash2(custom_types)}
 
     case :persistent_term.get(cache_key, :not_found) do
       :not_found ->
-        compiled = do_compile(pattern)
+        compiled = do_compile(pattern, custom_types)
         :persistent_term.put(cache_key, compiled)
         compiled
 
@@ -240,10 +258,10 @@ defmodule Cucumber.Expression do
     end
   end
 
-  defp do_compile(pattern) do
+  defp do_compile(pattern, custom_types) do
     case parse_expression(pattern) do
       {:ok, ast, "", _, _, _} ->
-        normalize_ast(ast)
+        normalize_ast(ast, pattern, custom_types)
 
       {:ok, _, rest, _, _, _} ->
         raise "Failed to parse expression, unexpected: #{inspect(rest)}"
@@ -253,7 +271,7 @@ defmodule Cucumber.Expression do
     end
   end
 
-  defp normalize_ast(ast) do
+  defp normalize_ast(ast, pattern, custom_types) do
     ast
     |> Enum.map(fn
       {:literal, text} ->
@@ -263,10 +281,10 @@ defmodule Cucumber.Expression do
         {:literal, char}
 
       {:parameter, [type]} ->
-        {:parameter, type, get_parser!(type), :required}
+        {:parameter, type, get_parser!(type, pattern, custom_types), :required}
 
       {:parameter, [type, true]} ->
-        {:parameter, type, get_parser!(type), :optional}
+        {:parameter, type, get_parser!(type, pattern, custom_types), :optional}
 
       {:optional, [text]} ->
         {:optional, text}
@@ -277,12 +295,52 @@ defmodule Cucumber.Expression do
     |> merge_adjacent_literals()
   end
 
-  defp get_parser!(type) do
+  defp get_parser!(type, pattern, custom_types) do
     case Map.fetch(@param_parsers, type) do
-      {:ok, parser} -> parser
-      :error -> raise "Unknown parameter type: #{type}"
+      {:ok, parser} ->
+        parser
+
+      :error ->
+        case Map.fetch(custom_types, type) do
+          {:ok, definition} -> build_custom_matcher(definition)
+          :error -> raise Cucumber.UndefinedParameterTypeError.new(type, pattern)
+        end
     end
   end
+
+  # A custom type matches a prefix of the remaining step text via its regex
+  # (anchored at the start); the matcher carries the capture-group count so
+  # unmatched optional groups can be reported as nil (PCRE drops trailing
+  # unmatched groups from plain capture results).
+  defp build_custom_matcher(%{regexp: %Regex{} = regexp} = definition) do
+    source = Regex.source(regexp)
+    prefix_anchored = Regex.compile!("\\A(?:#{source})", Regex.opts(regexp))
+    {:custom, prefix_anchored, count_capture_groups(source), Map.get(definition, :transform)}
+  end
+
+  @doc false
+  # Counts capturing groups in a regex source: plain `(`, named `(?<name>`,
+  # `(?'name'`, and `(?P<name>` capture; other `(?...)` constructs don't.
+  # Escapes and character classes are skipped. Shared with regex step
+  # definition matching in Cucumber.Runtime.
+  def count_capture_groups(source), do: count_groups(source, :normal, 0)
+
+  defp count_groups(<<>>, _state, count), do: count
+  defp count_groups(<<?\\, _, rest::binary>>, state, count), do: count_groups(rest, state, count)
+  defp count_groups(<<?[, rest::binary>>, :normal, count), do: count_groups(rest, :class, count)
+  defp count_groups(<<?], rest::binary>>, :class, count), do: count_groups(rest, :normal, count)
+
+  defp count_groups(<<?(, rest::binary>>, :normal, count) do
+    case rest do
+      <<"?<", c, _::binary>> when c != ?= and c != ?! -> count_groups(rest, :normal, count + 1)
+      <<"?'", _::binary>> -> count_groups(rest, :normal, count + 1)
+      <<"?P<", _::binary>> -> count_groups(rest, :normal, count + 1)
+      <<"?", _::binary>> -> count_groups(rest, :normal, count)
+      _ -> count_groups(rest, :normal, count + 1)
+    end
+  end
+
+  defp count_groups(<<_, rest::binary>>, state, count), do: count_groups(rest, state, count)
 
   # Merge adjacent literals (e.g., from escapes)
   defp merge_adjacent_literals(ast) do
@@ -364,22 +422,22 @@ defmodule Cucumber.Expression do
 
   # Match required parameter
   defp do_match(text, [{:parameter, _type, parser, :required} | rest], acc) do
-    case parser.(text) do
-      {:ok, [value], remaining, _, _, _} ->
+    case match_parameter(parser, text) do
+      {:ok, value, remaining} ->
         do_match(remaining, rest, [value | acc])
 
-      _ ->
+      :no_match ->
         :no_match
     end
   end
 
   # Match optional parameter
   defp do_match(text, [{:parameter, _type, parser, :optional} | rest], acc) do
-    case parser.(text) do
-      {:ok, [value], remaining, _, _, _} ->
+    case match_parameter(parser, text) do
+      {:ok, value, remaining} ->
         do_match(remaining, rest, [value | acc])
 
-      _ ->
+      :no_match ->
         # Optional failed, add nil and continue without consuming text
         do_match(text, rest, [nil | acc])
     end
@@ -415,4 +473,39 @@ defmodule Cucumber.Expression do
       end
     end)
   end
+
+  defp match_parameter(parser, text) when is_function(parser) do
+    case parser.(text) do
+      {:ok, [value], remaining, _, _, _} -> {:ok, value, remaining}
+      _ -> :no_match
+    end
+  end
+
+  defp match_parameter({:custom, prefix_anchored, group_count, transform}, text) do
+    capture_spec = [0 | Enum.to_list(1..group_count//1)]
+
+    case :re.run(text, prefix_anchored.re_pattern, [{:capture, capture_spec, :index}]) do
+      :nomatch ->
+        :no_match
+
+      {:match, [{0, full_length} | group_indexes]} ->
+        full_match = binary_part(text, 0, full_length)
+        remaining = binary_part(text, full_length, byte_size(text) - full_length)
+
+        group_values =
+          Enum.map(group_indexes, fn
+            {-1, 0} -> nil
+            {start, length} -> binary_part(text, start, length)
+          end)
+
+        {:ok, transform_value(transform, full_match, group_values), remaining}
+    end
+  end
+
+  # No transform: the parameter yields the full matched string. With a
+  # transform: no capture groups pass the full match; capture groups pass
+  # one argument per group.
+  defp transform_value(nil, full_match, _group_values), do: full_match
+  defp transform_value(transform, full_match, []), do: transform.(full_match)
+  defp transform_value(transform, _full_match, group_values), do: apply(transform, group_values)
 end
