@@ -53,6 +53,12 @@ defmodule Cucumber.Hooks do
   - `{:ok, context}`
   - `:ok` (keeps context unchanged)
   - map (merged into context)
+  - `{:error, reason}` (fails the scenario; steps and after hooks don't run)
+  - `:skipped` / `{:skipped, reason}` (skips the whole scenario without
+    failing it; remaining before hooks and all steps are skipped, after
+    hooks still run)
+  - `:pending` / `{:pending, message}` (like `:skipped`, but the scenario
+    fails with `Cucumber.PendingStepError`)
   """
   defmacro before_scenario(context_var, do: block) do
     build_hook_ast(
@@ -155,7 +161,11 @@ defmodule Cucumber.Hooks do
   end
 
   @doc false
-  @spec run_before_hooks([hook()], map(), [String.t()]) :: {:ok, map()} | {:error, term()}
+  # `{:halted, status, reason}` is returned when a before hook signals
+  # `:pending` or `:skipped`; remaining before hooks are not run (the runner
+  # then skips the scenario's steps but still runs after hooks).
+  @spec run_before_hooks([hook()], map(), [String.t()]) ::
+          {:ok, map()} | {:error, term()} | {:halted, :pending | :skipped, String.t() | nil}
   def run_before_hooks(hooks, context, tags) do
     hooks
     |> filter_hooks(:before_scenario, tags)
@@ -163,31 +173,58 @@ defmodule Cucumber.Hooks do
       _hook, {:error, _} = error ->
         error
 
+      _hook, {:halted, _status, _reason} = halted ->
+        halted
+
       {module, func_name}, {:ok, context} ->
-        case apply(module, func_name, [context]) do
-          :ok ->
-            {:ok, context}
-
-          {:ok, new_context} ->
-            {:ok, new_context}
-
-          %{} = new_context ->
-            {:ok, Map.merge(context, new_context)}
-
-          keyword when is_list(keyword) ->
-            {:ok, Map.merge(context, Map.new(keyword))}
-
-          {:error, _} = error ->
-            error
-
-          other ->
-            raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
-                    "Expected :ok, {:ok, context}, a map, a keyword list, or {:error, reason}"
-        end
+        apply_before_hook(module, func_name, context)
     end)
   end
 
+  defp apply_before_hook(module, func_name, context) do
+    result = apply(module, func_name, [context])
+
+    case halt_signal(result) do
+      {status, reason} -> {:halted, status, reason}
+      nil -> merge_hook_result(result, context, module, func_name)
+    end
+  end
+
+  # A pending/skipped return from a before hook is a control signal: the
+  # scenario's steps are skipped, after hooks still run.
+  defp halt_signal(:pending), do: {:pending, nil}
+  defp halt_signal(:skipped), do: {:skipped, nil}
+  defp halt_signal({:pending, message}) when is_binary(message), do: {:pending, message}
+  defp halt_signal({:skipped, reason}) when is_binary(reason), do: {:skipped, reason}
+  defp halt_signal(_result), do: nil
+
+  defp merge_hook_result(result, context, module, func_name) do
+    case result do
+      :ok ->
+        {:ok, context}
+
+      {:ok, new_context} ->
+        {:ok, new_context}
+
+      %{} = new_context ->
+        {:ok, Map.merge(context, new_context)}
+
+      keyword when is_list(keyword) ->
+        {:ok, Map.merge(context, Map.new(keyword))}
+
+      {:error, _} = error ->
+        error
+
+      other ->
+        raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
+                "Expected :ok, {:ok, context}, a map, a keyword list, {:error, reason}, " <>
+                ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
+    end
+  end
+
   @doc false
+  # Return values are ignored — an after hook returning :skipped only marks
+  # itself skipped (CCK semantics); subsequent after hooks still run.
   @spec run_after_hooks([hook()], map(), [String.t()]) :: :ok
   def run_after_hooks(hooks, context, tags) do
     hooks

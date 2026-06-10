@@ -86,7 +86,16 @@ Hooks support the same return values as step definitions:
 - `:ok` - Keeps the context unchanged
 - `{:ok, map}` - Merges the map into the context
 - `%{} = map` - Merges the map into the context
-- `{:error, reason}` - Fails the scenario before it starts
+- `{:error, reason}` - Fails the scenario before it starts (steps and after
+  hooks don't run)
+- `:skipped` or `{:skipped, reason}` (before hooks only) - Skips the whole
+  scenario without failing it: remaining before hooks and all steps are
+  skipped, after hooks still run
+- `:pending` or `{:pending, message}` (before hooks only) - Like `:skipped`,
+  but the scenario fails with `Cucumber.PendingStepError`
+
+Return values from after hooks are ignored, so an after hook returning
+`:skipped` only marks itself — subsequent after hooks still run.
 
 ## Hook Execution Order
 

@@ -280,6 +280,13 @@ Step definitions must return one of the following values (matching ExUnit's setu
 - A keyword list - Merged into the existing context
 - `{:ok, map_or_keyword_list}` - Merged into the existing context
 - `{:error, reason}` - Fails the step with the given reason
+- `:pending` or `{:pending, message}` - Marks the step as not yet
+  implemented: the remaining steps are skipped, after hooks still run, and
+  the scenario fails with `Cucumber.PendingStepError`
+- `:skipped` or `{:skipped, reason}` - Skips the rest of the scenario
+  without failing it: the remaining steps don't run, after hooks still run,
+  and a one-line notice is printed. Useful when the environment can't
+  support a scenario (a missing service, platform-specific behavior, etc.)
 
 ## Reusable Step Definitions
 

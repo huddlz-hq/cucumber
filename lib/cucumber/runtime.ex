@@ -14,6 +14,12 @@ defmodule Cucumber.Runtime do
      - A keyword list is converted to a map and merged
      - `{:ok, data}` unwraps and merges
      - `{:error, reason}` fails the step
+     - `:pending` / `{:pending, message}` marks the step pending: remaining
+       steps are skipped, after hooks run, and the scenario fails with
+       `Cucumber.PendingStepError`
+     - `:skipped` / `{:skipped, reason}` skips the rest of the scenario:
+       remaining steps don't run, after hooks run, and the scenario does
+       **not** fail (a one-line notice is printed instead)
   5. On failure, enhanced error messages are generated with step history,
      file locations, and formatted assertion details
   """
@@ -54,6 +60,11 @@ defmodule Cucumber.Runtime do
       (they are only armed once the background succeeded)
     * after hooks run whether the scenario's steps pass or fail, receiving
       the post-background context
+    * a `:pending` or `:skipped` signal (from a before hook, a background
+      step, or a scenario step) skips the remaining steps — the unexecuted
+      steps land in the context under `:skipped_steps` — and after hooks
+      still run. Skipped scenarios pass with a printed notice; pending
+      scenarios fail with `Cucumber.PendingStepError`
 
   Returns the final context.
   """
@@ -83,25 +94,110 @@ defmodule Cucumber.Runtime do
         scenario_line: scenario.scenario_line
       })
 
+    exec = %{
+      step_registry: step_registry,
+      parameter_types: parameter_types,
+      hooks: hooks,
+      tags: all_tags
+    }
+
     case Cucumber.Hooks.run_before_hooks(hooks, context, all_tags) do
       {:error, reason} ->
         raise "Before hook failed: #{inspect(reason)}"
 
-      {:ok, context} ->
-        context =
-          execute_steps(scenario.background_steps, context, step_registry, parameter_types)
+      {:halted, status, reason} ->
+        # Pending/skipped from a before hook: every step (background and
+        # scenario) is skipped, but after hooks still run — CCK
+        # hooks-skipped semantics.
+        skipped = scenario.background_steps ++ scenario.steps
 
-        try do
-          execute_steps(scenario.steps, context, step_registry, parameter_types)
-        after
-          Cucumber.Hooks.run_after_hooks(hooks, context, all_tags)
-        end
+        with_after_hooks(exec, context, fn ->
+          context
+          |> Map.put(:skipped_steps, skipped)
+          |> halt_scenario(status, reason, :before_hook, scenario)
+        end)
+
+      {:ok, context} ->
+        run_background(scenario, context, exec)
     end
   end
 
-  defp execute_steps(steps, context, step_registry, parameter_types) do
-    Enum.reduce(steps, context, fn step, ctx ->
-      execute_step(ctx, step, step_registry, parameter_types)
+  defp run_background(scenario, context, exec) do
+    case execute_steps(scenario.background_steps, context, exec) do
+      {:halted, status, reason, step, remaining, context} ->
+        # Pending/skipped is a deliberate signal, not a crash, so —
+        # unlike a *failing* background step — after hooks run.
+        skipped = remaining ++ scenario.steps
+
+        with_after_hooks(exec, context, fn ->
+          context
+          |> Map.put(:skipped_steps, skipped)
+          |> halt_scenario(status, reason, {:step, step}, scenario)
+        end)
+
+      {:ok, context} ->
+        run_scenario_steps(scenario, context, exec)
+    end
+  end
+
+  defp run_scenario_steps(scenario, context, exec) do
+    with_after_hooks(exec, context, fn ->
+      case execute_steps(scenario.steps, context, exec) do
+        {:ok, context} ->
+          context
+
+        {:halted, status, reason, step, remaining, context} ->
+          context
+          |> Map.put(:skipped_steps, remaining)
+          |> halt_scenario(status, reason, {:step, step}, scenario)
+      end
+    end)
+  end
+
+  defp with_after_hooks(exec, context, fun) do
+    fun.()
+  after
+    Cucumber.Hooks.run_after_hooks(exec.hooks, context, exec.tags)
+  end
+
+  # A skipped scenario is not a failure: print a one-line notice and let the
+  # test pass (ExUnit has no runtime-skip API, so the run's summary counts it
+  # as passed). Pending is unfinished work and fails the scenario.
+  defp halt_scenario(context, :skipped, reason, _source, scenario) do
+    suffix = if reason, do: " — #{reason}", else: ""
+
+    IO.puts(
+      "Cucumber: skipped scenario \"#{scenario.scenario_name}\" " <>
+        "(#{scenario.feature_file}:#{scenario.scenario_line})#{suffix}"
+    )
+
+    context
+  end
+
+  defp halt_scenario(context, :pending, reason, source, scenario) do
+    error =
+      Cucumber.PendingStepError.new(source, reason, scenario.feature_file, scenario.scenario_name)
+
+    stacktrace =
+      case source do
+        {:step, step} -> scenario_stacktrace(context, step, current_stacktrace())
+        :before_hook -> current_stacktrace()
+      end
+
+    :erlang.raise(:error, error, stacktrace)
+  end
+
+  defp execute_steps(steps, context, exec) do
+    steps
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, context}, fn {step, index}, {:ok, ctx} ->
+      case execute_step(ctx, step, exec.step_registry, exec.parameter_types) do
+        {:halted, status, reason, ctx} ->
+          {:halt, {:halted, status, reason, step, Enum.drop(steps, index + 1), ctx}}
+
+        ctx when is_map(ctx) ->
+          {:cont, {:ok, ctx}}
+      end
     end)
   end
 
@@ -110,8 +206,13 @@ defmodule Cucumber.Runtime do
 
   `parameter_types` carries custom parameter type definitions (see
   `Cucumber.ParameterTypes`) used when matching cucumber expressions.
+
+  Returns the updated context, or `{:halted, status, reason, context}` when
+  the step signaled `:pending` or `:skipped` — the caller owns what happens
+  to the rest of the scenario.
   """
-  @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) :: map()
+  @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) ::
+          map() | {:halted, :pending | :skipped, String.t() | nil, map()}
   def execute_step(context, step, step_registry, parameter_types \\ %{}) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
@@ -313,6 +414,21 @@ defmodule Cucumber.Runtime do
   end
 
   defp process_step_result(result, context) do
+    case halt_signal(result) do
+      {status, reason} -> {:halted, status, reason, context}
+      nil -> merge_step_result(result, context)
+    end
+  end
+
+  # A pending/skipped return is a control signal for the runner loop, not a
+  # context update.
+  defp halt_signal(:pending), do: {:pending, nil}
+  defp halt_signal(:skipped), do: {:skipped, nil}
+  defp halt_signal({:pending, message}) when is_binary(message), do: {:pending, message}
+  defp halt_signal({:skipped, reason}) when is_binary(reason), do: {:skipped, reason}
+  defp halt_signal(_result), do: nil
+
+  defp merge_step_result(result, context) do
     case result do
       :ok ->
         context
@@ -331,7 +447,8 @@ defmodule Cucumber.Runtime do
 
       other ->
         raise "Invalid step return value: #{inspect(other)}. " <>
-                "Expected :ok, a map, a keyword list, or {:ok, data}"
+                "Expected :ok, a map, a keyword list, {:ok, data}, " <>
+                ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
     end
   end
 
