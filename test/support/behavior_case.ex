@@ -90,6 +90,8 @@ defmodule Cucumber.BehaviorCase do
 
     * `:steps` - list of modules defined with `use Cucumber.StepDefinition`
     * `:hooks` - list of modules defined with `use Cucumber.Hooks`
+    * `:parameter_types` - list of modules defined with
+      `use Cucumber.ParameterTypes`
     * `:file` - synthetic feature path (defaults to a unique generated path,
       which also keeps generated module names unique across runs)
 
@@ -104,6 +106,7 @@ defmodule Cucumber.BehaviorCase do
   def run_feature(source, opts \\ []) do
     step_modules = opts |> Keyword.get(:steps, []) |> List.wrap()
     hook_modules = opts |> Keyword.get(:hooks, []) |> List.wrap()
+    parameter_types = opts |> Keyword.get(:parameter_types, []) |> List.wrap() |> merge_types()
     file = Keyword.get_lazy(opts, :file, &unique_feature_path/0)
 
     feature =
@@ -111,11 +114,15 @@ defmodule Cucumber.BehaviorCase do
       |> Gherkin.Parser.parse()
       |> Map.put(:file, file)
 
-    registry = build_registry(step_modules)
+    registry = build_registry(step_modules, parameter_types)
 
     Collector.reset()
 
-    module = Cucumber.Compiler.compile_feature!(feature, registry, hook_modules)
+    module =
+      Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
+        parameter_types: parameter_types
+      )
+
     {result, output} = run_isolated(module)
 
     %{
@@ -151,11 +158,20 @@ defmodule Cucumber.BehaviorCase do
     end
   end
 
-  defp build_registry(step_modules) do
+  defp build_registry(step_modules, parameter_types) do
     for module <- step_modules,
         {pattern, metadata} <- module.__cucumber_steps__(),
+        Cucumber.Discovery.compilable_pattern?(pattern, metadata, parameter_types),
         into: %{} do
       {Cucumber.Discovery.registry_key(pattern), {module, metadata}}
+    end
+  end
+
+  defp merge_types(parameter_type_modules) do
+    for module <- parameter_type_modules,
+        {name, definition} <- module.__cucumber_parameter_types__(),
+        into: %{} do
+      {name, definition}
     end
   end
 

@@ -88,9 +88,14 @@ defmodule Cucumber.ExpressionTest do
     end
 
     test "raises on unknown parameter type" do
-      assert_raise RuntimeError, ~r/Unknown parameter type: unknown/, fn ->
-        Expression.compile("I have {unknown} items")
-      end
+      error =
+        assert_raise Cucumber.UndefinedParameterTypeError, fn ->
+          Expression.compile("I have {unknown} items")
+        end
+
+      assert error.type_name == "unknown"
+      assert error.message =~ "Undefined parameter type {unknown}"
+      assert error.message =~ ~s(in pattern "I have {unknown} items")
     end
   end
 
@@ -406,6 +411,78 @@ defmodule Cucumber.ExpressionTest do
       compiled = Expression.compile("I see café")
 
       assert {:match, []} = Expression.match("I see café", compiled)
+    end
+  end
+
+  describe "compile/2 with custom parameter types" do
+    test "a custom type without transform yields the matched string" do
+      types = %{"color" => %{regexp: ~r/red|blue|green/, transform: nil}}
+      compiled = Expression.compile("a {color} wall", types)
+
+      assert {:match, ["blue"]} = Expression.match("a blue wall", compiled)
+      assert :no_match = Expression.match("a yellow wall", compiled)
+    end
+
+    test "a transform with no capture groups receives the full match" do
+      types = %{"shouty" => %{regexp: ~r/[A-Z]+/, transform: &String.downcase/1}}
+      compiled = Expression.compile("I yell {shouty}", types)
+
+      assert {:match, ["hello"]} = Expression.match("I yell HELLO", compiled)
+    end
+
+    test "a transform with capture groups receives one argument per group" do
+      types = %{
+        "flight" => %{
+          regexp: ~r/([A-Z]{3})-([A-Z]{3})/,
+          transform: fn from, to -> {from, to} end
+        }
+      }
+
+      compiled = Expression.compile("{flight} departs", types)
+
+      assert {:match, [{"LHR", "CDG"}]} = Expression.match("LHR-CDG departs", compiled)
+    end
+
+    test "unmatched optional capture groups arrive as nil" do
+      types = %{
+        "span" => %{
+          regexp: ~r/(\d+)(?:-(\d+))?/,
+          transform: fn from, to -> {from, to} end
+        }
+      }
+
+      compiled = Expression.compile("rows {span}", types)
+
+      assert {:match, [{"3", "9"}]} = Expression.match("rows 3-9", compiled)
+      assert {:match, [{"3", nil}]} = Expression.match("rows 3", compiled)
+    end
+
+    test "the custom type's regex only matches a prefix at the parameter position" do
+      types = %{"color" => %{regexp: ~r/red|blue/, transform: nil}}
+      compiled = Expression.compile("{color} paint", types)
+
+      assert {:match, ["red"]} = Expression.match("red paint", compiled)
+      assert :no_match = Expression.match("infrared paint", compiled)
+    end
+
+    test "the compile cache distinguishes different type definitions for one pattern" do
+      pattern = "a {hue} wall"
+
+      warm = %{"hue" => %{regexp: ~r/red/, transform: nil}}
+      cold = %{"hue" => %{regexp: ~r/blue/, transform: nil}}
+
+      warm_compiled = Expression.compile(pattern, warm)
+      cold_compiled = Expression.compile(pattern, cold)
+
+      assert {:match, ["red"]} = Expression.match("a red wall", warm_compiled)
+      assert :no_match = Expression.match("a blue wall", warm_compiled)
+      assert {:match, ["blue"]} = Expression.match("a blue wall", cold_compiled)
+    end
+
+    test "compile/1 still raises UndefinedParameterTypeError for unregistered types" do
+      assert_raise Cucumber.UndefinedParameterTypeError, fn ->
+        Expression.compile("a {hovercraft} full of eels", %{})
+      end
     end
   end
 end

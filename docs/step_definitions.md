@@ -162,6 +162,39 @@ step "path\\/to\\/file", context do
 end
 ```
 
+### Custom Parameter Types
+
+Define your own parameter types in a support file (loaded before step
+definitions) with `Cucumber.ParameterTypes`:
+
+```elixir
+# test/features/support/parameter_types.exs
+defmodule MyParameterTypes do
+  use Cucumber.ParameterTypes
+
+  parameter_type :flight,
+    regexp: ~r/([A-Z]{3})-([A-Z]{3})/,
+    transform: fn from, to -> %{from: from, to: to} end
+
+  parameter_type :priority, regexp: ~r/low|normal|high/
+end
+```
+
+Then use them like any built-in type:
+
+```elixir
+step "flight {flight} is boarding", %{args: [flight]} = context do
+  # flight is %{from: "LHR", to: "CDG"}
+  Map.put(context, :route, flight)
+end
+```
+
+With no capture groups the transform receives the full match; with capture
+groups it receives one argument per group. Without a transform, the
+parameter yields the matched string. A step pattern referencing an
+unregistered type is excluded with a warning, and steps that would have
+matched it are reported as undefined.
+
 ## Regular Expression Patterns
 
 Steps can also be defined with a regular expression instead of a cucumber

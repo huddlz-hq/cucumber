@@ -27,12 +27,13 @@ defmodule Cucumber.Compiler do
     %Discovery.DiscoveryResult{
       features: features,
       step_registry: step_registry,
-      hook_modules: hook_modules
+      hook_modules: hook_modules,
+      parameter_types: parameter_types
     } = Discovery.discover(opts)
 
     # Generate a test module for each feature
     for feature <- features do
-      compile_feature!(feature, step_registry, hook_modules)
+      compile_feature!(feature, step_registry, hook_modules, parameter_types: parameter_types)
     end
   end
 
@@ -40,9 +41,11 @@ defmodule Cucumber.Compiler do
   # Public so test harnesses (e.g. Cucumber.BehaviorCase) can compile a single
   # parsed feature against an explicit step registry, bypassing discovery.
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
-  @spec compile_feature!(map(), map(), [module()]) :: module()
-  def compile_feature!(feature, step_registry, hook_modules) do
+  @spec compile_feature!(map(), map(), [module()], keyword()) :: module()
+  def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
     warn_on_empty_feature(feature)
+
+    parameter_types = Keyword.get(opts, :parameter_types, %{})
 
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
@@ -59,7 +62,11 @@ defmodule Cucumber.Compiler do
     # compiles (mix test.watch, test harnesses) can't see stale data.
     runtime_key = {Cucumber, :runtime_data, :erlang.unique_integer([:positive])}
 
-    :persistent_term.put(runtime_key, %{step_registry: step_registry, hooks: all_hooks})
+    :persistent_term.put(runtime_key, %{
+      step_registry: step_registry,
+      hooks: all_hooks,
+      parameter_types: parameter_types
+    })
 
     # Generate test module AST
     ast =
@@ -86,6 +93,11 @@ defmodule Cucumber.Compiler do
           @doc false
           def __cucumber_feature_hooks__ do
             :persistent_term.get(unquote(Macro.escape(runtime_key))).hooks
+          end
+
+          @doc false
+          def __cucumber_parameter_types__ do
+            :persistent_term.get(unquote(Macro.escape(runtime_key))).parameter_types
           end
 
           # If there's a background or feature-level tags, create setup block
@@ -283,7 +295,8 @@ defmodule Cucumber.Compiler do
         Cucumber.Runtime.execute_step(
           context,
           unquote(Macro.escape(step)),
-          __MODULE__.__step_registry__()
+          __MODULE__.__step_registry__(),
+          __MODULE__.__cucumber_parameter_types__()
         )
     end
   end
