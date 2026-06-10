@@ -18,6 +18,7 @@
 
 ### New Features
 
+- **The Rule keyword** (#19). Rules group related scenarios under a feature; each rule can carry its own description, tags, and `Background:`. Rule-background steps run after the feature background for every scenario in the rule (spec order: feature background → rule background → scenario steps), rule tags are inherited by the rule's scenarios (so they participate in ExUnit tag filtering and tagged hooks), and `Example:` is accepted as a synonym for `Scenario:`. Parsed rules live on the new `Gherkin.Feature.rules` field as `Gherkin.Rule` structs; test names for scenarios inside a rule are prefixed with the rule name so identically-named scenarios in different rules don't collide.
 - **Backtick docstrings and media types** (#18). Docstrings can be delimited with ``` ``` ``` as an alternative to `"""`; the closing delimiter must match the opening one, and either delimiter style is plain content inside the other. An optional media type may follow the opening delimiter (e.g. ` ```json `) and is available as `Gherkin.Step.docstring_media_type` and `context.docstring_media_type` in step definitions. `context.docstring` remains a plain string.
 
 ### Improvements

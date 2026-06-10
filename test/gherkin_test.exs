@@ -492,6 +492,7 @@ defmodule Gherkin.ParserTest do
         "test/features/hook_execution_order.feature" => 1,
         "test/features/parameters.feature" => 4,
         "test/features/return_values.feature" => 4,
+        "test/features/rules.feature" => 2,
         "test/features/scenario_outline.feature" => 2,
         "test/features/shared_steps_integration.feature" => 2,
         "test/features/simple.feature" => 1,
@@ -507,8 +508,12 @@ defmodule Gherkin.ParserTest do
         content = File.read!(file)
         result = Gherkin.Parser.parse(content)
 
-        assert length(result.scenarios) == expected_count,
-               "#{file}: expected #{expected_count} scenarios, got #{length(result.scenarios)}"
+        count =
+          length(result.scenarios) +
+            (result.rules |> Enum.map(&length(&1.scenarios)) |> Enum.sum())
+
+        assert count == expected_count,
+               "#{file}: expected #{expected_count} scenarios (incl. rules), got #{count}"
       end
     end
   end

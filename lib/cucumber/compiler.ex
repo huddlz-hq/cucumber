@@ -91,9 +91,9 @@ defmodule Cucumber.Compiler do
           # If there's a background or feature-level tags, create setup block
           unquote(generate_setup(feature.background, step_registry, feature))
 
-          # Expand scenario outlines and generate test for each scenario
+          # Expand scenario outlines and rules, generate test for each scenario
           unquote_splicing(
-            for scenario <- expand_all_scenarios(feature.scenarios) do
+            for scenario <- expand_feature(feature) do
               generate_scenario_test(scenario, step_registry, all_hooks, feature, async)
             end
           )
@@ -111,15 +111,19 @@ defmodule Cucumber.Compiler do
   # synthetic stacktrace makes editors highlight the warning on the feature
   # file itself rather than inside the cucumber library.
   def warn_on_empty_feature(%{scenarios: []} = feature) do
-    stacktrace = [
-      {__MODULE__, :compile_feature, 3, [file: String.to_charlist(feature.file), line: 1]}
-    ]
+    if Map.get(feature, :rules, []) == [] do
+      stacktrace = [
+        {__MODULE__, :compile_feature, 3, [file: String.to_charlist(feature.file), line: 1]}
+      ]
 
-    IO.warn(
-      "Cucumber: feature file #{feature.file} parsed with zero scenarios — " <>
-        "scenarios may have been silently dropped by the parser.",
-      stacktrace
-    )
+      IO.warn(
+        "Cucumber: feature file #{feature.file} parsed with zero scenarios — " <>
+          "scenarios may have been silently dropped by the parser.",
+        stacktrace
+      )
+    else
+      :ok
+    end
   end
 
   def warn_on_empty_feature(_feature), do: :ok
@@ -284,7 +288,40 @@ defmodule Cucumber.Compiler do
     end
   end
 
-  # Scenario Outline expansion functions
+  # Scenario Outline and Rule expansion functions
+
+  @doc false
+  # Public for testing - expands a feature's scenarios and rules into the
+  # flat list of concrete scenarios that become tests.
+  @spec expand_feature(map()) :: [Gherkin.Scenario.t()]
+  def expand_feature(feature) do
+    rules = Map.get(feature, :rules, [])
+    expand_all_scenarios(feature.scenarios) ++ Enum.flat_map(rules, &expand_rule/1)
+  end
+
+  # Scenarios inside a rule get the rule background's steps prepended (the
+  # feature background stays in the module's setup block, preserving the
+  # spec order: feature background, rule background, scenario steps), the
+  # rule's tags merged in, and the rule name prefixed so identically-named
+  # scenarios in different rules don't collide as ExUnit test names.
+  defp expand_rule(%Gherkin.Rule{} = rule) do
+    rule_background_steps = if rule.background, do: rule.background.steps, else: []
+
+    rule.scenarios
+    |> expand_all_scenarios()
+    |> Enum.map(fn %Scenario{} = scenario ->
+      %Scenario{
+        scenario
+        | name: prefix_with_rule(rule.name, scenario.name),
+          steps: rule_background_steps ++ scenario.steps,
+          tags: Enum.uniq(rule.tags ++ scenario.tags),
+          rule: rule.name
+      }
+    end)
+  end
+
+  defp prefix_with_rule("", scenario_name), do: scenario_name
+  defp prefix_with_rule(rule_name, scenario_name), do: "#{rule_name}: #{scenario_name}"
 
   @doc false
   # Public for testing - expands scenario outlines into concrete scenarios

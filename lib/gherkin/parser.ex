@@ -18,7 +18,7 @@ defmodule Gherkin.NimbleParser do
 
   import NimbleParsec
 
-  alias Gherkin.{Background, Examples, Feature, Scenario, ScenarioOutline, Step}
+  alias Gherkin.{Background, Examples, Feature, Rule, Scenario, ScenarioOutline, Step}
 
   # ============================================================
   # LEVEL 1: PRIMITIVES
@@ -87,9 +87,16 @@ defmodule Gherkin.NimbleParser do
     string("Background:")
     |> label("Background:")
 
+  # "Example:" is the spec synonym for "Scenario:". No conflict with
+  # "Examples:" — the colon position differs, so neither prefix-matches
+  # the other.
   scenario_keyword =
-    string("Scenario:")
+    choice([string("Scenario:"), string("Example:")])
     |> label("Scenario:")
+
+  rule_keyword =
+    string("Rule:")
+    |> label("Rule:")
 
   scenario_outline_keyword =
     choice([string("Scenario Outline:"), string("Scenario Template:")])
@@ -203,6 +210,7 @@ defmodule Gherkin.NimbleParser do
       scenario_keyword,
       scenario_outline_keyword,
       examples_keyword,
+      rule_keyword,
       # Tag line indicates new section
       string("@")
     ])
@@ -255,6 +263,7 @@ defmodule Gherkin.NimbleParser do
         scenario_keyword,
         scenario_outline_keyword,
         examples_keyword,
+        rule_keyword,
         string("@")
       ])
     )
@@ -279,6 +288,7 @@ defmodule Gherkin.NimbleParser do
         scenario_keyword,
         scenario_outline_keyword,
         examples_keyword,
+        rule_keyword,
         string("@"),
         string("|"),
         string(~s(""")),
@@ -384,6 +394,26 @@ defmodule Gherkin.NimbleParser do
       scenario
     ])
 
+  # --- Rule ---
+  rule_name =
+    ignore(rule_keyword)
+    |> concat(rest_of_line)
+
+  # A rule groups scenarios and may carry its own background. Scenarios
+  # following a Rule: header belong to that rule (rules cannot be "closed",
+  # so each rule's repeat consumes everything until the next Rule: or EOF).
+  rule =
+    ignore(blank_lines)
+    |> concat(tags |> tag(:tags))
+    |> concat(optional_ws)
+    |> line(rule_name)
+    |> concat(eol)
+    |> concat(section_description)
+    |> optional(background)
+    |> concat(repeat(scenario_definition) |> tag(:scenarios))
+    |> reduce({__MODULE__, :build_rule, []})
+    |> label("rule section")
+
   # ============================================================
   # LEVEL 6: FEATURE
   # ============================================================
@@ -404,6 +434,7 @@ defmodule Gherkin.NimbleParser do
     |> concat(feature_description)
     |> optional(background)
     |> concat(repeat(scenario_definition) |> tag(:scenarios))
+    |> concat(repeat(rule) |> tag(:rules))
     |> reduce({__MODULE__, :build_feature, []})
     |> label("feature")
 
@@ -588,6 +619,9 @@ defmodule Gherkin.NimbleParser do
   defp extract_scenario_name(args),
     do: extract_name_from_args(args, [:tags, :steps, :examples, :description])
 
+  defp extract_rule_name(args),
+    do: extract_name_from_args(args, [:tags, :description, :background, :scenarios])
+
   defp extract_name_from_args([{tag, _} | rest], skip_tags) when is_atom(tag) do
     if tag in skip_tags,
       do: extract_name_from_args(rest, skip_tags),
@@ -641,18 +675,37 @@ defmodule Gherkin.NimbleParser do
   end
 
   @doc false
+  def build_rule(args) do
+    tags = extract_tagged(args, :tags)
+    scenarios = extract_tagged(args, :scenarios)
+    background = extract_tagged_single(args, :background)
+    {name, line_num} = extract_rule_name(args)
+
+    %Rule{
+      name: name,
+      description: extract_tagged_single(args, :description) || "",
+      tags: tags,
+      background: background,
+      scenarios: scenarios,
+      line: if(line_num, do: line_num - 1, else: nil)
+    }
+  end
+
+  @doc false
   def build_feature(args) do
     tags = extract_tagged(args, :tags)
     name = extract_tagged_single(args, :name) || ""
     background = extract_tagged_single(args, :background)
     scenarios = extract_tagged(args, :scenarios)
+    rules = extract_tagged(args, :rules)
 
     %Feature{
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
       background: background,
-      scenarios: scenarios
+      scenarios: scenarios,
+      rules: rules
     }
   end
 
