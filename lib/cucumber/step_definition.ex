@@ -11,6 +11,17 @@ defmodule Cucumber.StepDefinition do
           {:ok, Map.put(context, :current_user, username)}
         end
       end
+
+  ## Regular expression patterns
+
+  Steps can also be defined with a regular expression instead of a cucumber
+  expression. The regex must match the entire step text, and capture groups
+  arrive in `context.args` in order — always as strings (no type conversion),
+  with `nil` for unmatched optional groups:
+
+      step ~r/^I have (\\d+) cukes(?: in my (.+))?$/, %{args: [count, location]} = context do
+        {:ok, Map.put(context, :cukes, {String.to_integer(count), location})}
+      end
   """
 
   defmacro __using__(_opts) do
@@ -27,6 +38,9 @@ defmodule Cucumber.StepDefinition do
 
   @doc """
   Defines a step implementation.
+
+  The pattern is either a cucumber expression string or a regular expression
+  (`~r//` sigil) — see the module documentation for the differences.
   """
   defmacro step(pattern, context_var \\ {:_, [], nil}, do: block) do
     # Generate collision-free function name using sequential counter

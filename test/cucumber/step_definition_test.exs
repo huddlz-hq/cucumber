@@ -6,7 +6,7 @@ defmodule Cucumber.StepDefinitionTest do
   defp run_step(module, text, context \\ %{}) do
     registry =
       for {pattern, metadata} <- module.__cucumber_steps__(), into: %{} do
-        {{:expression, pattern}, {module, metadata}}
+        {Cucumber.Discovery.registry_key(pattern), {module, metadata}}
       end
 
     step = %Gherkin.Step{keyword: "Given", text: text, line: 1}
@@ -154,6 +154,25 @@ defmodule Cucumber.StepDefinitionTest do
       assert_raise Cucumber.StepError, ~r/No matching step definition found/, fn ->
         run_step(NoMatchSteps, "I do not exist")
       end
+    end
+
+    test "regex patterns register as %Regex{} and dispatch with string captures" do
+      defmodule RegexRegistrationSteps do
+        use Cucumber.StepDefinition
+
+        step ~r/^I store (\d+) and (\w+)$/, %{args: [number, word]} do
+          %{number: number, word: word}
+        end
+      end
+
+      assert [{%Regex{} = pattern, metadata}] = RegexRegistrationSteps.__cucumber_steps__()
+      assert Regex.source(pattern) == "^I store (\\d+) and (\\w+)$"
+      assert is_atom(metadata.function)
+
+      result = run_step(RegexRegistrationSteps, "I store 42 and cukes")
+      # Captures are strings — regex steps do no type conversion
+      assert result.number == "42"
+      assert result.word == "cukes"
     end
 
     test "raises AmbiguousStepError when multiple definitions match" do

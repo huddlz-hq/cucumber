@@ -155,7 +155,7 @@ defmodule Cucumber.BehaviorCase do
     for module <- step_modules,
         {pattern, metadata} <- module.__cucumber_steps__(),
         into: %{} do
-      {{:expression, pattern}, {module, metadata}}
+      {Cucumber.Discovery.registry_key(pattern), {module, metadata}}
     end
   end
 
