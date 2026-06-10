@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Improvements
+
+- **Behavior test harness.** New `Cucumber.BehaviorCase` test-case template (test-only, in `test/support/`) runs a Gherkin source against explicit step/hook modules through the real compile pipeline in a nested ExUnit run and reports the outcome — making failing, undefined, and otherwise broken scenarios assertable in the test suite. Behavior fixtures from the [Cucumber Compatibility Kit](https://github.com/cucumber/compatibility-kit) are vendored under `test/fixtures/cck/` (MIT) and backed by behavior tests asserting reference outcomes.
+- `Cucumber.Compiler.compile_feature!/3` is now public (`@doc false`) so test harnesses can compile a single parsed feature against an explicit step registry.
+- Removed an unreachable clause in `Cucumber.Runtime` exception formatting that failed `mix compile --warnings-as-errors` under Elixir 1.20's type checker.
+- **Bumped Credo** to 1.7.19 — 1.7.16 crashed on Elixir 1.20's new sigil token format, breaking `mix precommit`.
+
 ## v0.9.1 (2026-05-12)
 
 ### Bug Fixes

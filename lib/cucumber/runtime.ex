@@ -153,9 +153,6 @@ defmodule Cucumber.Runtime do
           do: format_assertion_error(e),
           else: Exception.message(e)
 
-      %{__exception__: true} = e ->
-        Exception.message(e)
-
       other ->
         inspect(other, pretty: true)
     end
