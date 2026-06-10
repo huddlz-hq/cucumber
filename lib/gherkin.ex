@@ -3,17 +3,39 @@ defmodule Gherkin.Feature do
   Represents a parsed Gherkin feature file (minimal subset).
 
   A Feature is the top-level element in a Gherkin file, containing a name,
-  optional description, optional background, and one or more scenarios.
+  optional description, optional background, scenarios, and rules.
   It can also have tags that apply to all scenarios in the feature.
   """
-  defstruct name: "", description: "", background: nil, scenarios: [], tags: []
+  defstruct name: "", description: "", background: nil, scenarios: [], rules: [], tags: []
 
   @type t :: %__MODULE__{
           name: String.t(),
           description: String.t(),
           background: Gherkin.Background.t() | nil,
           scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
+          rules: [Gherkin.Rule.t()],
           tags: [String.t()]
+        }
+end
+
+defmodule Gherkin.Rule do
+  @moduledoc """
+  Represents a Gherkin Rule section.
+
+  A Rule groups related scenarios under a feature to express a business rule.
+  It can have its own description, tags, and Background; rule-background steps
+  run after the feature-background steps for each scenario in the rule, and
+  rule tags are inherited by those scenarios.
+  """
+  defstruct name: "", description: "", background: nil, scenarios: [], tags: [], line: nil
+
+  @type t :: %__MODULE__{
+          name: String.t(),
+          description: String.t(),
+          background: Gherkin.Background.t() | nil,
+          scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
+          tags: [String.t()],
+          line: non_neg_integer() | nil
         }
 end
 
@@ -39,16 +61,18 @@ defmodule Gherkin.Scenario do
   A Scenario is a concrete example that illustrates a business rule.
   It consists of a name, an optional free-form description, a list of steps,
   optional tags for filtering, and the line number where it appears in the
-  source file.
+  source file. When a scenario was defined inside a `Rule`, `rule` carries
+  the rule's name (set during compilation, not by the parser).
   """
-  defstruct name: "", description: "", steps: [], tags: [], line: nil
+  defstruct name: "", description: "", steps: [], tags: [], line: nil, rule: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
           description: String.t(),
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          rule: String.t() | nil
         }
 end
 

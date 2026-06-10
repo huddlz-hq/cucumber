@@ -186,6 +186,27 @@ Scenario: Adding an item to an empty cart
   Then my cart should contain 1 item
 ```
 
+### Rules
+
+The `Rule:` keyword groups related scenarios under a business rule. A rule can
+have its own description, tags, and `Background:`; rule-background steps run
+after the feature background for each scenario in the rule, and rule tags are
+inherited by those scenarios. `Example:` is accepted as a synonym for
+`Scenario:`:
+
+```gherkin
+Feature: Chocolate sales
+
+  Rule: A sale cannot happen if the customer has no money
+    Background:
+      Given there are chocolate bars in stock
+
+    Example: Not enough money
+      Given the customer has 100 cents
+      When the customer tries to buy a 125 cent chocolate bar
+      Then the sale should not happen
+```
+
 ## File Organization
 
 Feature files should be placed in a `test/features/` directory and have a `.feature` extension. Organize them logically by feature or domain area:
