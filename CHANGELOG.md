@@ -8,7 +8,6 @@
 - `Cucumber.Compiler.compile_feature!/3` is now public (`@doc false`) so test harnesses can compile a single parsed feature against an explicit step registry.
 - Removed an unreachable clause in `Cucumber.Runtime` exception formatting that failed `mix compile --warnings-as-errors` under Elixir 1.20's type checker.
 - **Bumped Credo** to 1.7.19 — 1.7.16 crashed on Elixir 1.20's new sigil token format, breaking `mix precommit`.
-- **CI: Elixir 1.20 is now required.** With 1.20.1 released, the allow-failure 1.20-rc job is replaced by required matrix entries; CI now runs Elixir 1.19/OTP 28, 1.20.1/OTP 28, and 1.20.1/OTP 29, and all must pass.
 
 ## v0.9.1 (2026-05-12)
 
