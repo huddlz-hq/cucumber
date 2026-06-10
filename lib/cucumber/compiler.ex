@@ -59,6 +59,13 @@ defmodule Cucumber.Compiler do
     # Collect all hooks
     all_hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
+    # Run-level teardown: hand the after_all hooks to the coordinator and
+    # make sure the after_suite callback that claims them is registered.
+    # The callback is registered once per VM because ExUnit.after_suite
+    # callbacks accumulate in config and fire on every ExUnit.run.
+    Cucumber.RunCoordinator.register_after_all(all_hooks)
+    register_after_suite_callback()
+
     # The registry and hook list live in :persistent_term rather than being
     # Macro.escape'd into every generated module (which bloats each module's
     # AST with a full copy). Keys are unique per compilation, so repeated
@@ -144,6 +151,13 @@ defmodule Cucumber.Compiler do
   end
 
   def warn_on_empty_feature(_feature), do: :ok
+
+  defp register_after_suite_callback do
+    unless :persistent_term.get({Cucumber, :after_suite_registered}, false) do
+      ExUnit.after_suite(&Cucumber.RunCoordinator.run_after_all/1)
+      :persistent_term.put({Cucumber, :after_suite_registered}, true)
+    end
+  end
 
   defp generate_module_name(file_path) do
     # Convert path like "test/features/authentication.feature"

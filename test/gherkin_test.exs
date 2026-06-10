@@ -490,6 +490,7 @@ defmodule Gherkin.ParserTest do
         "test/features/descriptions.feature" => 3,
         "test/features/error_reporting.feature" => 2,
         "test/features/feature_level_tags.feature" => 2,
+        "test/features/global_hooks.feature" => 1,
         "test/features/hook_execution_order.feature" => 1,
         "test/features/parameters.feature" => 4,
         "test/features/regex_steps.feature" => 2,
