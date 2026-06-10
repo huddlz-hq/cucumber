@@ -310,11 +310,20 @@ defmodule Cucumber.CckBehaviorTest do
   end
 
   describe "CCK: stack-traces" do
-    test "a step that throws fails the scenario with the exception message" do
-      run = run_feature(fixture("stack-traces"), steps: [StackTraceSteps])
+    test "a step that throws fails with the exception message and a feature-file stack frame" do
+      run =
+        run_feature(fixture("stack-traces"),
+          steps: [StackTraceSteps],
+          file: "test/fixtures/cck/stack-traces/stack-traces.feature"
+        )
 
       assert %{total: 1, passed: 0, failures: 1} = run
       assert run.output =~ "BOOM"
+
+      # CCK: the first line of the stack trace references the feature file
+      stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
+      [first_frame | _] = String.split(stacktrace_section, "\n", trim: true)
+      assert first_frame =~ "stack-traces.feature:10"
     end
   end
 

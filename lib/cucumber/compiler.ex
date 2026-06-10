@@ -53,6 +53,14 @@ defmodule Cucumber.Compiler do
     # Collect all hooks
     all_hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
+    # The registry and hook list live in :persistent_term rather than being
+    # Macro.escape'd into every generated module (which bloats each module's
+    # AST with a full copy). Keys are unique per compilation, so repeated
+    # compiles (mix test.watch, test harnesses) can't see stale data.
+    runtime_key = {Cucumber, :runtime_data, :erlang.unique_integer([:positive])}
+
+    :persistent_term.put(runtime_key, %{step_registry: step_registry, hooks: all_hooks})
+
     # Generate test module AST
     ast =
       quote do
@@ -70,13 +78,18 @@ defmodule Cucumber.Compiler do
             end
           )
 
-          # Store the step registry for runtime access
+          # Runtime data accessors (registry and hooks live in :persistent_term)
           def __step_registry__ do
-            unquote(Macro.escape(Map.new(step_registry)))
+            :persistent_term.get(unquote(Macro.escape(runtime_key))).step_registry
+          end
+
+          @doc false
+          def __cucumber_feature_hooks__ do
+            :persistent_term.get(unquote(Macro.escape(runtime_key))).hooks
           end
 
           # If there's a background or feature-level tags, create setup block
-          unquote(generate_setup(feature.background, step_registry, feature, all_hooks))
+          unquote(generate_setup(feature.background, step_registry, feature))
 
           # Expand scenario outlines and generate test for each scenario
           unquote_splicing(
@@ -133,22 +146,22 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp generate_setup(nil, _step_registry, feature, all_hooks) do
+  defp generate_setup(nil, _step_registry, feature) do
     # Always generate setup to run hooks for all scenarios
-    build_setup_block([], feature, all_hooks)
+    build_setup_block([], feature)
   end
 
-  defp generate_setup(background, step_registry, feature, all_hooks) do
+  defp generate_setup(background, step_registry, feature) do
     background_steps =
       for step <- background.steps do
         generate_step_execution(step, step_registry)
       end
 
-    build_setup_block(background_steps, feature, all_hooks)
+    build_setup_block(background_steps, feature)
   end
 
   # Shared helper to build the setup block with hooks and optional background steps
-  defp build_setup_block(background_steps, feature, all_hooks) do
+  defp build_setup_block(background_steps, feature) do
     async = "async" in feature.tags
 
     quote do
@@ -192,7 +205,7 @@ defmodule Cucumber.Compiler do
         # Run ALL matching hooks (global + feature + scenario tags)
         result =
           Cucumber.Hooks.run_before_hooks(
-            unquote(Macro.escape(all_hooks)),
+            __cucumber_feature_hooks__(),
             context,
             all_tags
           )
@@ -203,12 +216,10 @@ defmodule Cucumber.Compiler do
             unquote_splicing(background_steps)
 
             # Register cleanup for after hooks
+            hooks = __cucumber_feature_hooks__()
+
             on_exit(fn ->
-              Cucumber.Hooks.run_after_hooks(
-                unquote(Macro.escape(all_hooks)),
-                context,
-                all_tags
-              )
+              Cucumber.Hooks.run_after_hooks(hooks, context, all_tags)
             end)
 
             {:ok, context}

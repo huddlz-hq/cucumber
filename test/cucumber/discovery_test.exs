@@ -58,7 +58,7 @@ defmodule Cucumber.DiscoveryTest do
 
         assert %Discovery.DiscoveryResult{} = result
         assert length(result.step_modules) == 1
-        assert Map.has_key?(result.step_registry, "I am a valid step")
+        assert Map.has_key?(result.step_registry, {:expression, "I am a valid step"})
       after
         File.rm_rf(temp_dir)
       end
@@ -137,8 +137,8 @@ defmodule Cucumber.DiscoveryTest do
       try do
         result = Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
 
-        assert Map.has_key?(result.step_registry, "I have {int} items")
-        {module, metadata} = result.step_registry["I have {int} items"]
+        assert Map.has_key?(result.step_registry, {:expression, "I have {int} items"})
+        {module, metadata} = result.step_registry[{:expression, "I have {int} items"}]
         assert is_atom(module)
         assert is_map(metadata)
         assert Map.has_key?(metadata, :line)
@@ -179,8 +179,8 @@ defmodule Cucumber.DiscoveryTest do
         result = Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
 
         assert length(result.step_modules) == 2
-        assert Map.has_key?(result.step_registry, "step from first module")
-        assert Map.has_key?(result.step_registry, "step from second module")
+        assert Map.has_key?(result.step_registry, {:expression, "step from first module"})
+        assert Map.has_key?(result.step_registry, {:expression, "step from second module"})
       after
         File.rm_rf(temp_dir)
       end

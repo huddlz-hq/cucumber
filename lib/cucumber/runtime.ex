@@ -31,13 +31,13 @@ defmodule Cucumber.Runtime do
 
     # Find matching step definition
     case find_step_definition(step.text, step_registry) do
-      {:ok, {module, _metadata}, args, pattern_text} ->
+      {:ok, {module, metadata}, args, pattern_text} ->
         # Prepare context with step arguments
         context = prepare_context(context, args, step)
 
         # Execute the step
         try do
-          result = module.step(context, step.text)
+          result = apply(module, metadata.function, [context])
           process_step_result(result, context)
         rescue
           e ->
@@ -57,8 +57,19 @@ defmodule Cucumber.Runtime do
                 format_step_history_with_status(step_history, step, context)
               )
 
-            reraise enhanced_error, __STACKTRACE__
+            reraise enhanced_error, scenario_stacktrace(context, step, __STACKTRACE__)
         end
+
+      {:ambiguous, matches} ->
+        feature_file = Map.get(context, :feature_file, "unknown")
+        scenario_name = Map.get(context, :scenario_name, "unknown scenario")
+
+        listed =
+          for {pattern_text, {module, metadata}, _args} <- matches,
+              do: {pattern_text, module, metadata}
+
+        error = Cucumber.AmbiguousStepError.new(step, listed, feature_file, scenario_name)
+        :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
 
       :error ->
         # Extract context info for better error
@@ -67,26 +78,62 @@ defmodule Cucumber.Runtime do
         step_history = Map.get(context, :step_history, [])
 
         # Use the enhanced error module
-        raise Cucumber.StepError.missing_step_definition(
-                step,
-                feature_file,
-                scenario_name,
-                format_step_history_with_status(step_history, step, context)
-              )
+        error =
+          Cucumber.StepError.missing_step_definition(
+            step,
+            feature_file,
+            scenario_name,
+            format_step_history_with_status(step_history, step, context)
+          )
+
+        :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
     end
   end
 
   defp find_step_definition(step_text, step_registry) do
-    # Try to match against each registered pattern
-    Enum.find_value(step_registry, :error, fn {pattern_text, definition} ->
-      # Compile pattern on the fly
-      compiled_pattern = Expression.compile(pattern_text)
+    matches =
+      Enum.flat_map(step_registry, fn {{:expression, pattern_text}, definition} ->
+        # Compile pattern on the fly (cached via :persistent_term)
+        compiled_pattern = Expression.compile(pattern_text)
 
-      case Expression.match(step_text, compiled_pattern) do
-        {:match, args} -> {:ok, definition, args, pattern_text}
-        :no_match -> nil
-      end
-    end)
+        case Expression.match(step_text, compiled_pattern) do
+          {:match, args} -> [{pattern_text, definition, args}]
+          :no_match -> []
+        end
+      end)
+
+    case matches do
+      [] ->
+        :error
+
+      [{pattern_text, definition, args}] ->
+        {:ok, definition, args, pattern_text}
+
+      multiple ->
+        # Stable listing order regardless of map iteration order
+        {:ambiguous, Enum.sort_by(multiple, fn {pattern_text, _, _} -> pattern_text end)}
+    end
+  end
+
+  # Builds the stacktrace reported for a step failure: the first frame points
+  # at the failing step's line in the feature file, followed by the original
+  # trace (which leads with the step definition's own frame) minus this
+  # module's internal frames.
+  defp scenario_stacktrace(context, step, stacktrace) do
+    test_module = Map.get(context, :module, Cucumber.Scenario)
+
+    feature_file = Map.get(context, :feature_file, "unknown")
+
+    feature_frame =
+      {test_module, :scenario, 1, [file: String.to_charlist(feature_file), line: step.line + 1]}
+
+    [feature_frame | Enum.reject(stacktrace, &match?({__MODULE__, _, _, _}, &1))]
+  end
+
+  defp current_stacktrace do
+    {:current_stacktrace, trace} = Process.info(self(), :current_stacktrace)
+    # Drop Process.info/2 and this function's own frames
+    Enum.reject(trace, &match?({Process, _, _, _}, &1))
   end
 
   defp prepare_context(context, args, step) do

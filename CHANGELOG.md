@@ -4,6 +4,15 @@
 
 ### Bug Fixes
 
+- **Ambiguous steps are now detected** (#20). A step whose text matches more than one step definition previously executed an arbitrary first match and passed silently. Step resolution now collects all matches and raises `Cucumber.AmbiguousStepError` listing every matching pattern with its definition site (`file:line`), failing the scenario. Ambiguity is detected per step text at runtime; the discovery-time exact-duplicate check is unchanged.
+
+### Improvements
+
+- **Step failure stack traces point at the feature file** (#22). The first stack frame of a failing (or undefined, or ambiguous) step now references the feature file and the failing step's line; the step definition's own frame follows, and internal `Cucumber.Runtime` frames are filtered from the trace.
+- **Single step-matching path.** Step dispatch now happens entirely in `Cucumber.Runtime` via the step registry; the generated per-module `step/2` dispatcher (which re-ran its own first-match loop) has been removed. **Breaking:** code calling `MySteps.step(context, text)` directly should go through `Cucumber.Runtime.execute_step/3` instead.
+- **Step registry keys are now `{:expression, source}` tuples** (was bare pattern strings), making room for regex step definitions (#24). **Breaking** for code reading `DiscoveryResult.step_registry` directly.
+- Generated feature modules no longer embed a full copy of the step registry and hook list in their AST; both now live in `:persistent_term` under per-compilation keys (also future-proof for `mix test.watch` staleness).
+
 - **Descriptions under any section header now parse** (#17). Standard Gherkin allows free-form description text after `Background:`, `Scenario:`, `Scenario Outline:`, and `Examples:` headers; previously such lines caused a parse error that made the whole feature file unusable. Descriptions are now captured on the corresponding structs (`description` field, default `""`), and the feature-level description — previously discarded — is captured on `Gherkin.Feature.description`. Descriptions never affect execution.
 - **Parser no longer hangs on a feature ending in a description.** A latent zero-width repeat in the description combinator could loop forever at end of input (e.g. a feature whose last line is description text, or a scenario with no steps at EOF).
 
