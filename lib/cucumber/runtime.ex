@@ -20,6 +20,91 @@ defmodule Cucumber.Runtime do
 
   alias Cucumber.Expression
 
+  # Standard ExUnit context keys — everything else in the test context is a
+  # scenario tag (ExUnit puts @tag values directly in the context as keys).
+  @exunit_context_keys [
+    :async,
+    :line,
+    :module,
+    :registered,
+    :file,
+    :test,
+    :describe,
+    :describe_line,
+    :test_type,
+    :test_pid,
+    :test_group
+  ]
+
+  @doc """
+  Runs a complete scenario inside the test process: before hooks, background
+  steps, scenario steps, and after hooks.
+
+  Generated feature tests call this as their entire body. The runtime owning
+  the whole lifecycle (rather than splitting it across ExUnit `setup` and
+  `on_exit`) keeps after-hooks in the test process and gives the runner
+  control over cross-step flow — the foundation for skip/pending semantics,
+  retry, and event emission.
+
+  Semantics:
+
+    * a `{:error, reason}` from a before hook fails the scenario without
+      running any steps (after hooks do not run)
+    * a failing background step fails the scenario; after hooks do not run
+      (they are only armed once the background succeeded)
+    * after hooks run whether the scenario's steps pass or fail, receiving
+      the post-background context
+
+  Returns the final context.
+  """
+  @spec run_scenario(map(), map(), map()) :: map()
+  def run_scenario(exunit_context, scenario, runtime_data) do
+    %{step_registry: step_registry, hooks: hooks} = runtime_data
+    parameter_types = Map.get(runtime_data, :parameter_types, %{})
+
+    scenario_tags =
+      exunit_context
+      |> Map.keys()
+      |> Enum.filter(&is_atom/1)
+      |> Enum.reject(&(&1 in @exunit_context_keys))
+      |> Enum.map(&to_string/1)
+
+    # Combine feature tags + scenario tags for hook matching
+    all_tags = Enum.uniq(scenario.feature_tags ++ scenario_tags)
+
+    context =
+      Map.merge(exunit_context, %{
+        step_history: [],
+        feature_file: scenario.feature_file,
+        feature_tags: scenario.feature_tags,
+        scenario_tags: scenario_tags,
+        async: scenario.async,
+        scenario_name: scenario.scenario_name,
+        scenario_line: scenario.scenario_line
+      })
+
+    case Cucumber.Hooks.run_before_hooks(hooks, context, all_tags) do
+      {:error, reason} ->
+        raise "Before hook failed: #{inspect(reason)}"
+
+      {:ok, context} ->
+        context =
+          execute_steps(scenario.background_steps, context, step_registry, parameter_types)
+
+        try do
+          execute_steps(scenario.steps, context, step_registry, parameter_types)
+        after
+          Cucumber.Hooks.run_after_hooks(hooks, context, all_tags)
+        end
+    end
+  end
+
+  defp execute_steps(steps, context, step_registry, parameter_types) do
+    Enum.reduce(steps, context, fn step, ctx ->
+      execute_step(ctx, step, step_registry, parameter_types)
+    end)
+  end
+
   @doc """
   Executes a step with the given context and step registry.
 

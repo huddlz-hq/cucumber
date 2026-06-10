@@ -31,6 +31,9 @@ defmodule Cucumber.Compiler do
       parameter_types: parameter_types
     } = Discovery.discover(opts)
 
+    # Start (or reset) the run-wide coordinator before any test executes
+    Cucumber.RunCoordinator.ensure_started()
+
     # Generate a test module for each feature
     for feature <- features do
       compile_feature!(feature, step_registry, hook_modules, parameter_types: parameter_types)
@@ -100,13 +103,15 @@ defmodule Cucumber.Compiler do
             :persistent_term.get(unquote(Macro.escape(runtime_key))).parameter_types
           end
 
-          # If there's a background or feature-level tags, create setup block
-          unquote(generate_setup(feature.background, step_registry, feature))
+          @doc false
+          def __cucumber_runtime__ do
+            :persistent_term.get(unquote(Macro.escape(runtime_key)))
+          end
 
           # Expand scenario outlines and rules, generate test for each scenario
           unquote_splicing(
             for scenario <- expand_feature(feature) do
-              generate_scenario_test(scenario, step_registry, all_hooks, feature, async)
+              generate_scenario_test(scenario, feature, async)
             end
           )
         end
@@ -162,117 +167,38 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp generate_setup(nil, _step_registry, feature) do
-    # Always generate setup to run hooks for all scenarios
-    build_setup_block([], feature)
-  end
-
-  defp generate_setup(background, step_registry, feature) do
-    background_steps =
-      for step <- background.steps do
-        generate_step_execution(step, step_registry)
-      end
-
-    build_setup_block(background_steps, feature)
-  end
-
-  # Shared helper to build the setup block with hooks and optional background steps
-  defp build_setup_block(background_steps, feature) do
-    async = "async" in feature.tags
-
-    quote do
-      setup context do
-        # ExUnit puts @tag values directly in context as keys
-        # Filter out standard ExUnit keys to get scenario tags
-        exunit_keys = [
-          :async,
-          :line,
-          :module,
-          :registered,
-          :file,
-          :test,
-          :describe,
-          :describe_line,
-          :test_type,
-          :test_pid,
-          :test_group
-        ]
-
-        scenario_tags =
-          context
-          |> Map.keys()
-          |> Enum.filter(&is_atom/1)
-          |> Enum.reject(&(&1 in exunit_keys))
-          |> Enum.map(&to_string/1)
-
-        # Combine feature tags + scenario tags for hook matching
-        all_tags = Enum.uniq(unquote(feature.tags) ++ scenario_tags)
-
-        # Initialize cucumber context
-        context =
-          Map.merge(context, %{
-            step_history: [],
-            feature_file: unquote(feature.file),
-            feature_tags: unquote(feature.tags),
-            scenario_tags: scenario_tags,
-            async: unquote(async)
-          })
-
-        # Run ALL matching hooks (global + feature + scenario tags)
-        result =
-          Cucumber.Hooks.run_before_hooks(
-            __cucumber_feature_hooks__(),
-            context,
-            all_tags
-          )
-
-        case result do
-          {:ok, context} ->
-            # Execute background steps if any
-            unquote_splicing(background_steps)
-
-            # Register cleanup for after hooks
-            hooks = __cucumber_feature_hooks__()
-
-            on_exit(fn ->
-              Cucumber.Hooks.run_after_hooks(hooks, context, all_tags)
-            end)
-
-            {:ok, context}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-      end
-    end
-  end
-
-  defp generate_scenario_test(scenario, step_registry, _all_hooks, feature, _async) do
+  defp generate_scenario_test(scenario, feature, async) do
     # Generate tags for the scenario
     tags =
       scenario.tags
       |> Enum.map(&String.to_atom/1)
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
+    background_steps = if feature.background, do: feature.background.steps, else: []
+
+    # The whole scenario lifecycle (before hooks, background, steps, after
+    # hooks) runs inside the test body via the runtime — see
+    # Cucumber.Runtime.run_scenario/3.
+    scenario_spec = %{
+      feature_file: feature.file,
+      feature_tags: feature.tags,
+      async: async,
+      scenario_name: scenario.name,
+      scenario_line: (scenario.line || 0) + 1,
+      background_steps: background_steps,
+      steps: scenario.steps
+    }
+
     quote do
       unquote_splicing(tags)
       @tag unquote(scenario_tag(scenario.name))
       @tag scenario_line: unquote((scenario.line || 0) + 1)
 
-      test unquote(scenario.name), context do
-        # Add scenario-specific context (hooks already ran in setup)
-        context =
-          Map.merge(context, %{
-            scenario_name: unquote(scenario.name),
-            feature_file: unquote(feature.file),
-            scenario_line: unquote((scenario.line || 0) + 1)
-          })
-
-        # Execute scenario steps
-        unquote_splicing(
-          for step <- scenario.steps do
-            generate_step_execution(step, step_registry)
-          end
+      test unquote(scenario.name), exunit_context do
+        Cucumber.Runtime.run_scenario(
+          exunit_context,
+          unquote(Macro.escape(scenario_spec)),
+          __cucumber_runtime__()
         )
       end
     end
@@ -287,18 +213,6 @@ defmodule Cucumber.Compiler do
       |> String.trim("_")
 
     :"scenario_#{tag_name}"
-  end
-
-  defp generate_step_execution(step, _step_registry) do
-    quote do
-      context =
-        Cucumber.Runtime.execute_step(
-          context,
-          unquote(Macro.escape(step)),
-          __MODULE__.__step_registry__(),
-          __MODULE__.__cucumber_parameter_types__()
-        )
-    end
   end
 
   # Scenario Outline and Rule expansion functions
