@@ -32,11 +32,16 @@ defmodule Cucumber.Compiler do
 
     # Generate a test module for each feature
     for feature <- features do
-      compile_feature(feature, step_registry, hook_modules)
+      compile_feature!(feature, step_registry, hook_modules)
     end
   end
 
-  defp compile_feature(feature, step_registry, hook_modules) do
+  @doc false
+  # Public so test harnesses (e.g. Cucumber.BehaviorCase) can compile a single
+  # parsed feature against an explicit step registry, bypassing discovery.
+  # The feature must carry a `:file` key (as set by Cucumber.Discovery).
+  @spec compile_feature!(map(), map(), [module()]) :: module()
+  def compile_feature!(feature, step_registry, hook_modules) do
     warn_on_empty_feature(feature)
 
     # Generate module name from feature file path
