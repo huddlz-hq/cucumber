@@ -148,12 +148,13 @@ defmodule Gherkin.NimbleParser do
     |> map({String, :trim, []})
 
   # Table row: | cell1 | cell2 | cell3 |
-  # Note: times(table_cell, min: 1) will consume the trailing | as an empty cell
+  # Note: times(table_cell, min: 1) will consume the trailing | as an empty cell.
+  # Each row carries its source line (for Cucumber Messages locations).
   table_row =
     optional_ws
-    |> times(table_cell, min: 1)
+    |> line(times(table_cell, min: 1))
     |> concat(eol)
-    |> reduce({__MODULE__, :filter_table_cells, []})
+    |> reduce({__MODULE__, :build_table_row, []})
     |> label("table row")
 
   # Full data table
@@ -178,9 +179,13 @@ defmodule Gherkin.NimbleParser do
       |> concat(utf8_string([not: ?\n, not: ?\r], min: 0))
       |> ignore(newline)
 
+    # The opening delimiter is line-wrapped so the docstring's source
+    # line is captured (for Cucumber Messages locations)
     optional_ws
-    |> ignore(string(delimiter))
-    |> concat(rest_of_line |> unwrap_and_tag(:media_type))
+    |> line(
+      ignore(string(delimiter))
+      |> concat(rest_of_line |> unwrap_and_tag(:media_type))
+    )
     |> concat(eol)
     |> repeat(content_line)
     |> concat(optional_ws)
@@ -495,12 +500,18 @@ defmodule Gherkin.NimbleParser do
   # ============================================================
 
   @doc false
-  # Builds the {content, media_type} pair for a docstring from the parser
-  # output: a tagged media type (text after the opening delimiter) followed
-  # by the raw content lines.
-  def build_docstring([{:media_type, media_type} | lines]) do
+  # Builds the {content, media_type, line} triple for a docstring from the
+  # parser output: the line-wrapped opening (carrying the tagged media type)
+  # followed by the raw content lines.
+  def build_docstring([{[{:media_type, media_type}], {line, _offset}} | lines]) do
     media_type = if media_type == "", do: nil, else: media_type
-    {join_docstring(lines), media_type}
+    {join_docstring(lines), media_type, line - 1}
+  end
+
+  @doc false
+  # A table row as {cells, line}.
+  def build_table_row([{cells, {line, _offset}}]) do
+    {filter_table_cells(cells), line - 1}
   end
 
   @doc false
@@ -569,21 +580,21 @@ defmodule Gherkin.NimbleParser do
     {step_data, attachment} = extract_step_parts(args)
     {[keyword, text], {line_num, _offset}} = step_data
 
-    {docstring, docstring_media_type, datatable} =
-      case attachment do
-        {:docstring, {content, media_type}} -> {content, media_type, nil}
-        {:datatable, dt} -> {nil, nil, dt}
-        nil -> {nil, nil, nil}
-      end
+    add_step_attachment(
+      %Step{keyword: keyword, text: text, line: line_num - 1},
+      attachment
+    )
+  end
 
-    %Step{
-      keyword: keyword,
-      text: text,
-      docstring: docstring,
-      docstring_media_type: docstring_media_type,
-      datatable: datatable,
-      line: line_num - 1
-    }
+  defp add_step_attachment(step, nil), do: step
+
+  defp add_step_attachment(step, {:docstring, {content, media_type, line}}) do
+    %{step | docstring: content, docstring_media_type: media_type, docstring_line: line}
+  end
+
+  defp add_step_attachment(step, {:datatable, rows}) do
+    {cells, lines} = Enum.unzip(rows)
+    %{step | datatable: cells, datatable_lines: lines}
   end
 
   defp extract_step_parts([{_data, {_line, _offset}} = step_data]) do
@@ -616,14 +627,17 @@ defmodule Gherkin.NimbleParser do
     table = extract_tagged(args, :table)
     {name, line_num} = extract_examples_name(args)
 
-    [header | body] = table
+    [{header, header_line} | body_rows] = table
+    {body, body_lines} = Enum.unzip(body_rows)
 
     %Examples{
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
       table_header: header,
+      table_header_line: header_line,
       table_body: body,
+      table_body_lines: body_lines,
       line: if(line_num, do: line_num - 1, else: nil),
       keyword: extract_line_keyword(args, "Examples")
     }

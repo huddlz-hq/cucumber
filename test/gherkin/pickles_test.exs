@@ -292,6 +292,34 @@ defmodule Gherkin.PicklesTest do
       assert [%{value: "2"}] = row_two.cells
     end
 
+    test "examples table and pickle locations are real source lines" do
+      # A description, blank line, and comment sit between the Examples
+      # header and its table — deriving lines from the header would be
+      # three lines off
+      %{document: document, pickles: [pickle]} =
+        compile("""
+        Feature: real lines
+          Scenario Outline: spaced out
+            Given number <n>
+
+            Examples: gappy
+              This examples block has a description.
+
+              # and a comment
+              | n |
+              | 7 |
+        """)
+
+      [%{scenario: outline_node}] = document.children
+      [examples_node] = outline_node.examples
+
+      assert examples_node.tableHeader.location == %{line: 9}
+      assert [%{location: %{line: 10}}] = examples_node.tableBody
+
+      # The pickle points at its examples row's actual line
+      assert pickle.line + 1 == 10
+    end
+
     test "an outline with no Examples raises" do
       outline = %Gherkin.ScenarioOutline{name: "Missing examples", examples: []}
       feature = %Gherkin.Feature{name: "f", scenarios: [outline]}

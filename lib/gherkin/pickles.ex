@@ -119,10 +119,10 @@ defmodule Gherkin.Pickles do
   call — callers emitting several documents thread `next_id` through.
 
   The parser tracks lines but not columns, so locations carry only
-  `line`. Locations the parser doesn't record directly (tags, docstrings,
-  table rows) are derived from their owning node: tag lines from the
-  section header, docstring and step-table rows sequentially from the
-  step's line, examples rows sequentially from the examples header.
+  `line`. Table rows and docstrings carry their real source lines as
+  recorded by the parser (with an owner-derived fallback for hand-built
+  ASTs); tags aren't recorded individually and carry the owning section
+  header's line.
   """
 
   alias Gherkin.{Pickle, PickleStep}
@@ -306,14 +306,14 @@ defmodule Gherkin.Pickles do
   defp build_examples(examples, ids) do
     {tag_entries, ids} = build_tags(examples.tags, examples.line, ids)
 
-    header_line = row_line(examples.line, 0)
+    header_line = examples.table_header_line || row_line(examples.line, 0)
     {header_row, ids} = build_table_row(examples.table_header, header_line, ids)
 
     {body_rows, ids} =
       examples.table_body
       |> Enum.with_index(1)
       |> Enum.map_reduce(ids, fn {row, index}, ids ->
-        build_table_row(row, row_line(examples.line, index), ids)
+        build_table_row(row, body_row_line(examples, index), ids)
       end)
 
     {id, ids} = next(ids)
@@ -339,10 +339,21 @@ defmodule Gherkin.Pickles do
     {entry, ids}
   end
 
-  # Table rows sit on consecutive lines after their header in every
-  # conventionally formatted file; the parser doesn't record row lines.
+  # Fallback for hand-built ASTs without recorded lines: assume rows sit
+  # on consecutive lines after their owner. Parsed features carry real
+  # lines (Examples.table_body_lines, Step.datatable_lines/docstring_line).
   defp row_line(nil, _offset), do: nil
   defp row_line(owner_line, offset), do: owner_line + 1 + offset
+
+  defp body_row_line(examples, index) do
+    real = examples.table_body_lines && Enum.at(examples.table_body_lines, index - 1)
+    real || row_line(examples.line, index)
+  end
+
+  defp datatable_row_line(step, index) do
+    real = step.datatable_lines && Enum.at(step.datatable_lines, index)
+    real || row_line(step.line, index)
+  end
 
   defp build_table_row(cells, line, ids) do
     {id, ids} = next(ids)
@@ -383,8 +394,10 @@ defmodule Gherkin.Pickles do
   end
 
   defp build_step_argument(%{docstring: docstring} = step, ids) when is_binary(docstring) do
+    line = step.docstring_line || row_line(step.line, 0)
+
     doc_string =
-      %{location: location(row_line(step.line, 0)), content: docstring}
+      %{location: location(line), content: docstring}
       |> put_unless_nil(:mediaType, step.docstring_media_type)
 
     {%{docString: doc_string}, ids}
@@ -395,10 +408,10 @@ defmodule Gherkin.Pickles do
       datatable
       |> Enum.with_index()
       |> Enum.map_reduce(ids, fn {row, index}, ids ->
-        build_table_row(row, row_line(step.line, index), ids)
+        build_table_row(row, datatable_row_line(step, index), ids)
       end)
 
-    {%{dataTable: %{location: location(row_line(step.line, 0)), rows: rows}}, ids}
+    {%{dataTable: %{location: location(datatable_row_line(step, 0)), rows: rows}}, ids}
   end
 
   defp build_step_argument(_step, ids), do: {%{}, ids}
@@ -523,7 +536,7 @@ defmodule Gherkin.Pickles do
           id: id,
           uri: uri,
           name: substitute_placeholders(outline.name, substitutions),
-          line: row_line(examples.line, row_index),
+          line: body_row_line(examples, row_index),
           ast_node_ids: [source.id, row_id],
           tags: pickle_tags(feature_tags, source, examples_entry),
           steps: pickle_steps,

@@ -134,7 +134,9 @@ defmodule Gherkin.Examples do
             table_header: [],
             table_body: [],
             line: nil,
-            keyword: "Examples"
+            keyword: "Examples",
+            table_header_line: nil,
+            table_body_lines: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -143,7 +145,9 @@ defmodule Gherkin.Examples do
           table_header: [String.t()],
           table_body: [[String.t()]],
           line: non_neg_integer() | nil,
-          keyword: String.t()
+          keyword: String.t(),
+          table_header_line: non_neg_integer() | nil,
+          table_body_lines: [non_neg_integer()] | nil
         }
 end
 
@@ -159,13 +163,20 @@ defmodule Gherkin.Step do
     docstring delimiter (e.g. `json` in `\"\"\"json`)
   - datatable: Optional table data (pipe-delimited)
   - line: Line number in the source file
+
+  `docstring_line` and `datatable_lines` record the source lines of the
+  docstring's opening delimiter and of each datatable row (parallel to
+  `datatable`) for Cucumber Messages locations; the published `docstring`
+  and `datatable` shapes are unchanged.
   """
   defstruct keyword: "",
             text: "",
             docstring: nil,
             docstring_media_type: nil,
             datatable: nil,
-            line: nil
+            line: nil,
+            docstring_line: nil,
+            datatable_lines: nil
 
   @type t :: %__MODULE__{
           keyword: String.t(),
@@ -173,7 +184,9 @@ defmodule Gherkin.Step do
           docstring: String.t() | nil,
           docstring_media_type: String.t() | nil,
           datatable: [[String.t()]] | nil,
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          docstring_line: non_neg_integer() | nil,
+          datatable_lines: [non_neg_integer()] | nil
         }
 end
 
