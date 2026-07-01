@@ -17,12 +17,6 @@ defmodule Cucumber.PendingSkippedTest do
 
   alias Cucumber.BehaviorCase.Collector
 
-  defp fixture(sample) do
-    File.read!(Path.join(["test/fixtures/cck", sample, "#{sample}.feature"]))
-  end
-
-  defp count(events, event), do: Enum.count(events, &(&1 == event))
-
   defmodule Steps do
     use Cucumber.StepDefinition
 
@@ -398,11 +392,6 @@ defmodule Cucumber.PendingSkippedTest do
 
   describe "skipped-step bookkeeping" do
     test "unexecuted steps land in the context under :skipped_steps" do
-      # This test drives Runtime.run_scenario directly instead of going
-      # through run_feature/2, so the Collector the steps record to isn't
-      # started for it — start it explicitly (seed-order dependent otherwise)
-      Collector.reset()
-
       registry =
         for {pattern, metadata} <- Steps.__cucumber_steps__(), into: %{} do
           {Cucumber.Discovery.registry_key(pattern), {Steps, metadata}}

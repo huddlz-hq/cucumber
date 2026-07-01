@@ -57,7 +57,15 @@ defmodule Cucumber.BehaviorCase do
   using do
     quote do
       import Cucumber.BehaviorCase,
-        only: [run_feature: 1, run_feature: 2, run_features: 1, run_features: 2]
+        only: [
+          run_feature: 1,
+          run_feature: 2,
+          run_features: 1,
+          run_features: 2,
+          fixture: 1,
+          fixture: 2,
+          count: 2
+        ]
 
       alias Cucumber.BehaviorCase.Collector
     end
@@ -83,6 +91,14 @@ defmodule Cucumber.BehaviorCase do
     def record(event), do: Agent.update(__MODULE__, &[event | &1])
 
     def events, do: Agent.get(__MODULE__, &Enum.reverse/1)
+  end
+
+  # Tests that drive Cucumber.Runtime directly (bypassing run_feature/2)
+  # still need the Collector running; without this, whether it exists
+  # depends on which test the seed ordered first.
+  setup do
+    Collector.reset()
+    :ok
   end
 
   @doc """
@@ -209,4 +225,20 @@ defmodule Cucumber.BehaviorCase do
   defp unique_feature_path do
     "test/fixtures/generated/behavior_#{System.unique_integer([:positive])}.feature"
   end
+
+  @doc """
+  Reads a vendored CCK sample's feature source from `test/fixtures/cck/`.
+
+  Defaults to the sample's eponymous feature file
+  (`<sample>/<sample>.feature`); pass `file` for samples with several.
+  """
+  def fixture(sample, file \\ nil) do
+    file = file || "#{sample}.feature"
+    File.read!(Path.join(["test/fixtures/cck", sample, file]))
+  end
+
+  @doc """
+  Counts occurrences of `event` in a run's collected `:events`.
+  """
+  def count(events, event), do: Enum.count(events, &(&1 == event))
 end

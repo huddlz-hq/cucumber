@@ -196,6 +196,10 @@ defmodule Cucumber.Compiler do
     scenario_spec = %{
       feature_file: feature.file,
       feature_tags: feature.tags,
+      # Scenario-level tags, distinguishable from feature tags (which become
+      # @moduletag and are indistinguishable in the ExUnit context) — retry
+      # tag precedence needs the two levels apart
+      scenario_tags: scenario.tags,
       async: async,
       scenario_name: scenario.name,
       scenario_line: (scenario.line || 0) + 1,

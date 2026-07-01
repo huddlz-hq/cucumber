@@ -66,12 +66,13 @@ defmodule Cucumber.Runtime do
       still run. Skipped scenarios pass with a printed notice; pending
       scenarios fail with `Cucumber.PendingStepError`
     * a failing scenario is retried when a retry limit is configured
-      (`config :cucumber, retry: n` or a `@retry-n` tag, tag winning):
-      each attempt re-runs before hooks, background, steps, and after
-      hooks with a fresh context (carrying `:retry_attempt`, 1-based), and
-      the scenario passes if any attempt passes. Undefined, ambiguous, and
+      (`config :cucumber, retry: n` or a `@retry-n` tag; a tag beats the
+      config, and a scenario-level tag beats a feature-level one): each
+      attempt re-runs before hooks, background, steps, and after hooks
+      with a fresh context (carrying `:retry_attempt`, 1-based), and the
+      scenario passes if any attempt passes. Undefined, ambiguous, and
       pending scenarios are never retried — they cannot succeed by
-      repetition
+      repetition — and neither is a cached `before_all` failure
 
   Returns the final context.
   """
@@ -98,17 +99,20 @@ defmodule Cucumber.Runtime do
       scenario_tags: scenario_tags
     }
 
-    attempt_scenario(exunit_context, scenario, exec, 1, max_attempts(all_tags))
+    attempt_scenario(exunit_context, scenario, exec, 1, max_attempts(scenario))
   end
 
   # One full scenario lifecycle per attempt, with a fresh context each time.
   # A retryable failure within the attempt limit prints a flake warning and
-  # re-runs; everything else propagates as usual.
+  # re-runs; everything else propagates as usual. `catch` rather than
+  # `rescue`: exits (e.g. a GenServer.call timeout) and throws are common
+  # flake shapes and must retry too — ExUnit fails a test on all three
+  # classes alike.
   defp attempt_scenario(exunit_context, scenario, exec, attempt, max_attempts) do
     run_single_attempt(exunit_context, scenario, exec, attempt)
-  rescue
-    e ->
-      if attempt < max_attempts and retryable?(e) do
+  catch
+    kind, reason ->
+      if attempt < max_attempts and retryable?(kind, reason, __STACKTRACE__) do
         IO.puts(
           "Cucumber: retrying scenario \"#{scenario.scenario_name}\" " <>
             "(#{scenario.feature_file}:#{scenario.scenario_line}) — " <>
@@ -117,23 +121,55 @@ defmodule Cucumber.Runtime do
 
         attempt_scenario(exunit_context, scenario, exec, attempt + 1, max_attempts)
       else
-        reraise e, __STACKTRACE__
+        :erlang.raise(kind, reason, __STACKTRACE__)
       end
   end
 
+  defp retryable?(:error, reason, stacktrace) do
+    retryable_error?(Exception.normalize(:error, reason, stacktrace))
+  end
+
+  # Exits and throws are runtime turbulence (timeouts, crashed processes) —
+  # exactly the failure shapes retry exists for.
+  defp retryable?(_kind, _reason, _stacktrace), do: true
+
   # Retrying can only help failures that might not repeat. Undefined,
   # ambiguous, and pending scenarios are deterministic — CCK semantics say
-  # they run exactly once regardless of the retry limit.
-  defp retryable?(%Cucumber.PendingStepError{}), do: false
-  defp retryable?(%Cucumber.AmbiguousStepError{}), do: false
-  defp retryable?(%Cucumber.StepError{failure_reason: :missing_step_definition}), do: false
-  defp retryable?(_error), do: true
+  # they run exactly once regardless of the retry limit — and a before_all
+  # failure is cached for the whole run, so repeating it can't succeed either.
+  defp retryable_error?(%Cucumber.PendingStepError{}), do: false
+  defp retryable_error?(%Cucumber.AmbiguousStepError{}), do: false
+  defp retryable_error?(%Cucumber.BeforeAllError{}), do: false
+  defp retryable_error?(%Cucumber.StepError{failure_reason: :missing_step_definition}), do: false
+  defp retryable_error?(_error), do: true
 
-  # Attempts = retries + 1. A @retry-n tag (scenario or feature level)
-  # overrides the :retry application config.
-  defp max_attempts(tags) do
-    retries = tag_retry_limit(tags) || Application.get_env(:cucumber, :retry, 0)
+  # Attempts = retries + 1. A @retry-n tag overrides the :retry application
+  # config, and a scenario-level tag beats a feature-level one — so a
+  # scenario's @retry-0 exempts it from a feature-wide retry tag. Tags are
+  # read from the compiler's scenario spec rather than the ExUnit context:
+  # feature tags become @moduletag, so in the context the two levels are
+  # indistinguishable.
+  defp max_attempts(scenario) do
+    retries =
+      tag_retry_limit(Map.get(scenario, :scenario_tags, [])) ||
+        tag_retry_limit(scenario.feature_tags) ||
+        config_retry_limit()
+
     max(retries, 0) + 1
+  end
+
+  defp config_retry_limit do
+    case Application.get_env(:cucumber, :retry, 0) do
+      nil ->
+        0
+
+      retries when is_integer(retries) ->
+        retries
+
+      other ->
+        raise ArgumentError,
+              "config :cucumber, :retry must be an integer, got: #{inspect(other)}"
+    end
   end
 
   defp tag_retry_limit(tags) do
@@ -167,7 +203,7 @@ defmodule Cucumber.Runtime do
     context =
       case Cucumber.RunCoordinator.before_all_context(exec.hooks) do
         {:ok, before_all_context} -> Map.merge(context, before_all_context)
-        {:error, message} -> raise message
+        {:error, message} -> raise Cucumber.BeforeAllError, message
       end
 
     case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags) do
@@ -410,11 +446,15 @@ defmodule Cucumber.Runtime do
 
   # Until Cucumber Messages land (#28), attachments surface in failure
   # output: a failing step's error lists everything the scenario attached.
+  # Only the current attempt's attachments — earlier attempts keep theirs
+  # in the coordinator (each retry is its own test case for #28), but
+  # listing them here would duplicate the evidence on every retry.
   defp append_attachments(error, context) do
     scenario_attachments =
       Enum.filter(Cucumber.RunCoordinator.attachments(), fn attachment ->
         attachment.feature_file == Map.get(context, :feature_file) and
-          attachment.scenario_name == Map.get(context, :scenario_name)
+          attachment.scenario_name == Map.get(context, :scenario_name) and
+          attachment.attempt == Map.get(context, :retry_attempt)
       end)
 
     case scenario_attachments do
