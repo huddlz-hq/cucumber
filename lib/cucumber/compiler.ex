@@ -33,21 +33,39 @@ defmodule Cucumber.Compiler do
     # Start (or reset) the run-wide coordinator before any test executes
     Cucumber.RunCoordinator.ensure_started()
 
-    # Generate a test module for each feature
-    for feature <- features do
-      compile_feature!(feature, step_registry, hook_modules, parameter_types: parameter_types)
-    end
+    # Generate a test module for each feature, threading the pickle id
+    # sequence so ids are unique across the whole run (the messages
+    # stream, #28, references them run-wide)
+    {modules, _next_id} =
+      Enum.map_reduce(features, 0, fn feature, start_id ->
+        compilation = Gherkin.Pickles.compile(feature, start_id)
+
+        module =
+          compile_feature!(feature, step_registry, hook_modules,
+            parameter_types: parameter_types,
+            compilation: compilation
+          )
+
+        {module, compilation.next_id}
+      end)
+
+    modules
   end
 
   @doc false
   # Public so test harnesses (e.g. Cucumber.BehaviorCase) can compile a single
   # parsed feature against an explicit step registry, bypassing discovery.
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
+  # `:compilation` accepts a precomputed `Gherkin.Pickles.Compilation` (used
+  # by compile_features!/1 to thread run-unique pickle ids across features).
   @spec compile_feature!(map(), map(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
     warn_on_empty_feature(feature)
 
     parameter_types = Keyword.get(opts, :parameter_types, %{})
+
+    compilation =
+      Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
@@ -116,7 +134,7 @@ defmodule Cucumber.Compiler do
 
           # One test per pickle (outlines and rules expanded by Gherkin.Pickles)
           unquote_splicing(
-            for pickle <- Gherkin.Pickles.compile(feature).pickles do
+            for pickle <- compilation.pickles do
               generate_scenario_test(pickle, feature, async)
             end
           )

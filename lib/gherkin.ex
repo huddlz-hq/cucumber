@@ -70,15 +70,14 @@ defmodule Gherkin.Scenario do
   A Scenario is a concrete example that illustrates a business rule.
   It consists of a name, an optional free-form description, a list of steps,
   optional tags for filtering, and the line number where it appears in the
-  source file. When a scenario was defined inside a `Rule`, `rule` carries
-  the rule's name (set during compilation, not by the parser).
+  source file. Rule provenance for scenarios defined inside a `Rule` lives
+  on `Gherkin.Pickle.rule_name`.
   """
   defstruct name: "",
             description: "",
             steps: [],
             tags: [],
             line: nil,
-            rule: nil,
             keyword: "Scenario"
 
   @type t :: %__MODULE__{
@@ -87,7 +86,6 @@ defmodule Gherkin.Scenario do
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           line: non_neg_integer() | nil,
-          rule: String.t() | nil,
           keyword: String.t()
         }
 end

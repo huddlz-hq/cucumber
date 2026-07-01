@@ -5,12 +5,13 @@
 ### New Features
 
 - **Cucumber Messages, static layer** (#28, part 1 of 3). Groundwork for emitting the [Cucumber Messages](https://github.com/cucumber/messages) NDJSON protocol:
-  - New `Gherkin.Pickles` module compiles a parsed feature into its `gherkinDocument` node and a list of `Gherkin.Pickle` structs — now the single expansion authority for scenario outlines and rules (previously private compiler logic). Every identified AST node (background, scenario, rule, step, tag, examples, table row) gets a deterministic sequential id; pickles reference them via `astNodeIds`.
+  - New `Gherkin.Pickles` module compiles a parsed feature into its `gherkinDocument` node and a list of `Gherkin.Pickle` structs — now the single expansion authority for scenario outlines and rules (previously private compiler logic). Every identified AST node (background, scenario, rule, step, tag, examples, table row) gets a deterministic sequential id, threaded across all features of a run so ids are run-unique; pickles reference them via `astNodeIds`. Pickle semantics match the reference compiler: only the outline's own steps are placeholder-substituted and reference the examples row (inherited background steps stay verbatim), step types thread across the background/scenario boundary, and docstring media types substitute placeholders like the content does (also fixing `context.docstring_media_type` for outlines at runtime).
   - New `Cucumber.Messages` module builds `source`, `gherkinDocument`, and `pickle` envelopes and encodes them as NDJSON lines (stdlib `JSON`, no new dependency). Runtime messages follow in part 2.
   - The compiler now generates **one ExUnit test per pickle**, carrying its `pickle_id`; test names, tags, and reported lines are unchanged.
   - Discovery retains each feature file's raw text (`:source`) for the `source` message.
-  - `Gherkin` structs capture more of the source for the document builder: `Feature.line`, `Background.name`/`Background.line`, and the keyword actually used (`Scenario`/`Example`, `Scenario Outline`/`Scenario Template`, `Examples`/`Scenarios`) on `Scenario`, `ScenarioOutline`, and `Examples`.
-  - **Breaking** for code calling compiler internals: `Cucumber.Compiler.expand_feature/1` and `expand_all_scenarios/1` are gone — use `Gherkin.Pickles.compile/2`.
+  - `Gherkin` structs capture more of the source for the document builder: `Feature.line`, `Background.name`/`Background.line`, the keyword actually used (`Scenario`/`Example`, `Scenario Outline`/`Scenario Template`, `Examples`/`Scenarios`), and real source lines for table rows and docstring delimiters (`Step.datatable_lines`/`docstring_line`, `Examples.table_header_line`/`table_body_lines` — the published `datatable`/`docstring` shapes are unchanged).
+  - **Behavior change:** a scenario with no steps of its own now compiles to an empty pickle, so its background no longer runs (matching the reference compiler; previously background steps ran even for step-less scenarios).
+  - **Breaking** for code calling compiler internals: `Cucumber.Compiler.expand_feature/1` and `expand_all_scenarios/1` are gone — use `Gherkin.Pickles.compile/2`. The dormant `Gherkin.Scenario.rule` field is removed (rule provenance lives on `Gherkin.Pickle.rule_name`).
 
 ### Bug Fixes
 

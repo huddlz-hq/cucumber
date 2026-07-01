@@ -66,7 +66,7 @@ defmodule Cucumber.Messages do
         uri: pickle.uri,
         name: pickle.name,
         language: pickle.language,
-        location: pickle_location(pickle.line),
+        location: Gherkin.Pickles.location(pickle.line),
         astNodeIds: pickle.ast_node_ids,
         tags: Enum.map(pickle.tags, &%{name: &1.name, astNodeId: &1.ast_node_id}),
         steps: Enum.map(pickle.steps, &pickle_step/1)
@@ -81,9 +81,6 @@ defmodule Cucumber.Messages do
   def encode!(envelope) when is_map(envelope) do
     JSON.encode!(envelope)
   end
-
-  defp pickle_location(nil), do: %{line: 1}
-  defp pickle_location(line), do: %{line: line + 1}
 
   defp pickle_step(%Gherkin.PickleStep{} = pickle_step) do
     base = %{

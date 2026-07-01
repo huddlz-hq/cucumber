@@ -186,10 +186,14 @@ defmodule Gherkin.Pickles do
   # Document: id-annotated gherkinDocument nodes
   # ============================================================
 
-  # Locations carry only :line — the parser doesn't track columns.
-  # Stored lines are 0-based (parser convention); messages are 1-based.
-  defp location(nil), do: %{line: 1}
-  defp location(line), do: %{line: line + 1}
+  @doc false
+  # A message location from a parser-convention line. Locations carry only
+  # :line — the parser doesn't track columns. Stored lines are 0-based
+  # (parser convention); messages are 1-based. Shared with
+  # Cucumber.Messages so the two envelope paths can't drift.
+  @spec location(non_neg_integer() | nil) :: %{line: pos_integer()}
+  def location(nil), do: %{line: 1}
+  def location(line), do: %{line: line + 1}
 
   defp next(ids), do: {Integer.to_string(ids), ids + 1}
 
