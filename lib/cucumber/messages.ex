@@ -21,14 +21,22 @@ defmodule Cucumber.Messages do
 
   ## Example
 
-      compilation = Gherkin.Pickles.compile(feature)
+  Ids must be unique across the whole stream, so when emitting several
+  features, thread `next_id` from one compilation into the next (as
+  `Cucumber.Compiler.compile_features!/1` does):
 
-      [
-        Cucumber.Messages.source(feature.file, source_text),
-        Cucumber.Messages.gherkin_document(feature.file, compilation.document)
-        | Enum.map(compilation.pickles, &Cucumber.Messages.pickle/1)
-      ]
-      |> Enum.map_join("\\n", &Cucumber.Messages.encode!/1)
+      {lines, _next_id} =
+        Enum.flat_map_reduce(features, 0, fn feature, start_id ->
+          compilation = Gherkin.Pickles.compile(feature, start_id)
+
+          envelopes = [
+            Cucumber.Messages.source(feature.file, feature.source),
+            Cucumber.Messages.gherkin_document(feature.file, compilation.document)
+            | Enum.map(compilation.pickles, &Cucumber.Messages.pickle/1)
+          ]
+
+          {Enum.map(envelopes, &Cucumber.Messages.encode!/1), compilation.next_id}
+        end)
   """
 
   @gherkin_media_type "text/x.cucumber.gherkin+plain"
