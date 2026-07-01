@@ -25,6 +25,7 @@ defmodule Cucumber.Runtime do
   """
 
   alias Cucumber.Expression
+  alias Cucumber.Messages.Emitter
 
   # Standard ExUnit context keys — everything else in the test context is a
   # scenario tag (ExUnit puts @tag values directly in the context as keys).
@@ -99,20 +100,37 @@ defmodule Cucumber.Runtime do
       scenario_tags: scenario_tags
     }
 
+    # Cucumber Messages session (nil unless the message sink is enabled):
+    # emits the testCase envelope now, per-attempt/per-step events later
+    exec = Map.put(exec, :msg, Emitter.open_test_case(scenario, exec))
+
     attempt_scenario(exunit_context, scenario, exec, 1, max_attempts(scenario))
   end
 
   # One full scenario lifecycle per attempt, with a fresh context each time.
+  # Each attempt gets its own testCaseStarted message; the session must be
+  # bound before do_attempt/5 so its catch clause can close the test case
+  # (an implicit try only sees function arguments, not body bindings).
+  defp attempt_scenario(exunit_context, scenario, exec, attempt, max_attempts) do
+    exec = %{exec | msg: Emitter.start_attempt(exec.msg, attempt)}
+    do_attempt(exunit_context, scenario, exec, attempt, max_attempts)
+  end
+
   # A retryable failure within the attempt limit prints a flake warning and
   # re-runs; everything else propagates as usual. `catch` rather than
   # `rescue`: exits (e.g. a GenServer.call timeout) and throws are common
   # flake shapes and must retry too — ExUnit fails a test on all three
   # classes alike.
-  defp attempt_scenario(exunit_context, scenario, exec, attempt, max_attempts) do
-    run_single_attempt(exunit_context, scenario, exec, attempt)
+  defp do_attempt(exunit_context, scenario, exec, attempt, max_attempts) do
+    context = run_single_attempt(exunit_context, scenario, exec, attempt)
+    Emitter.close_test_case(exec.msg, false)
+    context
   catch
     kind, reason ->
-      if attempt < max_attempts and retryable?(kind, reason, __STACKTRACE__) do
+      retrying = attempt < max_attempts and retryable?(kind, reason, __STACKTRACE__)
+      Emitter.close_test_case(exec.msg, retrying)
+
+      if retrying do
         IO.puts(
           "Cucumber: retrying scenario \"#{scenario.scenario_name}\" " <>
             "(#{scenario.feature_file}:#{scenario.scenario_line}) — " <>
@@ -183,7 +201,9 @@ defmodule Cucumber.Runtime do
 
   defp run_single_attempt(exunit_context, scenario, exec, attempt) do
     # :cucumber_phase tracks where in the lifecycle the context currently
-    # is — attachments use it for attribution (see Cucumber.attach/4)
+    # is — attachments use it for attribution (see Cucumber.attach/4);
+    # :cucumber_message_ref carries the current attempt's testCaseStarted id
+    # so attachments recorded from hooks land in the message stream
     context =
       Map.merge(exunit_context, %{
         step_history: [],
@@ -194,6 +214,7 @@ defmodule Cucumber.Runtime do
         scenario_name: scenario.scenario_name,
         scenario_line: scenario.scenario_line,
         cucumber_phase: :before_scenario,
+        cucumber_message_ref: message_ref(exec.msg),
         retry_attempt: attempt
       })
 
@@ -206,7 +227,10 @@ defmodule Cucumber.Runtime do
         {:error, message} -> raise Cucumber.BeforeAllError, message
       end
 
-    case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags) do
+    before_around =
+      Emitter.hook_around(exec.msg, exec.msg && exec.msg.before_ids)
+
+    case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags, before_around) do
       {:error, reason, hook_name} ->
         raise "Before hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
 
@@ -228,7 +252,7 @@ defmodule Cucumber.Runtime do
   end
 
   defp run_background(scenario, context, exec) do
-    case execute_steps(scenario.background_steps, context, exec) do
+    case execute_steps(scenario.background_steps, context, exec, 0) do
       {:halted, status, reason, step, remaining, context} ->
         # Pending/skipped is a deliberate signal, not a crash, so —
         # unlike a *failing* background step — after hooks run.
@@ -247,7 +271,7 @@ defmodule Cucumber.Runtime do
 
   defp run_scenario_steps(scenario, context, exec) do
     with_after_hooks(exec, context, fn ->
-      case execute_steps(scenario.steps, context, exec) do
+      case execute_steps(scenario.steps, context, exec, length(scenario.background_steps)) do
         {:ok, context} ->
           context
 
@@ -265,7 +289,8 @@ defmodule Cucumber.Runtime do
     Cucumber.Hooks.run_after_hooks(
       exec.hooks,
       Map.put(context, :cucumber_phase, :after_scenario),
-      exec.tags
+      exec.tags,
+      Emitter.hook_around(exec.msg, exec.msg && exec.msg.after_ids)
     )
   end
 
@@ -296,11 +321,15 @@ defmodule Cucumber.Runtime do
     :erlang.raise(:error, error, stacktrace)
   end
 
-  defp execute_steps(steps, context, exec) do
+  # `id_offset` positions these steps within the message session's step id
+  # list (scenario steps come after the background's).
+  defp execute_steps(steps, context, exec, id_offset) do
     steps
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, context}, fn {step, index}, {:ok, ctx} ->
-      case do_execute_step(ctx, step, exec) do
+      test_step_id = Emitter.step_id(exec.msg, id_offset + index)
+
+      case do_execute_step(ctx, step, exec, test_step_id) do
         {:halted, status, reason, ctx} ->
           {:halt, {:halted, status, reason, step, Enum.drop(steps, index + 1), ctx}}
 
@@ -326,19 +355,30 @@ defmodule Cucumber.Runtime do
   @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) ::
           map() | {:halted, :pending | :skipped, String.t() | nil, map()}
   def execute_step(context, step, step_registry, parameter_types \\ %{}) do
-    do_execute_step(context, step, %{
-      step_registry: step_registry,
-      parameter_types: parameter_types,
-      hooks: [],
-      tags: []
-    })
+    do_execute_step(
+      context,
+      step,
+      %{
+        step_registry: step_registry,
+        parameter_types: parameter_types,
+        hooks: [],
+        tags: [],
+        msg: nil
+      },
+      nil
+    )
   end
 
-  defp do_execute_step(context, step, exec) do
+  defp do_execute_step(context, step, exec, test_step_id) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
     context = update_in(context, [:step_history], &(&1 ++ [step]))
     context = Map.put(context, :cucumber_phase, :step)
+
+    # Message bookkeeping for this step (nil when the sink is disabled)
+    msg = Emitter.step_message(exec.msg, test_step_id)
+    Emitter.step_started(msg)
+    context = put_step_message_ref(context, msg)
 
     # Find matching step definition
     case find_step_definition(step.text, exec.step_registry, exec.parameter_types) do
@@ -350,7 +390,17 @@ defmodule Cucumber.Runtime do
           |> prepare_context(args, step)
           |> Map.put(:step, step)
 
-        run_matched_step(context, step, {module, metadata}, pattern_text, exec)
+        outcome = run_matched_step(context, step, {module, metadata}, pattern_text, exec, msg)
+
+        case outcome do
+          {:halted, status, reason, _ctx} ->
+            Emitter.step_finished(msg, status, reason)
+
+          _ctx ->
+            Emitter.step_finished(msg, :passed)
+        end
+
+        outcome
 
       {:ambiguous, matches} ->
         feature_file = Map.get(context, :feature_file, "unknown")
@@ -361,6 +411,7 @@ defmodule Cucumber.Runtime do
               do: {pattern_text, module, metadata}
 
         error = Cucumber.AmbiguousStepError.new(step, listed, feature_file, scenario_name)
+        Emitter.step_finished(msg, :ambiguous, Exception.message(error))
         :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
 
       :error ->
@@ -378,28 +429,42 @@ defmodule Cucumber.Runtime do
             format_step_history_with_status(step_history, step, context)
           )
 
+        Emitter.step_finished(msg, :undefined, Exception.message(error))
         :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
     end
+  end
+
+  # Attachments recorded inside the step body reference this step's message
+  # ids (see Cucumber.attach/4).
+  defp put_step_message_ref(context, nil), do: context
+
+  defp put_step_message_ref(context, msg) do
+    Map.put(context, :cucumber_message_ref, %{
+      test_case_started_id: msg.test_case_started_id,
+      test_step_id: msg.test_step_id
+    })
   end
 
   # Brackets the matched step definition with before_step/after_step hooks.
   # A {:error, reason} from a before_step hook fails the scenario without
   # running the step body; a :pending/:skipped signal halts the scenario
   # like the step itself returning it.
-  defp run_matched_step(context, step, definition, pattern_text, exec) do
+  defp run_matched_step(context, step, definition, pattern_text, exec, msg) do
     case Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags) do
       {:error, reason, hook_name} ->
-        raise "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
+        message = "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
+        Emitter.step_finished(msg, :failed, message)
+        raise message
 
       {:halted, status, reason} ->
         {:halted, status, reason, context}
 
       {:ok, context} ->
-        invoke_step(context, step, definition, pattern_text, exec)
+        invoke_step(context, step, definition, pattern_text, exec, msg)
     end
   end
 
-  defp invoke_step(context, step, {module, metadata}, pattern_text, exec) do
+  defp invoke_step(context, step, {module, metadata}, pattern_text, exec, msg) do
     outcome =
       try do
         result = apply(module, metadata.function, [context])
@@ -413,6 +478,9 @@ defmodule Cucumber.Runtime do
           # masks the step's own error — that's the hook author's bug)
           Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
 
+          failure_description = describe_failure(kind, reason, __STACKTRACE__)
+          Emitter.step_finished(msg, :failed, failure_description)
+
           # Extract meaningful information from the error
           feature_file = Map.get(context, :feature_file, "unknown")
           scenario_name = Map.get(context, :scenario_name, "unknown scenario")
@@ -423,7 +491,7 @@ defmodule Cucumber.Runtime do
             Cucumber.StepError.failed_step(
               step,
               pattern_text,
-              describe_failure(kind, reason, __STACKTRACE__),
+              failure_description,
               feature_file,
               scenario_name,
               format_step_history_with_status(step_history, step, context)
@@ -494,6 +562,22 @@ defmodule Cucumber.Runtime do
 
   defp truncate(text, max) do
     if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
+
+  # The scenario-level attachment reference: hooks attach against the test
+  # case only (no step id); steps override this with put_step_message_ref/2.
+  defp message_ref(nil), do: nil
+  defp message_ref(session), do: %{test_case_started_id: session.case_started_id}
+
+  @doc false
+  # Registry keys of every definition matching `step_text` — used by the
+  # message emitter to fill testCase.testSteps.stepDefinitionIds without
+  # re-running full dispatch.
+  @spec matching_definition_keys(String.t(), map(), Expression.custom_types()) :: [tuple()]
+  def matching_definition_keys(step_text, step_registry, parameter_types) do
+    for {key, _definition} <- step_registry,
+        match_pattern(key, step_text, parameter_types) != :no_match,
+        do: key
   end
 
   defp find_step_definition(step_text, step_registry, parameter_types) do

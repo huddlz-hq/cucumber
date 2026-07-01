@@ -54,6 +54,8 @@ defmodule Cucumber.BehaviorCase do
 
   import ExUnit.CaptureIO
 
+  alias Cucumber.Messages.Emitter
+
   using do
     quote do
       import Cucumber.BehaviorCase,
@@ -112,6 +114,9 @@ defmodule Cucumber.BehaviorCase do
       `use Cucumber.ParameterTypes`
     * `:file` - synthetic feature path (defaults to a unique generated path,
       which also keeps generated module names unique across runs)
+    * `:messages` - a path enabling the Cucumber Messages sink for this run
+      (mirroring `config :cucumber, messages: path`); the NDJSON file is
+      flushed when the nested run finishes
 
   Returns a map with:
 
@@ -120,6 +125,7 @@ defmodule Cucumber.BehaviorCase do
     * `:output` - everything the nested run printed (assert error messages here)
     * `:events` - events recorded via `Collector.record/1`, in order
     * `:attachments` - `Cucumber.Attachment` structs recorded during the run
+    * `:messages` - the decoded message envelopes (only with `:messages`)
     * `:module` - the generated test module
   """
   def run_feature(source, opts \\ []) do
@@ -148,10 +154,12 @@ defmodule Cucumber.BehaviorCase do
     Cucumber.RunCoordinator.ensure_started()
     Collector.reset()
 
-    modules =
+    # Thread pickle ids across features exactly like compile_features!/1
+    # does, so ids stay unique across a multi-feature run
+    {compiled, next_id} =
       sources
       |> Enum.with_index()
-      |> Enum.map(fn {source, index} ->
+      |> Enum.map_reduce(0, fn {source, index}, start_id ->
         file =
           case {Keyword.fetch(opts, :file), index} do
             {{:ok, file}, 0} -> file
@@ -164,10 +172,29 @@ defmodule Cucumber.BehaviorCase do
           |> Map.put(:file, file)
           |> Map.put(:source, source)
 
-        Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
-          parameter_types: parameter_types
-        )
+        compilation = Gherkin.Pickles.compile(feature, start_id)
+
+        module =
+          Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
+            parameter_types: parameter_types,
+            compilation: compilation
+          )
+
+        {{module, feature, compilation}, compilation.next_id}
       end)
+
+    modules = Enum.map(compiled, fn {module, _feature, _compilation} -> module end)
+
+    if path = opts[:messages] do
+      Emitter.configure(
+        path,
+        Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
+        registry,
+        Cucumber.Hooks.collect_hooks(hook_modules),
+        parameter_types,
+        next_id
+      )
+    end
 
     {result, output} = run_isolated(modules)
 
@@ -180,16 +207,34 @@ defmodule Cucumber.BehaviorCase do
       output: output,
       events: Collector.events(),
       attachments: Cucumber.RunCoordinator.attachments(),
+      messages: read_messages(opts[:messages]),
       module: List.first(modules),
       modules: modules
     }
   end
 
-  # Runs the module in a nested ExUnit run with neutral include/exclude
-  # filters, so outer-suite filters (e.g. `mix test --exclude cucumber`,
-  # which would exclude every generated module via its :cucumber moduletag)
-  # cannot distort the nested result. Safe to swap globally: see moduledoc.
-  defp run_isolated(modules) do
+  # The nested run's after_suite callback flushes the NDJSON file before
+  # ExUnit.run/1 returns, so it is readable here.
+  defp read_messages(nil), do: nil
+
+  defp read_messages(path) do
+    path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&JSON.decode!/1)
+  end
+
+  @doc """
+  Runs already-compiled test modules in a nested ExUnit run with neutral
+  include/exclude filters, so outer-suite filters (e.g. `mix test --exclude
+  cucumber`, which would exclude every generated module via its `:cucumber`
+  moduletag) cannot distort the nested result. Safe to swap globally: see
+  the moduledoc.
+
+  Returns `{result, output}`. Prefer `run_feature/2`; this is for tests
+  that drive `Cucumber.Compiler.compile_features!/1` themselves.
+  """
+  def run_isolated(modules) do
     config = ExUnit.configuration()
 
     try do

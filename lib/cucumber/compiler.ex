@@ -16,6 +16,7 @@ defmodule Cucumber.Compiler do
   """
 
   alias Cucumber.Discovery
+  alias Cucumber.Messages.Emitter
 
   @doc """
   Compiles all discovered features into ExUnit test modules.
@@ -35,8 +36,8 @@ defmodule Cucumber.Compiler do
 
     # Generate a test module for each feature, threading the pickle id
     # sequence so ids are unique across the whole run (the messages
-    # stream, #28, references them run-wide)
-    {modules, _next_id} =
+    # stream references them run-wide)
+    {compiled, next_id} =
       Enum.map_reduce(features, 0, fn feature, start_id ->
         compilation = Gherkin.Pickles.compile(feature, start_id)
 
@@ -46,10 +47,23 @@ defmodule Cucumber.Compiler do
             compilation: compilation
           )
 
-        {module, compilation.next_id}
+        {{module, feature, compilation}, compilation.next_id}
       end)
 
-    modules
+    # Opt-in Cucumber Messages: build the run's static envelopes and enable
+    # the coordinator's sink; the runner and the after_suite flush do the rest
+    if path = Application.get_env(:cucumber, :messages) do
+      Emitter.configure(
+        path,
+        Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
+        step_registry,
+        Cucumber.Hooks.collect_hooks(hook_modules),
+        parameter_types,
+        next_id
+      )
+    end
+
+    Enum.map(compiled, fn {module, _feature, _compilation} -> module end)
   end
 
   @doc false
@@ -171,7 +185,18 @@ defmodule Cucumber.Compiler do
 
   defp register_after_suite_callback do
     unless :persistent_term.get({Cucumber, :after_suite_registered}, false) do
-      ExUnit.after_suite(&Cucumber.RunCoordinator.run_after_all/1)
+      # One callback for both run-level concerns so their order is fixed:
+      # after_all hooks run first (their testRunHook messages must land in
+      # the stream), then the message flush — which must happen even when an
+      # after_all hook raises (the raise still fails the run).
+      ExUnit.after_suite(fn suite_result ->
+        try do
+          Cucumber.RunCoordinator.run_after_all(suite_result)
+        after
+          Cucumber.RunCoordinator.flush_messages(suite_result)
+        end
+      end)
+
       :persistent_term.put({Cucumber, :after_suite_registered}, true)
     end
   end
@@ -226,6 +251,10 @@ defmodule Cucumber.Compiler do
       scenario_line: (pickle.scenario_line || 0) + 1,
       background_steps: Enum.map(background_steps, & &1.step),
       steps: Enum.map(scenario_steps, & &1.step),
+      # Pickle step ids parallel to the step lists — testCase.testSteps
+      # references them when the message sink is enabled
+      background_step_ids: Enum.map(background_steps, & &1.id),
+      step_ids: Enum.map(scenario_steps, & &1.id),
       pickle_id: pickle.id
     }
 

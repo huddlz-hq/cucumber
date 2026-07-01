@@ -35,6 +35,10 @@ defmodule Cucumber do
         features: ["test/features/**/*.feature"],
         steps: ["test/features/step_definitions/**/*.exs"]
 
+  Setting `messages: "cucumber-messages.ndjson"` additionally writes a
+  [Cucumber Messages](https://github.com/cucumber/messages) NDJSON stream
+  describing the run — see `Cucumber.Messages`.
+
   ## Step Definitions
 
   Create step definition modules using `Cucumber.StepDefinition`:
@@ -170,7 +174,7 @@ defmodule Cucumber do
   defp record_attachment(context, body, media_type, encoding, opts) do
     step = if context[:cucumber_phase] == :step, do: context[:step]
 
-    Cucumber.RunCoordinator.record_attachment(%Cucumber.Attachment{
+    attachment = %Cucumber.Attachment{
       body: body,
       media_type: media_type,
       encoding: encoding,
@@ -181,7 +185,14 @@ defmodule Cucumber do
       step_line: step && step.line,
       phase: Map.get(context, :cucumber_phase),
       attempt: Map.get(context, :retry_attempt)
-    })
+    }
+
+    # The message ref (current testCaseStarted/testStep ids, set by the
+    # runner) places the attachment envelope in the message stream
+    Cucumber.RunCoordinator.record_attachment(
+      attachment,
+      Map.get(context, :cucumber_message_ref)
+    )
 
     context
   end
