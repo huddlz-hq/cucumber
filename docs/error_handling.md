@@ -234,6 +234,36 @@ end
 
 ## Handling Flaky Tests
 
+### Scenario-Level Retry
+
+Failing scenarios can be retried automatically, matching the retry
+mechanism of other Cucumber implementations. Configure a global retry
+limit:
+
+```elixir
+# config/test.exs
+config :cucumber, retry: 2  # up to 3 attempts per failing scenario
+```
+
+Or opt individual scenarios (or whole features) in with a `@retry-n` tag,
+which overrides the global config — including `@retry-0` to exempt a
+scenario from a global retry limit:
+
+```gherkin
+@retry-2
+Scenario: occasionally slow external service
+  Given the payment provider responds
+```
+
+Each attempt re-runs the full scenario lifecycle — before hooks,
+background, steps, and after hooks — with a fresh context (the 1-based
+attempt number is available as `context.retry_attempt`). The scenario
+passes if any attempt passes; each retry prints a one-line flake warning
+so quiet flakiness stays visible. Undefined, ambiguous, and pending
+scenarios are never retried — they cannot succeed by repetition.
+
+### Step-Level Techniques
+
 Sometimes tests can be inconsistent due to timing issues, especially with UI interactions:
 
 ```elixir
