@@ -148,12 +148,13 @@ defmodule Gherkin.NimbleParser do
     |> map({String, :trim, []})
 
   # Table row: | cell1 | cell2 | cell3 |
-  # Note: times(table_cell, min: 1) will consume the trailing | as an empty cell
+  # Note: times(table_cell, min: 1) will consume the trailing | as an empty cell.
+  # Each row carries its source line (for Cucumber Messages locations).
   table_row =
     optional_ws
-    |> times(table_cell, min: 1)
+    |> line(times(table_cell, min: 1))
     |> concat(eol)
-    |> reduce({__MODULE__, :filter_table_cells, []})
+    |> reduce({__MODULE__, :build_table_row, []})
     |> label("table row")
 
   # Full data table
@@ -178,9 +179,13 @@ defmodule Gherkin.NimbleParser do
       |> concat(utf8_string([not: ?\n, not: ?\r], min: 0))
       |> ignore(newline)
 
+    # The opening delimiter is line-wrapped so the docstring's source
+    # line is captured (for Cucumber Messages locations)
     optional_ws
-    |> ignore(string(delimiter))
-    |> concat(rest_of_line |> unwrap_and_tag(:media_type))
+    |> line(
+      ignore(string(delimiter))
+      |> concat(rest_of_line |> unwrap_and_tag(:media_type))
+    )
     |> concat(eol)
     |> repeat(content_line)
     |> concat(optional_ws)
@@ -312,12 +317,12 @@ defmodule Gherkin.NimbleParser do
   background_name =
     ignore(background_keyword)
     |> concat(rest_of_line)
-    |> concat(eol)
 
   # Background parser
   background =
     optional_ws
-    |> concat(background_name)
+    |> line(background_name)
+    |> concat(eol)
     |> concat(section_description)
     |> concat(steps |> tag(:steps))
     |> reduce({__MODULE__, :build_background, []})
@@ -325,8 +330,11 @@ defmodule Gherkin.NimbleParser do
     |> label("background section")
 
   # --- Examples ---
+  # The keyword actually used ("Examples"/"Scenarios") is kept for the
+  # gherkinDocument message (#28)
   examples_name =
-    ignore(examples_keyword)
+    examples_keyword
+    |> unwrap_and_tag(:keyword)
     |> concat(rest_of_line)
 
   # Lookahead to verify Examples: keyword follows tags (with optional
@@ -352,8 +360,11 @@ defmodule Gherkin.NimbleParser do
     |> label("examples block")
 
   # --- Scenario ---
+  # The keyword actually used ("Scenario"/"Example") is kept for the
+  # gherkinDocument message (#28)
   scenario_name =
-    ignore(scenario_keyword)
+    scenario_keyword
+    |> unwrap_and_tag(:keyword)
     |> concat(rest_of_line)
 
   # Regular scenario parser
@@ -369,8 +380,11 @@ defmodule Gherkin.NimbleParser do
     |> label("scenario")
 
   # --- Scenario Outline ---
+  # The keyword actually used ("Scenario Outline"/"Scenario Template") is
+  # kept for the gherkinDocument message (#28)
   outline_name =
-    ignore(scenario_outline_keyword)
+    scenario_outline_keyword
+    |> unwrap_and_tag(:keyword)
     |> concat(rest_of_line)
 
   # Scenario outline with examples
@@ -423,14 +437,14 @@ defmodule Gherkin.NimbleParser do
     ignore(feature_keyword)
     |> ignore(optional(horizontal_ws))
     |> concat(rest_of_line)
-    |> concat(eol)
 
   # Full feature file parser
   feature =
     ignore(blank_lines)
     |> concat(tags |> tag(:tags))
     |> concat(optional_ws)
-    |> concat(feature_name |> unwrap_and_tag(:name))
+    |> concat(line(feature_name) |> unwrap_and_tag(:name))
+    |> concat(eol)
     |> concat(feature_description)
     |> optional(background)
     |> concat(repeat(scenario_definition) |> tag(:scenarios))
@@ -486,12 +500,18 @@ defmodule Gherkin.NimbleParser do
   # ============================================================
 
   @doc false
-  # Builds the {content, media_type} pair for a docstring from the parser
-  # output: a tagged media type (text after the opening delimiter) followed
-  # by the raw content lines.
-  def build_docstring([{:media_type, media_type} | lines]) do
+  # Builds the {content, media_type, line} triple for a docstring from the
+  # parser output: the line-wrapped opening (carrying the tagged media type)
+  # followed by the raw content lines.
+  def build_docstring([{[{:media_type, media_type}], {line, _offset}} | lines]) do
     media_type = if media_type == "", do: nil, else: media_type
-    {join_docstring(lines), media_type}
+    {join_docstring(lines), media_type, line - 1}
+  end
+
+  @doc false
+  # A table row as {cells, line}.
+  def build_table_row([{cells, {line, _offset}}]) do
+    {filter_table_cells(cells), line - 1}
   end
 
   @doc false
@@ -560,21 +580,21 @@ defmodule Gherkin.NimbleParser do
     {step_data, attachment} = extract_step_parts(args)
     {[keyword, text], {line_num, _offset}} = step_data
 
-    {docstring, docstring_media_type, datatable} =
-      case attachment do
-        {:docstring, {content, media_type}} -> {content, media_type, nil}
-        {:datatable, dt} -> {nil, nil, dt}
-        nil -> {nil, nil, nil}
-      end
+    add_step_attachment(
+      %Step{keyword: keyword, text: text, line: line_num - 1},
+      attachment
+    )
+  end
 
-    %Step{
-      keyword: keyword,
-      text: text,
-      docstring: docstring,
-      docstring_media_type: docstring_media_type,
-      datatable: datatable,
-      line: line_num - 1
-    }
+  defp add_step_attachment(step, nil), do: step
+
+  defp add_step_attachment(step, {:docstring, {content, media_type, line}}) do
+    %{step | docstring: content, docstring_media_type: media_type, docstring_line: line}
+  end
+
+  defp add_step_attachment(step, {:datatable, rows}) do
+    {cells, lines} = Enum.unzip(rows)
+    %{step | datatable: cells, datatable_lines: lines}
   end
 
   defp extract_step_parts([{_data, {_line, _offset}} = step_data]) do
@@ -588,12 +608,18 @@ defmodule Gherkin.NimbleParser do
   @doc false
   def build_background(args) do
     steps = extract_tagged(args, :steps)
+    {name, line_num} = extract_background_name(args)
 
     %Background{
+      name: name,
       steps: steps,
-      description: extract_tagged_single(args, :description) || ""
+      description: extract_tagged_single(args, :description) || "",
+      line: if(line_num, do: line_num - 1, else: nil)
     }
   end
+
+  defp extract_background_name(args),
+    do: extract_name_from_args(args, [:steps, :description])
 
   @doc false
   def build_examples(args) do
@@ -601,15 +627,19 @@ defmodule Gherkin.NimbleParser do
     table = extract_tagged(args, :table)
     {name, line_num} = extract_examples_name(args)
 
-    [header | body] = table
+    [{header, header_line} | body_rows] = table
+    {body, body_lines} = Enum.unzip(body_rows)
 
     %Examples{
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
       table_header: header,
+      table_header_line: header_line,
       table_body: body,
-      line: if(line_num, do: line_num - 1, else: nil)
+      table_body_lines: body_lines,
+      line: if(line_num, do: line_num - 1, else: nil),
+      keyword: extract_line_keyword(args, "Examples")
     }
   end
 
@@ -628,6 +658,11 @@ defmodule Gherkin.NimbleParser do
       else: {"", nil}
   end
 
+  # Section header whose keyword was captured (tagged :keyword inside the
+  # line-wrapped contents): the name is whatever follows the keyword
+  defp extract_name_from_args([{[{:keyword, _} | name_parts], {line, _}} | _], _),
+    do: {name_parts |> Enum.join() |> String.trim(), line}
+
   defp extract_name_from_args([{[name], {line, _}} | _], _) when is_binary(name),
     do: {String.trim(name), line}
 
@@ -642,6 +677,15 @@ defmodule Gherkin.NimbleParser do
 
   defp extract_name_from_args(_, _), do: {"", nil}
 
+  # The section keyword as used in the source (e.g. "Example" for a scenario,
+  # "Scenarios" for an examples block), without the trailing colon.
+  defp extract_line_keyword(args, default) do
+    Enum.find_value(args, default, fn
+      {[{:keyword, keyword} | _], {_line, _offset}} -> String.trim_trailing(keyword, ":")
+      _other -> nil
+    end)
+  end
+
   @doc false
   def build_scenario(args) do
     tags = extract_tagged(args, :tags)
@@ -653,7 +697,8 @@ defmodule Gherkin.NimbleParser do
       description: extract_tagged_single(args, :description) || "",
       steps: steps,
       tags: tags,
-      line: if(line_num, do: line_num - 1, else: nil)
+      line: if(line_num, do: line_num - 1, else: nil),
+      keyword: extract_line_keyword(args, "Scenario")
     }
   end
 
@@ -670,7 +715,8 @@ defmodule Gherkin.NimbleParser do
       steps: steps,
       tags: tags,
       examples: examples,
-      line: if(line_num, do: line_num - 1, else: nil)
+      line: if(line_num, do: line_num - 1, else: nil),
+      keyword: extract_line_keyword(args, "Scenario Outline")
     }
   end
 
@@ -694,10 +740,15 @@ defmodule Gherkin.NimbleParser do
   @doc false
   def build_feature(args) do
     tags = extract_tagged(args, :tags)
-    name = extract_tagged_single(args, :name) || ""
     background = extract_tagged_single(args, :background)
     scenarios = extract_tagged(args, :scenarios)
     rules = extract_tagged(args, :rules)
+
+    {name, line_num} =
+      case extract_tagged_single(args, :name) do
+        {[name], {line, _offset}} when is_binary(name) -> {name, line}
+        _other -> {"", nil}
+      end
 
     %Feature{
       name: name,
@@ -705,7 +756,8 @@ defmodule Gherkin.NimbleParser do
       tags: tags,
       background: background,
       scenarios: scenarios,
-      rules: rules
+      rules: rules,
+      line: if(line_num, do: line_num - 1, else: nil)
     }
   end
 

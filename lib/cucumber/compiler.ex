@@ -8,15 +8,14 @@ defmodule Cucumber.Compiler do
   2. For each feature file, a unique ExUnit test module is generated
   3. Module names are derived from the feature file path
      (e.g., `test/features/auth.feature` becomes `Test.Features.AuthTest`)
-  4. Background steps become ExUnit `setup` blocks
-  5. Each scenario becomes an ExUnit `test` block
-  6. Scenario Outlines are expanded into individual scenarios using Examples data
-  7. Tags from features and scenarios are mapped to ExUnit tags for filtering
-  8. Hooks are wired into setup/teardown via `Cucumber.Hooks`
+  4. The feature is compiled into pickles by `Gherkin.Pickles` (expanding
+     scenario outlines and rules); each pickle becomes one ExUnit `test`
+     block carrying its pickle id
+  5. Tags from features and scenarios are mapped to ExUnit tags for filtering
+  6. Hooks are wired in via `Cucumber.Hooks`
   """
 
   alias Cucumber.Discovery
-  alias Gherkin.{Examples, Scenario, ScenarioOutline, Step}
 
   @doc """
   Compiles all discovered features into ExUnit test modules.
@@ -34,21 +33,39 @@ defmodule Cucumber.Compiler do
     # Start (or reset) the run-wide coordinator before any test executes
     Cucumber.RunCoordinator.ensure_started()
 
-    # Generate a test module for each feature
-    for feature <- features do
-      compile_feature!(feature, step_registry, hook_modules, parameter_types: parameter_types)
-    end
+    # Generate a test module for each feature, threading the pickle id
+    # sequence so ids are unique across the whole run (the messages
+    # stream, #28, references them run-wide)
+    {modules, _next_id} =
+      Enum.map_reduce(features, 0, fn feature, start_id ->
+        compilation = Gherkin.Pickles.compile(feature, start_id)
+
+        module =
+          compile_feature!(feature, step_registry, hook_modules,
+            parameter_types: parameter_types,
+            compilation: compilation
+          )
+
+        {module, compilation.next_id}
+      end)
+
+    modules
   end
 
   @doc false
   # Public so test harnesses (e.g. Cucumber.BehaviorCase) can compile a single
   # parsed feature against an explicit step registry, bypassing discovery.
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
+  # `:compilation` accepts a precomputed `Gherkin.Pickles.Compilation` (used
+  # by compile_features!/1 to thread run-unique pickle ids across features).
   @spec compile_feature!(map(), map(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
     warn_on_empty_feature(feature)
 
     parameter_types = Keyword.get(opts, :parameter_types, %{})
+
+    compilation =
+      Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
@@ -115,10 +132,10 @@ defmodule Cucumber.Compiler do
             :persistent_term.get(unquote(Macro.escape(runtime_key)))
           end
 
-          # Expand scenario outlines and rules, generate test for each scenario
+          # One test per pickle (outlines and rules expanded by Gherkin.Pickles)
           unquote_splicing(
-            for scenario <- expand_feature(feature) do
-              generate_scenario_test(scenario, feature, async)
+            for pickle <- compilation.pickles do
+              generate_scenario_test(pickle, feature, async)
             end
           )
         end
@@ -181,14 +198,18 @@ defmodule Cucumber.Compiler do
     :"feature_#{tag_name}"
   end
 
-  defp generate_scenario_test(scenario, feature, async) do
-    # Generate tags for the scenario
+  defp generate_scenario_test(%Gherkin.Pickle{} = pickle, feature, async) do
+    # Generate tags for the scenario (its own tags plus inherited rule /
+    # outline / examples tags — feature tags are module tags)
     tags =
-      scenario.tags
+      pickle.own_tags
       |> Enum.map(&String.to_atom/1)
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
-    background_steps = if feature.background, do: feature.background.steps, else: []
+    name = test_name(pickle)
+
+    {background_steps, scenario_steps} =
+      Enum.split_with(pickle.steps, & &1.from_background)
 
     # The whole scenario lifecycle (before hooks, background, steps, after
     # hooks) runs inside the test body via the runtime — see
@@ -199,20 +220,21 @@ defmodule Cucumber.Compiler do
       # Scenario-level tags, distinguishable from feature tags (which become
       # @moduletag and are indistinguishable in the ExUnit context) — retry
       # tag precedence needs the two levels apart
-      scenario_tags: scenario.tags,
+      scenario_tags: pickle.own_tags,
       async: async,
-      scenario_name: scenario.name,
-      scenario_line: (scenario.line || 0) + 1,
-      background_steps: background_steps,
-      steps: scenario.steps
+      scenario_name: name,
+      scenario_line: (pickle.scenario_line || 0) + 1,
+      background_steps: Enum.map(background_steps, & &1.step),
+      steps: Enum.map(scenario_steps, & &1.step),
+      pickle_id: pickle.id
     }
 
     quote do
       unquote_splicing(tags)
-      @tag unquote(scenario_tag(scenario.name))
-      @tag scenario_line: unquote((scenario.line || 0) + 1)
+      @tag unquote(scenario_tag(name))
+      @tag scenario_line: unquote((pickle.scenario_line || 0) + 1)
 
-      test unquote(scenario.name), exunit_context do
+      test unquote(name), exunit_context do
         Cucumber.Runtime.run_scenario(
           exunit_context,
           unquote(Macro.escape(scenario_spec)),
@@ -221,6 +243,29 @@ defmodule Cucumber.Compiler do
       end
     end
   end
+
+  # ExUnit raises on duplicate test names, so pickles from outline rows get
+  # a row suffix and pickles inside rules a rule-name prefix (identically
+  # named scenarios can appear in different rules). The pickle's own `name`
+  # (placeholder-substituted, per the messages spec) is not unique.
+  defp test_name(pickle) do
+    base =
+      case pickle.row_index do
+        nil -> pickle.scenario_name
+        row_index -> row_test_name(pickle.scenario_name, pickle.examples_name, row_index)
+      end
+
+    prefix_with_rule(pickle.rule_name, base)
+  end
+
+  defp row_test_name(outline_name, "", row_index), do: "#{outline_name} (row #{row_index})"
+
+  defp row_test_name(outline_name, examples_name, row_index),
+    do: "#{outline_name} (#{examples_name}: row #{row_index})"
+
+  defp prefix_with_rule(nil, scenario_name), do: scenario_name
+  defp prefix_with_rule("", scenario_name), do: scenario_name
+  defp prefix_with_rule(rule_name, scenario_name), do: "#{rule_name}: #{scenario_name}"
 
   defp scenario_tag(name) do
     # Convert "User logs in successfully" to :scenario_user_logs_in_successfully
@@ -231,117 +276,5 @@ defmodule Cucumber.Compiler do
       |> String.trim("_")
 
     :"scenario_#{tag_name}"
-  end
-
-  # Scenario Outline and Rule expansion functions
-
-  @doc false
-  # Public for testing - expands a feature's scenarios and rules into the
-  # flat list of concrete scenarios that become tests.
-  @spec expand_feature(map()) :: [Gherkin.Scenario.t()]
-  def expand_feature(feature) do
-    rules = Map.get(feature, :rules, [])
-    expand_all_scenarios(feature.scenarios) ++ Enum.flat_map(rules, &expand_rule/1)
-  end
-
-  # Scenarios inside a rule get the rule background's steps prepended (the
-  # feature background stays in the module's setup block, preserving the
-  # spec order: feature background, rule background, scenario steps), the
-  # rule's tags merged in, and the rule name prefixed so identically-named
-  # scenarios in different rules don't collide as ExUnit test names.
-  # Scenario tags come before the inherited rule tags: first match wins for
-  # @retry-n, so the more specific level must win.
-  defp expand_rule(%Gherkin.Rule{} = rule) do
-    rule_background_steps = if rule.background, do: rule.background.steps, else: []
-
-    rule.scenarios
-    |> expand_all_scenarios()
-    |> Enum.map(fn %Scenario{} = scenario ->
-      %Scenario{
-        scenario
-        | name: prefix_with_rule(rule.name, scenario.name),
-          steps: rule_background_steps ++ scenario.steps,
-          tags: Enum.uniq(scenario.tags ++ rule.tags),
-          rule: rule.name
-      }
-    end)
-  end
-
-  defp prefix_with_rule("", scenario_name), do: scenario_name
-  defp prefix_with_rule(rule_name, scenario_name), do: "#{rule_name}: #{scenario_name}"
-
-  @doc false
-  # Public for testing - expands scenario outlines into concrete scenarios
-  @spec expand_all_scenarios([Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()]) :: [
-          Gherkin.Scenario.t()
-        ]
-  def expand_all_scenarios(scenarios) do
-    Enum.flat_map(scenarios, fn
-      %Scenario{} = scenario -> [scenario]
-      %ScenarioOutline{} = outline -> expand_outline(outline)
-    end)
-  end
-
-  defp expand_outline(%ScenarioOutline{examples: []} = outline) do
-    raise """
-    Scenario Outline '#{outline.name}' has no Examples section.
-
-    Every Scenario Outline must have at least one Examples block with data rows.
-    """
-  end
-
-  defp expand_outline(%ScenarioOutline{} = outline) do
-    outline.examples
-    |> Enum.flat_map(fn %Examples{} = examples ->
-      examples.table_body
-      |> Enum.with_index(1)
-      |> Enum.map(fn {row, row_num} ->
-        substitutions = Enum.zip(examples.table_header, row) |> Map.new()
-
-        # Examples-block tags before the outline's: first match wins for
-        # @retry-n, so the more specific level must win
-        %Scenario{
-          name: generate_test_name(outline.name, examples.name, row_num),
-          steps: substitute_steps(outline.steps, substitutions),
-          tags: Enum.uniq(examples.tags ++ outline.tags),
-          line: outline.line
-        }
-      end)
-    end)
-  end
-
-  defp generate_test_name(outline_name, "", row_num) do
-    "#{outline_name} (row #{row_num})"
-  end
-
-  defp generate_test_name(outline_name, examples_name, row_num) do
-    "#{outline_name} (#{examples_name}: row #{row_num})"
-  end
-
-  defp substitute_steps(steps, substitutions) do
-    Enum.map(steps, fn %Step{} = step ->
-      %{
-        step
-        | text: substitute_placeholders(step.text, substitutions),
-          docstring: substitute_placeholders(step.docstring, substitutions),
-          datatable: substitute_datatable(step.datatable, substitutions)
-      }
-    end)
-  end
-
-  defp substitute_placeholders(nil, _substitutions), do: nil
-
-  defp substitute_placeholders(text, substitutions) do
-    Enum.reduce(substitutions, text, fn {key, value}, acc ->
-      String.replace(acc, "<#{key}>", value)
-    end)
-  end
-
-  defp substitute_datatable(nil, _substitutions), do: nil
-
-  defp substitute_datatable(table, substitutions) do
-    Enum.map(table, fn row ->
-      Enum.map(row, &substitute_placeholders(&1, substitutions))
-    end)
   end
 end

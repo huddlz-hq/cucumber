@@ -22,7 +22,9 @@ defmodule Gherkin.ParserTest do
       expected = %Feature{
         name: "User signs up for event",
         description: "",
+        line: 0,
         background: %Background{
+          line: 2,
           steps: [
             %Step{
               keyword: "Given",
@@ -99,6 +101,7 @@ defmodule Gherkin.ParserTest do
       expected = %Feature{
         name: "Multiple scenarios",
         description: "",
+        line: 0,
         background: nil,
         scenarios: [
           %Scenario{

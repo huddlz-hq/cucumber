@@ -162,6 +162,7 @@ defmodule Cucumber.BehaviorCase do
           source
           |> Gherkin.Parser.parse()
           |> Map.put(:file, file)
+          |> Map.put(:source, source)
 
         Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
           parameter_types: parameter_types
