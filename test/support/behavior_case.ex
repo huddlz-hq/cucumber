@@ -103,6 +103,7 @@ defmodule Cucumber.BehaviorCase do
     * `:passed` - convenience: total minus failures/skipped/excluded
     * `:output` - everything the nested run printed (assert error messages here)
     * `:events` - events recorded via `Collector.record/1`, in order
+    * `:attachments` - `Cucumber.Attachment` structs recorded during the run
     * `:module` - the generated test module
   """
   def run_feature(source, opts \\ []) do
@@ -161,6 +162,7 @@ defmodule Cucumber.BehaviorCase do
       passed: result.total - result.failures - result.skipped - result.excluded,
       output: output,
       events: Collector.events(),
+      attachments: Cucumber.RunCoordinator.attachments(),
       module: List.first(modules),
       modules: modules
     }

@@ -83,6 +83,8 @@ defmodule Cucumber.Runtime do
     # Combine feature tags + scenario tags for hook matching
     all_tags = Enum.uniq(scenario.feature_tags ++ scenario_tags)
 
+    # :cucumber_phase tracks where in the lifecycle the context currently
+    # is — attachments use it for attribution (see Cucumber.attach/4)
     context =
       Map.merge(exunit_context, %{
         step_history: [],
@@ -91,7 +93,8 @@ defmodule Cucumber.Runtime do
         scenario_tags: scenario_tags,
         async: scenario.async,
         scenario_name: scenario.scenario_name,
-        scenario_line: scenario.scenario_line
+        scenario_line: scenario.scenario_line,
+        cucumber_phase: :before_scenario
       })
 
     exec = %{
@@ -166,7 +169,11 @@ defmodule Cucumber.Runtime do
   defp with_after_hooks(exec, context, fun) do
     fun.()
   after
-    Cucumber.Hooks.run_after_hooks(exec.hooks, context, exec.tags)
+    Cucumber.Hooks.run_after_hooks(
+      exec.hooks,
+      Map.put(context, :cucumber_phase, :after_scenario),
+      exec.tags
+    )
   end
 
   # A skipped scenario is not a failure: print a one-line notice and let the
@@ -238,6 +245,7 @@ defmodule Cucumber.Runtime do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
     context = update_in(context, [:step_history], &(&1 ++ [step]))
+    context = Map.put(context, :cucumber_phase, :step)
 
     # Find matching step definition
     case find_step_definition(step.text, exec.step_registry, exec.parameter_types) do
@@ -325,6 +333,8 @@ defmodule Cucumber.Runtime do
               format_step_history_with_status(step_history, step, context)
             )
 
+          enhanced_error = append_attachments(enhanced_error, context)
+
           reraise enhanced_error, scenario_stacktrace(context, step, __STACKTRACE__)
       end
 
@@ -340,6 +350,41 @@ defmodule Cucumber.Runtime do
 
   defp hook_label(nil), do: ""
   defp hook_label(name), do: ~s( "#{name}")
+
+  # Until Cucumber Messages land (#28), attachments surface in failure
+  # output: a failing step's error lists everything the scenario attached.
+  defp append_attachments(error, context) do
+    scenario_attachments =
+      Enum.filter(Cucumber.RunCoordinator.attachments(), fn attachment ->
+        attachment.feature_file == Map.get(context, :feature_file) and
+          attachment.scenario_name == Map.get(context, :scenario_name)
+      end)
+
+    case scenario_attachments do
+      [] ->
+        error
+
+      attachments ->
+        listing = Enum.map_join(attachments, "\n", &format_attachment/1)
+        %{error | message: error.message <> "\n\nAttachments:\n\n" <> listing <> "\n"}
+    end
+  end
+
+  defp format_attachment(%Cucumber.Attachment{} = attachment) do
+    name = if attachment.filename, do: " (#{attachment.filename})", else: ""
+
+    body =
+      case attachment.encoding do
+        :base64 -> "#{byte_size(Base.decode64!(attachment.body))} bytes, base64-encoded"
+        :identity -> truncate(attachment.body, 200)
+      end
+
+    "  * #{attachment.media_type}#{name}: #{body}"
+  end
+
+  defp truncate(text, max) do
+    if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
 
   defp find_step_definition(step_text, step_registry, parameter_types) do
     matches =

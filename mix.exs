@@ -75,6 +75,7 @@ defmodule Cucumber.MixProject do
         "docs/feature_files.md",
         "docs/step_definitions.md",
         "docs/hooks.md",
+        "docs/attachments.md",
         "docs/error_handling.md",
         "docs/best_practices.md",
         "docs/architecture.md"

@@ -98,4 +98,90 @@ defmodule Cucumber do
     # Return the compiled module names for debugging
     modules
   end
+
+  @doc """
+  Attaches data to the current step (or hook execution) for reporting.
+
+  Mirrors the `attach` API of reference Cucumber implementations: useful
+  for capturing screenshots, response payloads, or logs while a scenario
+  runs. Attachments are recorded against the step that attached them; until
+  a step fails they are invisible, then they are listed in the failure
+  output. (Cucumber Messages formatters will render them in reports, #28.)
+
+  `data` is either a string (attached as-is) or `{:bytes, binary}` for
+  binary data, which is Base64-encoded — Elixir can't tell text from bytes
+  by type, so binary data is marked explicitly.
+
+  Returns the context unchanged, so it composes with any step return style.
+
+  ## Options
+
+    * `:filename` - a file name for the attachment (e.g. `"screenshot.png"`)
+
+  ## Examples
+
+      step "I take a screenshot", context do
+        Cucumber.attach(context, {:bytes, screenshot()}, "image/png",
+          filename: "checkout.png"
+        )
+      end
+
+      step "the API responds", context do
+        context
+        |> Cucumber.attach(response.body, "application/json")
+        |> Map.put(:response, response)
+      end
+  """
+  @spec attach(map(), String.t() | {:bytes, binary()}, String.t(), keyword()) :: map()
+  def attach(context, data, media_type, opts \\ [])
+
+  def attach(context, {:bytes, binary}, media_type, opts) when is_binary(binary) do
+    record_attachment(context, Base.encode64(binary), media_type, :base64, opts)
+  end
+
+  def attach(context, text, media_type, opts) when is_binary(text) do
+    record_attachment(context, text, media_type, :identity, opts)
+  end
+
+  @doc """
+  Attaches a log message to the current step.
+
+  Convenience for `attach(context, text, "text/x.cucumber.log+plain")` —
+  the media type reference Cucumber implementations use for `log`.
+  Returns the context unchanged.
+  """
+  @spec log(map(), String.t()) :: map()
+  def log(context, text) when is_binary(text) do
+    attach(context, text, "text/x.cucumber.log+plain")
+  end
+
+  @doc """
+  Attaches a link to the current step.
+
+  Convenience for `attach(context, uri, "text/uri-list")` — the media type
+  reference Cucumber implementations use for `link`. Returns the context
+  unchanged.
+  """
+  @spec link(map(), String.t()) :: map()
+  def link(context, uri) when is_binary(uri) do
+    attach(context, uri, "text/uri-list")
+  end
+
+  defp record_attachment(context, body, media_type, encoding, opts) do
+    step = if context[:cucumber_phase] == :step, do: context[:step]
+
+    Cucumber.RunCoordinator.record_attachment(%Cucumber.Attachment{
+      body: body,
+      media_type: media_type,
+      encoding: encoding,
+      filename: opts[:filename],
+      feature_file: Map.get(context, :feature_file),
+      scenario_name: Map.get(context, :scenario_name),
+      step_text: step && step.text,
+      step_line: step && step.line,
+      phase: Map.get(context, :cucumber_phase)
+    })
+
+    context
+  end
 end

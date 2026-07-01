@@ -17,9 +17,12 @@ defmodule Cucumber.RunCoordinator do
     * **AfterAll hand-off** — `register_after_all/1` stores the run's
       `after_all` hooks; the `ExUnit.after_suite/1` callback registered by
       the compiler claims them exactly once via `run_after_all/1`.
+    * **Attachments** — `record_attachment/1` collects
+      `Cucumber.Attachment` structs (see `Cucumber.attach/4`) in run order;
+      `attachments/0` returns them.
 
-  This process is also the future home of attachments, retry bookkeeping,
-  and the Cucumber Messages sink.
+  This process is also the future home of retry bookkeeping and the
+  Cucumber Messages sink.
   """
 
   use GenServer
@@ -80,6 +83,27 @@ defmodule Cucumber.RunCoordinator do
     end
 
     :ok
+  end
+
+  @doc false
+  # Records an attachment against the current run. Synchronous so that an
+  # attachment recorded right before a step failure is reliably visible to
+  # the failure-output formatting that follows.
+  @spec record_attachment(Cucumber.Attachment.t()) :: :ok
+  def record_attachment(%Cucumber.Attachment{} = attachment) do
+    ensure_process()
+    GenServer.call(__MODULE__, {:record_attachment, attachment})
+  end
+
+  @doc false
+  # Returns the run's attachments in the order they were recorded.
+  @spec attachments() :: [Cucumber.Attachment.t()]
+  def attachments do
+    if Process.whereis(__MODULE__) do
+      GenServer.call(__MODULE__, :attachments)
+    else
+      []
+    end
   end
 
   @doc false
@@ -171,6 +195,14 @@ defmodule Cucumber.RunCoordinator do
     {:reply, :ok, %{state | after_all: hooks}}
   end
 
+  def handle_call({:record_attachment, attachment}, _from, state) do
+    {:reply, :ok, %{state | attachments: [attachment | state.attachments]}}
+  end
+
+  def handle_call(:attachments, _from, state) do
+    {:reply, Enum.reverse(state.attachments), state}
+  end
+
   def handle_call(:take_after_all, _from, state) do
     before_all_context =
       case state.before_all do
@@ -215,6 +247,6 @@ defmodule Cucumber.RunCoordinator do
   end
 
   defp initial_state(run_id) do
-    %{run_id: run_id, before_all: :not_run, after_all: []}
+    %{run_id: run_id, before_all: :not_run, after_all: [], attachments: []}
   end
 end
