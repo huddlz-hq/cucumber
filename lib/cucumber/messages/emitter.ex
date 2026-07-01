@@ -47,7 +47,7 @@ defmodule Cucumber.Messages.Emitter do
       Enum.flat_map(features_with_compilations, fn {feature, compilation} ->
         [
           Messages.source(feature.file, feature.source),
-          Messages.gherkin_document(feature.file, compilation.document)
+          Messages.gherkin_document(feature.file, compilation.document, compilation.comments)
           | Enum.map(compilation.pickles, &Messages.pickle/1)
         ]
       end)
@@ -211,18 +211,21 @@ defmodule Cucumber.Messages.Emitter do
   end
 
   @doc false
-  # Synthesizes SKIPPED events for this attempt's unexecuted before-hook and
+  # Synthesizes skip events for this attempt's unexecuted before-hook and
   # pickle steps. The runner calls this right before the after-scenario
   # hooks run, so skipped pickle steps precede the after-hook events in the
   # stream (reference ordering); the after-hook steps themselves are
-  # excluded — their real events follow.
-  @spec skip_unexecuted_steps(map() | nil) :: :ok
-  def skip_unexecuted_steps(nil), do: :ok
+  # excluded — their real events follow. `outcome` is how the scenario
+  # stopped: after a `:failedish` stop, unmatched steps report
+  # UNDEFINED/AMBIGUOUS instead of SKIPPED (CCK failedish semantics).
+  @spec skip_unexecuted_steps(map() | nil, :skipped | :failedish) :: :ok
+  def skip_unexecuted_steps(nil, _outcome), do: :ok
 
-  def skip_unexecuted_steps(session) do
+  def skip_unexecuted_steps(session, outcome) do
     RunCoordinator.skip_unfinished_steps(
       session.case_started_id,
-      session.before_ids ++ session.step_ids
+      session.before_ids ++ session.step_ids,
+      outcome
     )
   end
 

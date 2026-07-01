@@ -119,21 +119,21 @@ defmodule Gherkin.Pickles do
   call — callers emitting several documents thread `next_id` through.
 
   The parser tracks lines but not columns, so locations carry only
-  `line`. Table rows and docstrings carry their real source lines as
-  recorded by the parser (with an owner-derived fallback for hand-built
-  ASTs); tags aren't recorded individually and carry the owning section
-  header's line.
+  `line`. Table rows, docstrings, and tags carry their real source lines
+  as recorded by the parser (with an owner-derived fallback for
+  hand-built ASTs).
   """
 
   alias Gherkin.{Pickle, PickleStep}
 
   defmodule Compilation do
     @moduledoc "Result of `Gherkin.Pickles.compile/2`."
-    defstruct document: %{}, pickles: [], next_id: 0
+    defstruct document: %{}, pickles: [], comments: [], next_id: 0
 
     @type t :: %__MODULE__{
             document: map(),
             pickles: [Gherkin.Pickle.t()],
+            comments: [map()],
             next_id: non_neg_integer()
           }
   end
@@ -149,7 +149,8 @@ defmodule Gherkin.Pickles do
   def compile(feature, start_id \\ 0) do
     uri = Map.get(feature, :file)
 
-    {feature_tags, ids} = build_tags(feature.tags, Map.get(feature, :line), start_id)
+    {feature_tags, ids} =
+      build_tags(feature.tags, Map.get(feature, :tag_lines), Map.get(feature, :line), start_id)
 
     {background_children, background_source, ids} =
       build_background_child(feature.background, ids)
@@ -179,7 +180,12 @@ defmodule Gherkin.Pickles do
     {pickles, next_id} =
       build_pickles(sources, background_source, feature_tags, uri, ids)
 
-    %Compilation{document: document, pickles: pickles, next_id: next_id}
+    comments =
+      for {line, text} <- Map.get(feature, :comments) || [] do
+        %{location: location(line), text: text}
+      end
+
+    %Compilation{document: document, pickles: pickles, comments: comments, next_id: next_id}
   end
 
   # ============================================================
@@ -197,17 +203,21 @@ defmodule Gherkin.Pickles do
 
   defp next(ids), do: {Integer.to_string(ids), ids + 1}
 
-  # Tags get ids (pickle tags reference them). Their own lines aren't
-  # tracked, so they carry the owning section header's location.
-  defp build_tags(tags, owner_line, ids) do
+  # Tags get ids (pickle tags reference them). Parsed features record each
+  # tag's own line (`tag_lines`, parallel to `tags`); hand-built ASTs fall
+  # back to the owning section header's location.
+  defp build_tags(tags, tag_lines, owner_line, ids) do
     {entries, ids} =
-      Enum.map_reduce(tags, ids, fn tag, ids ->
+      tags
+      |> Enum.with_index()
+      |> Enum.map_reduce(ids, fn {tag, index}, ids ->
         {id, ids} = next(ids)
+        line = Enum.at(tag_lines || [], index) || owner_line
 
         entry = %{
           name: tag,
           id: id,
-          tag: %{location: location(owner_line), name: "@" <> tag, id: id}
+          tag: %{location: location(line), name: "@" <> tag, id: id}
         }
 
         {entry, ids}
@@ -248,7 +258,9 @@ defmodule Gherkin.Pickles do
   end
 
   defp build_scenario(scenario, ids) do
-    {tag_entries, ids} = build_tags(scenario.tags, scenario.line, ids)
+    {tag_entries, ids} =
+      build_tags(scenario.tags, Map.get(scenario, :tag_lines), scenario.line, ids)
+
     {step_entries, ids} = build_steps(scenario.steps, ids)
     {id, ids} = next(ids)
 
@@ -277,7 +289,9 @@ defmodule Gherkin.Pickles do
   end
 
   defp build_outline(outline, ids) do
-    {tag_entries, ids} = build_tags(outline.tags, outline.line, ids)
+    {tag_entries, ids} =
+      build_tags(outline.tags, Map.get(outline, :tag_lines), outline.line, ids)
+
     {step_entries, ids} = build_steps(outline.steps, ids)
     {examples_entries, ids} = Enum.map_reduce(outline.examples, ids, &build_examples/2)
     {id, ids} = next(ids)
@@ -308,7 +322,8 @@ defmodule Gherkin.Pickles do
   end
 
   defp build_examples(examples, ids) do
-    {tag_entries, ids} = build_tags(examples.tags, examples.line, ids)
+    {tag_entries, ids} =
+      build_tags(examples.tags, Map.get(examples, :tag_lines), examples.line, ids)
 
     header_line = examples.table_header_line || row_line(examples.line, 0)
     {header_row, ids} = build_table_row(examples.table_header, header_line, ids)
@@ -403,6 +418,7 @@ defmodule Gherkin.Pickles do
     doc_string =
       %{location: location(line), content: docstring}
       |> put_unless_nil(:mediaType, step.docstring_media_type)
+      |> put_unless_nil(:delimiter, Map.get(step, :docstring_delimiter))
 
     {%{docString: doc_string}, ids}
   end
@@ -440,7 +456,8 @@ defmodule Gherkin.Pickles do
   defp build_rules(rules, ids) do
     {pairs, ids} =
       Enum.map_reduce(rules, ids, fn rule, ids ->
-        {rule_tag_entries, ids} = build_tags(rule.tags, rule.line, ids)
+        {rule_tag_entries, ids} =
+          build_tags(rule.tags, Map.get(rule, :tag_lines), rule.line, ids)
 
         {background_children, background_source, ids} =
           build_background_child(rule.background, ids)

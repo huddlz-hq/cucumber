@@ -55,7 +55,9 @@ defmodule Cucumber.Messages do
   `testCase.testSteps` entries do not carry `stepMatchArgumentsLists`
   (expression matching returns converted values, not source offsets), and
   `parameterType`/`hook` envelopes have no source line (their macros don't
-  record one). The CCK approval harness (#28c) normalizes these.
+  record one). The CCK approval harness (`test/cucumber/cck_approval_test.exs`)
+  normalizes these; its samples table documents the two samples with
+  further per-sample divergences.
   """
 
   @gherkin_media_type "text/x.cucumber.gherkin+plain"
@@ -78,12 +80,12 @@ defmodule Cucumber.Messages do
   @doc """
   Builds a `gherkinDocument` envelope from a compiled feature node.
 
-  `feature_node` is the `document` produced by `Gherkin.Pickles.compile/2`.
-  The parser discards comments, so `comments` is always empty.
+  `feature_node` and `comments` are the `document` and `comments`
+  produced by `Gherkin.Pickles.compile/2`.
   """
-  @spec gherkin_document(String.t(), map()) :: envelope()
-  def gherkin_document(uri, feature_node) do
-    %{gherkinDocument: %{uri: uri, feature: feature_node, comments: []}}
+  @spec gherkin_document(String.t(), map(), [map()]) :: envelope()
+  def gherkin_document(uri, feature_node, comments \\ []) do
+    %{gherkinDocument: %{uri: uri, feature: feature_node, comments: comments}}
   end
 
   @doc """

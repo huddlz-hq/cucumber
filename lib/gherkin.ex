@@ -5,6 +5,11 @@ defmodule Gherkin.Feature do
   A Feature is the top-level element in a Gherkin file, containing a name,
   optional description, optional background, scenarios, and rules.
   It can also have tags that apply to all scenarios in the feature.
+
+  `tag_lines` records each tag's own source line (parallel to `tags`) and
+  `comments` collects every comment line in the file as `{line, text}` —
+  both for Cucumber Messages locations; the published `tags` shape is
+  unchanged.
   """
   defstruct name: "",
             description: "",
@@ -12,7 +17,9 @@ defmodule Gherkin.Feature do
             scenarios: [],
             rules: [],
             tags: [],
-            line: nil
+            line: nil,
+            tag_lines: [],
+            comments: []
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -21,7 +28,9 @@ defmodule Gherkin.Feature do
           scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
           rules: [Gherkin.Rule.t()],
           tags: [String.t()],
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          tag_lines: [non_neg_integer()],
+          comments: [{non_neg_integer(), String.t()}]
         }
 end
 
@@ -34,7 +43,13 @@ defmodule Gherkin.Rule do
   run after the feature-background steps for each scenario in the rule, and
   rule tags are inherited by those scenarios.
   """
-  defstruct name: "", description: "", background: nil, scenarios: [], tags: [], line: nil
+  defstruct name: "",
+            description: "",
+            background: nil,
+            scenarios: [],
+            tags: [],
+            line: nil,
+            tag_lines: []
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -42,7 +57,8 @@ defmodule Gherkin.Rule do
           background: Gherkin.Background.t() | nil,
           scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
           tags: [String.t()],
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          tag_lines: [non_neg_integer()]
         }
 end
 
@@ -78,7 +94,8 @@ defmodule Gherkin.Scenario do
             steps: [],
             tags: [],
             line: nil,
-            keyword: "Scenario"
+            keyword: "Scenario",
+            tag_lines: []
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -86,7 +103,8 @@ defmodule Gherkin.Scenario do
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           line: non_neg_integer() | nil,
-          keyword: String.t()
+          keyword: String.t(),
+          tag_lines: [non_neg_integer()]
         }
 end
 
@@ -104,7 +122,8 @@ defmodule Gherkin.ScenarioOutline do
             tags: [],
             examples: [],
             line: nil,
-            keyword: "Scenario Outline"
+            keyword: "Scenario Outline",
+            tag_lines: []
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -113,7 +132,8 @@ defmodule Gherkin.ScenarioOutline do
           tags: [String.t()],
           examples: [Gherkin.Examples.t()],
           line: non_neg_integer() | nil,
-          keyword: String.t()
+          keyword: String.t(),
+          tag_lines: [non_neg_integer()]
         }
 end
 
@@ -134,7 +154,8 @@ defmodule Gherkin.Examples do
             line: nil,
             keyword: "Examples",
             table_header_line: nil,
-            table_body_lines: nil
+            table_body_lines: nil,
+            tag_lines: []
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -145,7 +166,8 @@ defmodule Gherkin.Examples do
           line: non_neg_integer() | nil,
           keyword: String.t(),
           table_header_line: non_neg_integer() | nil,
-          table_body_lines: [non_neg_integer()] | nil
+          table_body_lines: [non_neg_integer()] | nil,
+          tag_lines: [non_neg_integer()]
         }
 end
 
@@ -162,10 +184,11 @@ defmodule Gherkin.Step do
   - datatable: Optional table data (pipe-delimited)
   - line: Line number in the source file
 
-  `docstring_line` and `datatable_lines` record the source lines of the
-  docstring's opening delimiter and of each datatable row (parallel to
-  `datatable`) for Cucumber Messages locations; the published `docstring`
-  and `datatable` shapes are unchanged.
+  `docstring_line`, `docstring_delimiter`, and `datatable_lines` record the
+  source line of the docstring's opening delimiter, the delimiter style used
+  (`\"\"\"` or triple backticks), and each datatable row's line (parallel to
+  `datatable`) for Cucumber Messages; the published `docstring` and
+  `datatable` shapes are unchanged.
   """
   defstruct keyword: "",
             text: "",
@@ -174,6 +197,7 @@ defmodule Gherkin.Step do
             datatable: nil,
             line: nil,
             docstring_line: nil,
+            docstring_delimiter: nil,
             datatable_lines: nil
 
   @type t :: %__MODULE__{
@@ -184,6 +208,7 @@ defmodule Gherkin.Step do
           datatable: [[String.t()]] | nil,
           line: non_neg_integer() | nil,
           docstring_line: non_neg_integer() | nil,
+          docstring_delimiter: String.t() | nil,
           datatable_lines: [non_neg_integer()] | nil
         }
 end

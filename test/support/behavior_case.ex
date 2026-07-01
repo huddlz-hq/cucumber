@@ -112,9 +112,14 @@ defmodule Cucumber.BehaviorCase do
       `use Cucumber.ParameterTypes`
     * `:file` - synthetic feature path (defaults to a unique generated path,
       which also keeps generated module names unique across runs)
+    * `:files` - like `:file`, but names each source by index (for
+      multi-feature runs asserting on per-feature uris)
     * `:messages` - a path enabling the Cucumber Messages sink for this run
       (mirroring `config :cucumber, messages: path`); the NDJSON file is
       flushed when the nested run finishes
+    * `:seed` - seed for the nested run (`0` runs scenarios in definition
+      order — required when asserting on cross-scenario ordering, e.g.
+      comparing message streams); defaults to the outer suite's seed
 
   Returns a map with:
 
@@ -152,15 +157,13 @@ defmodule Cucumber.BehaviorCase do
     Cucumber.RunCoordinator.ensure_started()
     Collector.reset()
 
+    named_files = Keyword.get(opts, :files) || List.wrap(Keyword.get(opts, :file))
+
     features =
       sources
       |> Enum.with_index()
       |> Enum.map(fn {source, index} ->
-        file =
-          case {Keyword.fetch(opts, :file), index} do
-            {{:ok, file}, 0} -> file
-            _ -> unique_feature_path()
-          end
+        file = Enum.at(named_files, index) || unique_feature_path()
 
         source
         |> Gherkin.Parser.parse()
@@ -180,7 +183,7 @@ defmodule Cucumber.BehaviorCase do
         opts[:messages]
       )
 
-    {result, output} = run_isolated(modules)
+    {result, output} = run_isolated(modules, Keyword.take(opts, [:seed]))
 
     %{
       total: result.total,
@@ -215,14 +218,21 @@ defmodule Cucumber.BehaviorCase do
   moduletag) cannot distort the nested result. Safe to swap globally: see
   the moduledoc.
 
+  Accepts a `:seed` option for the nested run (see `run_feature/2`).
+
   Returns `{result, output}`. Prefer `run_feature/2`; this is for tests
   that drive `Cucumber.Compiler.compile_features!/1` themselves.
   """
-  def run_isolated(modules) do
+  def run_isolated(modules, opts \\ []) do
     config = ExUnit.configuration()
 
     try do
       ExUnit.configure(include: [], exclude: [])
+
+      case Keyword.fetch(opts, :seed) do
+        {:ok, seed} -> ExUnit.configure(seed: seed)
+        :error -> :ok
+      end
 
       output =
         capture_io(fn ->
@@ -231,7 +241,7 @@ defmodule Cucumber.BehaviorCase do
 
       {Process.delete(__MODULE__), output}
     after
-      ExUnit.configure(include: config[:include], exclude: config[:exclude])
+      ExUnit.configure(include: config[:include], exclude: config[:exclude], seed: config[:seed])
     end
   end
 
