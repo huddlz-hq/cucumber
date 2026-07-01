@@ -6,7 +6,13 @@ defmodule Gherkin.Feature do
   optional description, optional background, scenarios, and rules.
   It can also have tags that apply to all scenarios in the feature.
   """
-  defstruct name: "", description: "", background: nil, scenarios: [], rules: [], tags: []
+  defstruct name: "",
+            description: "",
+            background: nil,
+            scenarios: [],
+            rules: [],
+            tags: [],
+            line: nil
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -14,7 +20,8 @@ defmodule Gherkin.Feature do
           background: Gherkin.Background.t() | nil,
           scenarios: [Gherkin.Scenario.t() | Gherkin.ScenarioOutline.t()],
           rules: [Gherkin.Rule.t()],
-          tags: [String.t()]
+          tags: [String.t()],
+          line: non_neg_integer() | nil
         }
 end
 
@@ -46,11 +53,13 @@ defmodule Gherkin.Background do
   A Background contains steps that are run before each scenario in the feature.
   It allows you to define common setup steps that apply to all scenarios.
   """
-  defstruct steps: [], description: ""
+  defstruct name: "", steps: [], description: "", line: nil
 
   @type t :: %__MODULE__{
+          name: String.t(),
           steps: [Gherkin.Step.t()],
-          description: String.t()
+          description: String.t(),
+          line: non_neg_integer() | nil
         }
 end
 
@@ -64,7 +73,13 @@ defmodule Gherkin.Scenario do
   source file. When a scenario was defined inside a `Rule`, `rule` carries
   the rule's name (set during compilation, not by the parser).
   """
-  defstruct name: "", description: "", steps: [], tags: [], line: nil, rule: nil
+  defstruct name: "",
+            description: "",
+            steps: [],
+            tags: [],
+            line: nil,
+            rule: nil,
+            keyword: "Scenario"
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -72,7 +87,8 @@ defmodule Gherkin.Scenario do
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           line: non_neg_integer() | nil,
-          rule: String.t() | nil
+          rule: String.t() | nil,
+          keyword: String.t()
         }
 end
 
@@ -84,7 +100,13 @@ defmodule Gherkin.ScenarioOutline do
   from Examples tables. Placeholders in step text use `<name>` syntax and are
   substituted with values from each row of the Examples table.
   """
-  defstruct name: "", description: "", steps: [], tags: [], examples: [], line: nil
+  defstruct name: "",
+            description: "",
+            steps: [],
+            tags: [],
+            examples: [],
+            line: nil,
+            keyword: "Scenario Outline"
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -92,7 +114,8 @@ defmodule Gherkin.ScenarioOutline do
           steps: [Gherkin.Step.t()],
           tags: [String.t()],
           examples: [Gherkin.Examples.t()],
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          keyword: String.t()
         }
 end
 
@@ -105,7 +128,13 @@ defmodule Gherkin.Examples do
   values to substitute. Examples blocks can have optional names, descriptions,
   and tags.
   """
-  defstruct name: "", description: "", tags: [], table_header: [], table_body: [], line: nil
+  defstruct name: "",
+            description: "",
+            tags: [],
+            table_header: [],
+            table_body: [],
+            line: nil,
+            keyword: "Examples"
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -113,7 +142,8 @@ defmodule Gherkin.Examples do
           tags: [String.t()],
           table_header: [String.t()],
           table_body: [[String.t()]],
-          line: non_neg_integer() | nil
+          line: non_neg_integer() | nil,
+          keyword: String.t()
         }
 end
 
