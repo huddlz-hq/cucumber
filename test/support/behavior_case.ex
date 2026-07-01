@@ -112,6 +112,9 @@ defmodule Cucumber.BehaviorCase do
       `use Cucumber.ParameterTypes`
     * `:file` - synthetic feature path (defaults to a unique generated path,
       which also keeps generated module names unique across runs)
+    * `:messages` - a path enabling the Cucumber Messages sink for this run
+      (mirroring `config :cucumber, messages: path`); the NDJSON file is
+      flushed when the nested run finishes
 
   Returns a map with:
 
@@ -120,6 +123,7 @@ defmodule Cucumber.BehaviorCase do
     * `:output` - everything the nested run printed (assert error messages here)
     * `:events` - events recorded via `Collector.record/1`, in order
     * `:attachments` - `Cucumber.Attachment` structs recorded during the run
+    * `:messages` - the decoded message envelopes (only with `:messages`)
     * `:module` - the generated test module
   """
   def run_feature(source, opts \\ []) do
@@ -148,7 +152,7 @@ defmodule Cucumber.BehaviorCase do
     Cucumber.RunCoordinator.ensure_started()
     Collector.reset()
 
-    modules =
+    features =
       sources
       |> Enum.with_index()
       |> Enum.map(fn {source, index} ->
@@ -158,16 +162,23 @@ defmodule Cucumber.BehaviorCase do
             _ -> unique_feature_path()
           end
 
-        feature =
-          source
-          |> Gherkin.Parser.parse()
-          |> Map.put(:file, file)
-          |> Map.put(:source, source)
-
-        Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
-          parameter_types: parameter_types
-        )
+        source
+        |> Gherkin.Parser.parse()
+        |> Map.put(:file, file)
+        |> Map.put(:source, source)
       end)
+
+    # The same shared compilation path compile_features!/1 uses: run-unique
+    # pickle ids threaded across features, message sink configured when a
+    # path is given
+    modules =
+      Cucumber.Compiler.compile_all!(
+        features,
+        registry,
+        hook_modules,
+        parameter_types,
+        opts[:messages]
+      )
 
     {result, output} = run_isolated(modules)
 
@@ -180,16 +191,34 @@ defmodule Cucumber.BehaviorCase do
       output: output,
       events: Collector.events(),
       attachments: Cucumber.RunCoordinator.attachments(),
+      messages: read_messages(opts[:messages]),
       module: List.first(modules),
       modules: modules
     }
   end
 
-  # Runs the module in a nested ExUnit run with neutral include/exclude
-  # filters, so outer-suite filters (e.g. `mix test --exclude cucumber`,
-  # which would exclude every generated module via its :cucumber moduletag)
-  # cannot distort the nested result. Safe to swap globally: see moduledoc.
-  defp run_isolated(modules) do
+  # The nested run's after_suite callback flushes the NDJSON file before
+  # ExUnit.run/1 returns, so it is readable here.
+  defp read_messages(nil), do: nil
+
+  defp read_messages(path) do
+    path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&JSON.decode!/1)
+  end
+
+  @doc """
+  Runs already-compiled test modules in a nested ExUnit run with neutral
+  include/exclude filters, so outer-suite filters (e.g. `mix test --exclude
+  cucumber`, which would exclude every generated module via its `:cucumber`
+  moduletag) cannot distort the nested result. Safe to swap globally: see
+  the moduledoc.
+
+  Returns `{result, output}`. Prefer `run_feature/2`; this is for tests
+  that drive `Cucumber.Compiler.compile_features!/1` themselves.
+  """
+  def run_isolated(modules) do
     config = ExUnit.configuration()
 
     try do

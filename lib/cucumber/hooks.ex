@@ -337,24 +337,56 @@ defmodule Cucumber.Hooks do
     |> Enum.map(fn {_type, _tag, name, hook_ref} -> {name, hook_ref} end)
   end
 
+  @typedoc """
+  Wraps each hook invocation — receives the hook's run-order index, its
+  name (nil if unnamed), and a one-arity function that executes the hook
+  with the given context overrides merged in; must return that function's
+  result. The scenario runner uses this to bracket hooks with Cucumber
+  Messages events and to inject each hook's message reference.
+  """
+  @type around :: (non_neg_integer(), String.t() | nil, (map() -> term()) -> term())
+
+  @doc false
+  # The before_scenario hooks that will run for `tags`, in run order.
+  # Single source of truth shared with the message emitter, which
+  # pre-allocates test-step ids positionally against this list.
+  @spec before_scenario_hooks([hook()], [String.t()]) :: [
+          {String.t() | nil, {module(), atom()}}
+        ]
+  def before_scenario_hooks(hooks, tags) do
+    filter_hooks(hooks, :before_scenario, tags)
+  end
+
+  @doc false
+  # The after_scenario hooks that will run for `tags`, in run order (i.e.
+  # reverse definition order). Same contract as before_scenario_hooks/2.
+  @spec after_scenario_hooks([hook()], [String.t()]) :: [
+          {String.t() | nil, {module(), atom()}}
+        ]
+  def after_scenario_hooks(hooks, tags) do
+    hooks
+    |> filter_hooks(:after_scenario, tags)
+    |> Enum.reverse()
+  end
+
   @doc false
   # `{:halted, status, reason}` is returned when a before hook signals
   # `:pending` or `:skipped`; remaining before hooks are not run (the runner
   # then skips the scenario's steps but still runs after hooks).
   # `{:error, reason, name}` carries the failing hook's name (nil if unnamed)
   # for error reporting.
-  @spec run_before_hooks([hook()], map(), [String.t()]) ::
+  @spec run_before_hooks([hook()], map(), [String.t()], around() | nil) ::
           {:ok, map()}
           | {:error, term(), String.t() | nil}
           | {:halted, :pending | :skipped, String.t() | nil}
-  def run_before_hooks(hooks, context, tags) do
+  def run_before_hooks(hooks, context, tags, around \\ nil) do
     hooks
-    |> filter_hooks(:before_scenario, tags)
-    |> run_halting_hooks(context)
+    |> before_scenario_hooks(tags)
+    |> run_halting_hooks(context, around || (&unwrapped/3))
   end
 
   @doc false
-  # Same contract as run_before_hooks/3, for before_step hooks.
+  # Same contract as run_before_hooks/4, for before_step hooks.
   @spec run_before_step_hooks([hook()], map(), [String.t()]) ::
           {:ok, map()}
           | {:error, term(), String.t() | nil}
@@ -362,23 +394,33 @@ defmodule Cucumber.Hooks do
   def run_before_step_hooks(hooks, context, tags) do
     hooks
     |> filter_hooks(:before_step, tags)
-    |> run_halting_hooks(context)
+    |> run_halting_hooks(context, &unwrapped/3)
   end
 
-  defp run_halting_hooks(filtered_hooks, context) do
-    Enum.reduce(filtered_hooks, {:ok, context}, fn
+  defp unwrapped(_index, _name, hook_fun), do: hook_fun.(%{})
+
+  defp run_halting_hooks(filtered_hooks, context, around) do
+    filtered_hooks
+    |> Enum.with_index()
+    |> Enum.reduce({:ok, context}, fn
       _hook, {:error, _, _} = error ->
         error
 
       _hook, {:halted, _status, _reason} = halted ->
         halted
 
-      {name, {module, func_name}}, {:ok, context} ->
-        case apply_before_hook(module, func_name, context) do
-          {:error, reason} -> {:error, reason, name}
-          other -> other
-        end
+      {{name, hook_ref}, index}, {:ok, context} ->
+        invoke_halting_hook(around, index, name, hook_ref, context)
     end)
+  end
+
+  defp invoke_halting_hook(around, index, name, {module, func_name}, context) do
+    run = fn overrides -> apply_before_hook(module, func_name, Map.merge(context, overrides)) end
+
+    case around.(index, name, run) do
+      {:error, reason} -> {:error, reason, name}
+      other -> other
+    end
   end
 
   defp apply_before_hook(module, func_name, context) do
@@ -424,14 +466,21 @@ defmodule Cucumber.Hooks do
 
   @doc false
   # Return values are ignored — an after hook returning :skipped only marks
-  # itself skipped (CCK semantics); subsequent after hooks still run.
-  @spec run_after_hooks([hook()], map(), [String.t()]) :: :ok
-  def run_after_hooks(hooks, context, tags) do
+  # itself skipped (CCK semantics); subsequent after hooks still run. The
+  # around callback receives run-order indexes (i.e. reverse definition
+  # order).
+  @spec run_after_hooks([hook()], map(), [String.t()], around() | nil) :: :ok
+  def run_after_hooks(hooks, context, tags, around \\ nil) do
+    around = around || (&unwrapped/3)
+
     hooks
-    |> filter_hooks(:after_scenario, tags)
-    # After hooks run in reverse order
-    |> Enum.reverse()
-    |> Enum.each(fn {_name, {module, func_name}} -> apply(module, func_name, [context]) end)
+    |> after_scenario_hooks(tags)
+    |> Enum.with_index()
+    |> Enum.each(fn {{name, {module, func_name}}, index} ->
+      around.(index, name, fn overrides ->
+        apply(module, func_name, [Map.merge(context, overrides)])
+      end)
+    end)
   end
 
   @doc false
