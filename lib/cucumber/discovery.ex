@@ -240,7 +240,12 @@ defmodule Cucumber.Discovery do
   defp parse_feature(path) do
     content = File.read!(path)
     feature = Gherkin.Parser.parse(content)
-    Map.put(feature, :file, path)
+
+    # The raw text is kept for the `source` message (#28) — the parsed AST
+    # cannot reproduce it.
+    feature
+    |> Map.put(:file, path)
+    |> Map.put(:source, content)
   end
 
   defp expand_patterns(patterns) do

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### New Features
+
+- **Cucumber Messages, static layer** (#28, part 1 of 3). Groundwork for emitting the [Cucumber Messages](https://github.com/cucumber/messages) NDJSON protocol:
+  - New `Gherkin.Pickles` module compiles a parsed feature into its `gherkinDocument` node and a list of `Gherkin.Pickle` structs — now the single expansion authority for scenario outlines and rules (previously private compiler logic). Every identified AST node (background, scenario, rule, step, tag, examples, table row) gets a deterministic sequential id; pickles reference them via `astNodeIds`.
+  - New `Cucumber.Messages` module builds `source`, `gherkinDocument`, and `pickle` envelopes and encodes them as NDJSON lines (stdlib `JSON`, no new dependency). Runtime messages follow in part 2.
+  - The compiler now generates **one ExUnit test per pickle**, carrying its `pickle_id`; test names, tags, and reported lines are unchanged.
+  - Discovery retains each feature file's raw text (`:source`) for the `source` message.
+  - `Gherkin` structs capture more of the source for the document builder: `Feature.line`, `Background.name`/`Background.line`, and the keyword actually used (`Scenario`/`Example`, `Scenario Outline`/`Scenario Template`, `Examples`/`Scenarios`) on `Scenario`, `ScenarioOutline`, and `Examples`.
+  - **Breaking** for code calling compiler internals: `Cucumber.Compiler.expand_feature/1` and `expand_all_scenarios/1` are gone — use `Gherkin.Pickles.compile/2`.
+
 ### Bug Fixes
 
 - **Ambiguous steps are now detected** (#20). A step whose text matches more than one step definition previously executed an arbitrary first match and passed silently. Step resolution now collects all matches and raises `Cucumber.AmbiguousStepError` listing every matching pattern with its definition site (`file:line`), failing the scenario. Ambiguity is detected per step text at runtime; the discovery-time exact-duplicate check is unchanged.
