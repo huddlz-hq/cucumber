@@ -9,6 +9,8 @@ defmodule Cucumber.Attachment do
       recorded outside the scenario lifecycle, e.g. from a `before_all` hook)
     * `step_text`/`step_line` - set when `phase` is `:step`
     * `feature_file`/`scenario_name` - the owning scenario
+    * `attempt` - the scenario's 1-based retry attempt (nil when recorded
+      outside the scenario lifecycle)
 
   `body` holds text as-is (`encoding: :identity`) or Base64-encoded bytes
   (`encoding: :base64`), mirroring the Cucumber Messages attachment
@@ -24,7 +26,8 @@ defmodule Cucumber.Attachment do
     :scenario_name,
     :step_text,
     :step_line,
-    :phase
+    :phase,
+    :attempt
   ]
 
   @type t :: %__MODULE__{
@@ -36,6 +39,7 @@ defmodule Cucumber.Attachment do
           scenario_name: String.t() | nil,
           step_text: String.t() | nil,
           step_line: non_neg_integer() | nil,
-          phase: :step | :before_scenario | :after_scenario | nil
+          phase: :step | :before_scenario | :after_scenario | nil,
+          attempt: pos_integer() | nil
         }
 end

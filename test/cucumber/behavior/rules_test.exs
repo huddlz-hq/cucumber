@@ -84,10 +84,6 @@ defmodule Cucumber.RulesBehaviorTest do
     end
   end
 
-  defp fixture(sample) do
-    File.read!(Path.join(["test/fixtures/cck", sample, "#{sample}.feature"]))
-  end
-
   describe "CCK: rules" do
     test "scenarios in rules execute with reference outcomes" do
       run = run_feature(fixture("rules"), steps: [ChocolateSteps])

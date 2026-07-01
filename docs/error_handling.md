@@ -234,6 +234,51 @@ end
 
 ## Handling Flaky Tests
 
+### Scenario-Level Retry
+
+Failing scenarios can be retried automatically, matching the retry
+mechanism of other Cucumber implementations. Configure a global retry
+limit:
+
+```elixir
+# config/test.exs
+config :cucumber, retry: 2  # up to 3 attempts per failing scenario
+```
+
+Or opt individual scenarios (or whole features) in with a `@retry-n` tag,
+which overrides the global config — including `@retry-0` to exempt a
+scenario. The most specific tag wins: a scenario's tag beats its rule's
+or its feature's, and an `Examples`-level tag beats the outline's — so
+`@retry-0` on a scenario also exempts it from a feature- or rule-wide
+retry tag:
+
+```gherkin
+@retry-2
+Scenario: occasionally slow external service
+  Given the payment provider responds
+```
+
+Each attempt re-runs the full scenario lifecycle — before hooks,
+background, steps, and after hooks — with a fresh context (the 1-based
+attempt number is available as `context.retry_attempt`). The scenario
+passes if any attempt passes; each retry prints a one-line flake warning
+so quiet flakiness stays visible. Failures of every class are retried —
+raised exceptions, exits (e.g. a `GenServer.call` timeout), and throws.
+Undefined, ambiguous, and pending scenarios are never retried — they
+cannot succeed by repetition — and neither is a `before_all` hook
+failure, whose result is cached for the whole run.
+
+"Fresh context" means the context *map*: attempts re-run in the same
+test process, so everything else survives between them. `on_exit`
+callbacks don't run until the test process exits, processes started
+with `start_supervised!` are still running (a retry starting the same
+named process will see `:already_started`), and the process dictionary
+persists. Steps in retried scenarios should tolerate re-entry — or
+reset shared state in a `before_scenario` hook, which runs at the top
+of every attempt.
+
+### Step-Level Techniques
+
 Sometimes tests can be inconsistent due to timing issues, especially with UI interactions:
 
 ```elixir

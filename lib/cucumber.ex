@@ -179,7 +179,8 @@ defmodule Cucumber do
       scenario_name: Map.get(context, :scenario_name),
       step_text: step && step.text,
       step_line: step && step.line,
-      phase: Map.get(context, :cucumber_phase)
+      phase: Map.get(context, :cucumber_phase),
+      attempt: Map.get(context, :retry_attempt)
     })
 
     context

@@ -14,11 +14,6 @@ defmodule Cucumber.CckBehaviorTest do
 
   alias Cucumber.BehaviorCase.Collector
 
-  defp fixture(sample, file \\ nil) do
-    file = file || "#{sample}.feature"
-    File.read!(Path.join(["test/fixtures/cck", sample, file]))
-  end
-
   defmodule MinimalSteps do
     use Cucumber.StepDefinition
 

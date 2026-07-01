@@ -196,6 +196,10 @@ defmodule Cucumber.Compiler do
     scenario_spec = %{
       feature_file: feature.file,
       feature_tags: feature.tags,
+      # Scenario-level tags, distinguishable from feature tags (which become
+      # @moduletag and are indistinguishable in the ExUnit context) — retry
+      # tag precedence needs the two levels apart
+      scenario_tags: scenario.tags,
       async: async,
       scenario_name: scenario.name,
       scenario_line: (scenario.line || 0) + 1,
@@ -245,6 +249,8 @@ defmodule Cucumber.Compiler do
   # spec order: feature background, rule background, scenario steps), the
   # rule's tags merged in, and the rule name prefixed so identically-named
   # scenarios in different rules don't collide as ExUnit test names.
+  # Scenario tags come before the inherited rule tags: first match wins for
+  # @retry-n, so the more specific level must win.
   defp expand_rule(%Gherkin.Rule{} = rule) do
     rule_background_steps = if rule.background, do: rule.background.steps, else: []
 
@@ -255,7 +261,7 @@ defmodule Cucumber.Compiler do
         scenario
         | name: prefix_with_rule(rule.name, scenario.name),
           steps: rule_background_steps ++ scenario.steps,
-          tags: Enum.uniq(rule.tags ++ scenario.tags),
+          tags: Enum.uniq(scenario.tags ++ rule.tags),
           rule: rule.name
       }
     end)
@@ -292,10 +298,12 @@ defmodule Cucumber.Compiler do
       |> Enum.map(fn {row, row_num} ->
         substitutions = Enum.zip(examples.table_header, row) |> Map.new()
 
+        # Examples-block tags before the outline's: first match wins for
+        # @retry-n, so the more specific level must win
         %Scenario{
           name: generate_test_name(outline.name, examples.name, row_num),
           steps: substitute_steps(outline.steps, substitutions),
-          tags: Enum.uniq(outline.tags ++ examples.tags),
+          tags: Enum.uniq(examples.tags ++ outline.tags),
           line: outline.line
         }
       end)

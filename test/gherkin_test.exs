@@ -494,6 +494,7 @@ defmodule Gherkin.ParserTest do
         "test/features/hook_execution_order.feature" => 1,
         "test/features/parameters.feature" => 4,
         "test/features/regex_steps.feature" => 2,
+        "test/features/retry.feature" => 1,
         "test/features/return_values.feature" => 4,
         "test/features/rules.feature" => 2,
         "test/features/scenario_outline.feature" => 2,

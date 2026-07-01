@@ -17,12 +17,6 @@ defmodule Cucumber.PendingSkippedTest do
 
   alias Cucumber.BehaviorCase.Collector
 
-  defp fixture(sample) do
-    File.read!(Path.join(["test/fixtures/cck", sample, "#{sample}.feature"]))
-  end
-
-  defp count(events, event), do: Enum.count(events, &(&1 == event))
-
   defmodule Steps do
     use Cucumber.StepDefinition
 

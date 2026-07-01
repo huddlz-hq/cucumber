@@ -65,6 +65,14 @@ defmodule Cucumber.Runtime do
       steps land in the context under `:skipped_steps` — and after hooks
       still run. Skipped scenarios pass with a printed notice; pending
       scenarios fail with `Cucumber.PendingStepError`
+    * a failing scenario is retried when a retry limit is configured
+      (`config :cucumber, retry: n` or a `@retry-n` tag; a tag beats the
+      config, and a scenario-level tag beats a feature-level one): each
+      attempt re-runs before hooks, background, steps, and after hooks
+      with a fresh context (carrying `:retry_attempt`, 1-based), and the
+      scenario passes if any attempt passes. Undefined, ambiguous, and
+      pending scenarios are never retried — they cannot succeed by
+      repetition — and neither is a cached `before_all` failure
 
   Returns the final context.
   """
@@ -83,6 +91,97 @@ defmodule Cucumber.Runtime do
     # Combine feature tags + scenario tags for hook matching
     all_tags = Enum.uniq(scenario.feature_tags ++ scenario_tags)
 
+    exec = %{
+      step_registry: step_registry,
+      parameter_types: parameter_types,
+      hooks: hooks,
+      tags: all_tags,
+      scenario_tags: scenario_tags
+    }
+
+    attempt_scenario(exunit_context, scenario, exec, 1, max_attempts(scenario))
+  end
+
+  # One full scenario lifecycle per attempt, with a fresh context each time.
+  # A retryable failure within the attempt limit prints a flake warning and
+  # re-runs; everything else propagates as usual. `catch` rather than
+  # `rescue`: exits (e.g. a GenServer.call timeout) and throws are common
+  # flake shapes and must retry too — ExUnit fails a test on all three
+  # classes alike.
+  defp attempt_scenario(exunit_context, scenario, exec, attempt, max_attempts) do
+    run_single_attempt(exunit_context, scenario, exec, attempt)
+  catch
+    kind, reason ->
+      if attempt < max_attempts and retryable?(kind, reason, __STACKTRACE__) do
+        IO.puts(
+          "Cucumber: retrying scenario \"#{scenario.scenario_name}\" " <>
+            "(#{scenario.feature_file}:#{scenario.scenario_line}) — " <>
+            "attempt #{attempt} of #{max_attempts} failed"
+        )
+
+        attempt_scenario(exunit_context, scenario, exec, attempt + 1, max_attempts)
+      else
+        :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+  end
+
+  defp retryable?(:error, reason, stacktrace) do
+    retryable_error?(Exception.normalize(:error, reason, stacktrace))
+  end
+
+  # Exits and throws are runtime turbulence (timeouts, crashed processes) —
+  # exactly the failure shapes retry exists for.
+  defp retryable?(_kind, _reason, _stacktrace), do: true
+
+  # Retrying can only help failures that might not repeat. Undefined,
+  # ambiguous, and pending scenarios are deterministic — CCK semantics say
+  # they run exactly once regardless of the retry limit — and a before_all
+  # failure is cached for the whole run, so repeating it can't succeed either.
+  defp retryable_error?(%Cucumber.PendingStepError{}), do: false
+  defp retryable_error?(%Cucumber.AmbiguousStepError{}), do: false
+  defp retryable_error?(%Cucumber.BeforeAllError{}), do: false
+  defp retryable_error?(%Cucumber.StepError{failure_reason: :missing_step_definition}), do: false
+  defp retryable_error?(_error), do: true
+
+  # Attempts = retries + 1. A @retry-n tag overrides the :retry application
+  # config, and a scenario-level tag beats a feature-level one — so a
+  # scenario's @retry-0 exempts it from a feature-wide retry tag. Tags are
+  # read from the compiler's scenario spec rather than the ExUnit context:
+  # feature tags become @moduletag, so in the context the two levels are
+  # indistinguishable.
+  defp max_attempts(scenario) do
+    retries =
+      tag_retry_limit(Map.get(scenario, :scenario_tags, [])) ||
+        tag_retry_limit(scenario.feature_tags) ||
+        config_retry_limit()
+
+    max(retries, 0) + 1
+  end
+
+  defp config_retry_limit do
+    case Application.get_env(:cucumber, :retry, 0) do
+      nil ->
+        0
+
+      retries when is_integer(retries) ->
+        retries
+
+      other ->
+        raise ArgumentError,
+              "config :cucumber, :retry must be an integer, got: #{inspect(other)}"
+    end
+  end
+
+  defp tag_retry_limit(tags) do
+    Enum.find_value(tags, fn tag ->
+      case Regex.run(~r/^retry-(\d+)$/, tag) do
+        [_, n] -> String.to_integer(n)
+        nil -> nil
+      end
+    end)
+  end
+
+  defp run_single_attempt(exunit_context, scenario, exec, attempt) do
     # :cucumber_phase tracks where in the lifecycle the context currently
     # is — attachments use it for attribution (see Cucumber.attach/4)
     context =
@@ -90,30 +189,24 @@ defmodule Cucumber.Runtime do
         step_history: [],
         feature_file: scenario.feature_file,
         feature_tags: scenario.feature_tags,
-        scenario_tags: scenario_tags,
+        scenario_tags: exec.scenario_tags,
         async: scenario.async,
         scenario_name: scenario.scenario_name,
         scenario_line: scenario.scenario_line,
-        cucumber_phase: :before_scenario
+        cucumber_phase: :before_scenario,
+        retry_attempt: attempt
       })
-
-    exec = %{
-      step_registry: step_registry,
-      parameter_types: parameter_types,
-      hooks: hooks,
-      tags: all_tags
-    }
 
     # Run-level setup happens lazily before the first scenario of the run;
     # its context reaches every scenario. A BeforeAll failure fails every
     # scenario before any scenario hook or step runs.
     context =
-      case Cucumber.RunCoordinator.before_all_context(hooks) do
+      case Cucumber.RunCoordinator.before_all_context(exec.hooks) do
         {:ok, before_all_context} -> Map.merge(context, before_all_context)
-        {:error, message} -> raise message
+        {:error, message} -> raise Cucumber.BeforeAllError, message
       end
 
-    case Cucumber.Hooks.run_before_hooks(hooks, context, all_tags) do
+    case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags) do
       {:error, reason, hook_name} ->
         raise "Before hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
 
@@ -311,8 +404,11 @@ defmodule Cucumber.Runtime do
       try do
         result = apply(module, metadata.function, [context])
         process_step_result(result, context)
-      rescue
-        e ->
+      catch
+        # `catch` (not `rescue`) so exits and throws get the same step-level
+        # bookkeeping as raised exceptions: after-step hooks with :failed,
+        # and the enhanced error with step history and attachments
+        kind, reason ->
           # After-step hooks see failing steps too (a hook raising here
           # masks the step's own error — that's the hook author's bug)
           Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
@@ -327,7 +423,7 @@ defmodule Cucumber.Runtime do
             Cucumber.StepError.failed_step(
               step,
               pattern_text,
-              format_exception_for_display(e),
+              describe_failure(kind, reason, __STACKTRACE__),
               feature_file,
               scenario_name,
               format_step_history_with_status(step_history, step, context)
@@ -351,13 +447,27 @@ defmodule Cucumber.Runtime do
   defp hook_label(nil), do: ""
   defp hook_label(name), do: ~s( "#{name}")
 
+  defp describe_failure(:error, reason, stacktrace) do
+    format_exception_for_display(Exception.normalize(:error, reason, stacktrace))
+  end
+
+  # Exits and throws: the banner names the original kind and reason
+  # (e.g. `** (exit) :timeout`)
+  defp describe_failure(kind, reason, _stacktrace) do
+    Exception.format_banner(kind, reason)
+  end
+
   # Until Cucumber Messages land (#28), attachments surface in failure
   # output: a failing step's error lists everything the scenario attached.
+  # Only the current attempt's attachments — earlier attempts keep theirs
+  # in the coordinator (each retry is its own test case for #28), but
+  # listing them here would duplicate the evidence on every retry.
   defp append_attachments(error, context) do
     scenario_attachments =
       Enum.filter(Cucumber.RunCoordinator.attachments(), fn attachment ->
         attachment.feature_file == Map.get(context, :feature_file) and
-          attachment.scenario_name == Map.get(context, :scenario_name)
+          attachment.scenario_name == Map.get(context, :scenario_name) and
+          attachment.attempt == Map.get(context, :retry_attempt)
       end)
 
     case scenario_attachments do
