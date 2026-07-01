@@ -117,6 +117,66 @@ defmodule Gherkin.PicklesTest do
              ]
     end
 
+    test "background steps are never placeholder-substituted and don't reference the row" do
+      %{document: document, pickles: [pickle]} =
+        compile("""
+        Feature: literal background
+          Background:
+            Given a template containing <b> markup
+
+          Scenario Outline: uses <b>
+            Given I emphasise <b>
+
+            Examples:
+              | b     |
+              | words |
+        """)
+
+      [background_step, own_step] = pickle.steps
+
+      # The background step keeps its literal text — <b> is not an
+      # outline placeholder there, even though the Examples table has
+      # a matching column
+      assert background_step.text == "a template containing <b> markup"
+      assert own_step.text == "I emphasise words"
+
+      # Only the outline's own step references the examples row
+      [%{background: background_node}, %{scenario: outline_node}] = document.children
+      [examples_node] = outline_node.examples
+      [row] = examples_node.tableBody
+
+      assert background_step.ast_node_ids == [hd(background_node.steps).id]
+      assert own_step.ast_node_ids == [hd(outline_node.steps).id, row.id]
+    end
+
+    test "conjunction types thread across the background boundary" do
+      %{pickles: [pickle]} =
+        compile("""
+        Feature: threading
+          Background:
+            Given a user
+
+          Scenario: starts with a conjunction
+            And an admin
+            When something happens
+        """)
+
+      assert Enum.map(pickle.steps, & &1.type) == [:context, :context, :action]
+    end
+
+    test "a scenario with no steps of its own compiles to an empty pickle" do
+      %{pickles: [pickle]} =
+        compile("""
+        Feature: empty scenario
+          Background:
+            Given setup
+
+          Scenario: nothing yet
+        """)
+
+      assert pickle.steps == []
+    end
+
     test "the background appears as a document child with its steps" do
       %{document: document} =
         compile("""
@@ -188,6 +248,25 @@ defmodule Gherkin.PicklesTest do
 
       # Each pickle step references its outline step and the row
       assert step_one.ast_node_ids == [hd(outline_node.steps).id, small_row.id]
+    end
+
+    test "docstring media types substitute placeholders" do
+      %{pickles: [pickle]} =
+        compile("""
+        Feature: media types
+          Scenario Outline: typed note
+            Given a note:
+              \"\"\"<fmt>
+              payload
+              \"\"\"
+
+            Examples:
+              | fmt  |
+              | json |
+        """)
+
+      [note] = pickle.steps
+      assert note.step.docstring_media_type == "json"
     end
 
     test "examples tables land in the document with header and body rows" do

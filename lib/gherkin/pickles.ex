@@ -357,14 +357,10 @@ defmodule Gherkin.Pickles do
   end
 
   defp build_steps(steps, ids) do
-    {entries, {ids, _previous_type}} =
-      Enum.map_reduce(steps, {ids, :unknown}, fn step, {ids, previous_type} ->
-        type = step_type(step.keyword, previous_type)
-        {node, ids} = build_step_node(step, ids)
-        {%{node: node, step: step, id: node.id, type: type}, {ids, type}}
-      end)
-
-    {entries, ids}
+    Enum.map_reduce(steps, ids, fn step, ids ->
+      {node, ids} = build_step_node(step, ids)
+      {%{node: node, step: step, id: node.id}, ids}
+    end)
   end
 
   defp build_step_node(step, ids) do
@@ -546,16 +542,23 @@ defmodule Gherkin.Pickles do
 
   # The step material a pickle draws from: feature background steps
   # (marked — the runner reports background failures distinctly), then
-  # rule background steps, then the scenario's own steps.
+  # rule background steps, then the scenario's own steps. Only the
+  # scenario's own steps (`own: true`) undergo outline substitution and
+  # reference the examples row — reference compiler semantics; inherited
+  # background steps pass through verbatim.
+  #
+  # A scenario with no steps of its own compiles to an empty pickle:
+  # per the reference compiler, background steps alone are not a test
+  # case (the runner accordingly skips the background too).
+  defp pickle_step_sources(%{step_entries: []}, _background_source), do: []
+
   defp pickle_step_sources(source, background_source) do
     background_entries = background_entries(background_source)
     rule_background_entries = background_entries(rule_background_source(source))
 
-    Enum.map(background_entries, &Map.put(&1, :from_background, true)) ++
-      Enum.map(
-        rule_background_entries ++ source.step_entries,
-        &Map.put(&1, :from_background, false)
-      )
+    Enum.map(background_entries, &Map.merge(&1, %{from_background: true, own: false})) ++
+      Enum.map(rule_background_entries, &Map.merge(&1, %{from_background: false, own: false})) ++
+      Enum.map(source.step_entries, &Map.merge(&1, %{from_background: false, own: true}))
   end
 
   defp background_entries(nil), do: []
@@ -567,22 +570,30 @@ defmodule Gherkin.Pickles do
   defp rule_name(%{rule: nil}), do: nil
   defp rule_name(%{rule: rule_info}), do: rule_info.rule.name
 
+  # Pickle step types thread across the whole pickle (background steps
+  # included), so a scenario starting with And/But inherits the type of
+  # the last background step — reference compiler semantics.
   defp build_pickle_steps(step_sources, substitutions, row_id, ids) do
-    Enum.map_reduce(step_sources, ids, fn entry, ids ->
-      step = substitute_step(entry.step, substitutions)
-      {id, ids} = next(ids)
+    {pickle_steps, {ids, _previous_type}} =
+      Enum.map_reduce(step_sources, {ids, :unknown}, fn entry, {ids, previous_type} ->
+        type = step_type(entry.step.keyword, previous_type)
+        step = if entry.own, do: substitute_step(entry.step, substitutions), else: entry.step
+        ast_node_ids = if entry.own, do: [entry.id] ++ List.wrap(row_id), else: [entry.id]
+        {id, ids} = next(ids)
 
-      pickle_step = %PickleStep{
-        id: id,
-        text: step.text,
-        type: entry.type,
-        ast_node_ids: [entry.id] ++ List.wrap(row_id),
-        step: step,
-        from_background: entry.from_background
-      }
+        pickle_step = %PickleStep{
+          id: id,
+          text: step.text,
+          type: type,
+          ast_node_ids: ast_node_ids,
+          step: step,
+          from_background: entry.from_background
+        }
 
-      {pickle_step, ids}
-    end)
+        {pickle_step, {ids, type}}
+      end)
+
+    {pickle_steps, ids}
   end
 
   # Pickle tags: everything in effect, outermost first (feature, rule,
@@ -628,6 +639,7 @@ defmodule Gherkin.Pickles do
       step
       | text: substitute_placeholders(step.text, substitutions),
         docstring: substitute_placeholders(step.docstring, substitutions),
+        docstring_media_type: substitute_placeholders(step.docstring_media_type, substitutions),
         datatable: substitute_datatable(step.datatable, substitutions)
     }
   end
