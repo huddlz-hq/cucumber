@@ -100,6 +100,12 @@ defmodule Cucumber.Runtime do
       scenario_tags: scenario_tags
     }
 
+    # Run-level setup happens lazily before the first scenario of the run —
+    # and before this scenario's message session opens, so testRunHook
+    # events precede any testCase envelope in the stream. A cached error is
+    # raised per attempt in run_single_attempt/4.
+    exec = Map.put(exec, :before_all, Cucumber.RunCoordinator.before_all_context(hooks))
+
     # Cucumber Messages session (nil unless the message sink is enabled):
     # emits the testCase envelope now, per-attempt/per-step events later
     exec = Map.put(exec, :msg, Emitter.open_test_case(scenario, exec))
@@ -218,17 +224,16 @@ defmodule Cucumber.Runtime do
         retry_attempt: attempt
       })
 
-    # Run-level setup happens lazily before the first scenario of the run;
-    # its context reaches every scenario. A BeforeAll failure fails every
+    # The before_all result (computed once in run_scenario/3, before the
+    # message session opened) reaches every scenario; a failure fails every
     # scenario before any scenario hook or step runs.
     context =
-      case Cucumber.RunCoordinator.before_all_context(exec.hooks) do
+      case exec.before_all do
         {:ok, before_all_context} -> Map.merge(context, before_all_context)
         {:error, message} -> raise Cucumber.BeforeAllError, message
       end
 
-    before_around =
-      Emitter.hook_around(exec.msg, exec.msg && exec.msg.before_ids)
+    before_around = Emitter.hook_around(exec.msg, :before)
 
     case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags, before_around) do
       {:error, reason, hook_name} ->
@@ -286,11 +291,15 @@ defmodule Cucumber.Runtime do
   defp with_after_hooks(exec, context, fun) do
     fun.()
   after
+    # Unexecuted pickle steps get their SKIPPED events now, so they precede
+    # the after-hook events in the message stream (reference ordering)
+    Emitter.skip_unexecuted_steps(exec.msg)
+
     Cucumber.Hooks.run_after_hooks(
       exec.hooks,
       Map.put(context, :cucumber_phase, :after_scenario),
       exec.tags,
-      Emitter.hook_around(exec.msg, exec.msg && exec.msg.after_ids)
+      Emitter.hook_around(exec.msg, :after)
     )
   end
 
@@ -474,12 +483,15 @@ defmodule Cucumber.Runtime do
         # bookkeeping as raised exceptions: after-step hooks with :failed,
         # and the enhanced error with step history and attachments
         kind, reason ->
+          # Report the failure to the message stream before the after-step
+          # hooks run — a hook raising below must not leave the step
+          # unfinished in the stream
+          failure_description = describe_failure(kind, reason, __STACKTRACE__)
+          Emitter.step_finished(msg, :failed, failure_description)
+
           # After-step hooks see failing steps too (a hook raising here
           # masks the step's own error — that's the hook author's bug)
           Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
-
-          failure_description = describe_failure(kind, reason, __STACKTRACE__)
-          Emitter.step_finished(msg, :failed, failure_description)
 
           # Extract meaningful information from the error
           feature_file = Map.get(context, :feature_file, "unknown")
@@ -508,8 +520,21 @@ defmodule Cucumber.Runtime do
         ctx -> {:passed, ctx}
       end
 
-    Cucumber.Hooks.run_after_step_hooks(exec.hooks, hook_context, exec.tags, status)
+    run_after_step_hooks_reporting(exec, hook_context, status, msg)
     outcome
+  end
+
+  # An after-step hook raising fails the scenario; the step itself must
+  # still be reported with its real status in the message stream before the
+  # raise escapes — otherwise it would surface as UNKNOWN (the
+  # killed-process status) at reconciliation. The step's own finished event
+  # is emitted by do_execute_step only when this returns normally.
+  defp run_after_step_hooks_reporting(exec, context, status, msg) do
+    Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, status)
+  catch
+    kind, reason ->
+      Emitter.step_finished(msg, :failed, Exception.format_banner(kind, reason))
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   defp hook_label(nil), do: ""

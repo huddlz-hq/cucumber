@@ -126,12 +126,10 @@ defmodule Cucumber.Messages.Emitter do
         nil
 
       context ->
-        before_hooks = Cucumber.Hooks.filter_hooks(exec.hooks, :before_scenario, exec.tags)
-
-        after_hooks =
-          exec.hooks
-          |> Cucumber.Hooks.filter_hooks(:after_scenario, exec.tags)
-          |> Enum.reverse()
+        # The same resolved lists Cucumber.Hooks executes, so the
+        # pre-allocated ids line up positionally with the around callback
+        before_hooks = Cucumber.Hooks.before_scenario_hooks(exec.hooks, exec.tags)
+        after_hooks = Cucumber.Hooks.after_scenario_hooks(exec.hooks, exec.tags)
 
         steps = scenario.background_steps ++ scenario.steps
 
@@ -202,14 +200,30 @@ defmodule Cucumber.Messages.Emitter do
   end
 
   @doc false
-  # Closes the current attempt: unexecuted steps are synthesized as SKIPPED
-  # and testCaseFinished is emitted (with willBeRetried when a retry
+  # Closes the current attempt: any step still unexecuted is synthesized as
+  # SKIPPED and testCaseFinished is emitted (with willBeRetried when a retry
   # follows).
   @spec close_test_case(map() | nil, boolean()) :: :ok
   def close_test_case(nil, _will_be_retried), do: :ok
 
   def close_test_case(session, will_be_retried) do
     RunCoordinator.finish_test_case(session.case_started_id, :skipped, will_be_retried)
+  end
+
+  @doc false
+  # Synthesizes SKIPPED events for this attempt's unexecuted before-hook and
+  # pickle steps. The runner calls this right before the after-scenario
+  # hooks run, so skipped pickle steps precede the after-hook events in the
+  # stream (reference ordering); the after-hook steps themselves are
+  # excluded — their real events follow.
+  @spec skip_unexecuted_steps(map() | nil) :: :ok
+  def skip_unexecuted_steps(nil), do: :ok
+
+  def skip_unexecuted_steps(session) do
+    RunCoordinator.skip_unfinished_steps(
+      session.case_started_id,
+      session.before_ids ++ session.step_ids
+    )
   end
 
   @doc false
@@ -264,18 +278,25 @@ defmodule Cucumber.Messages.Emitter do
 
   @doc false
   # Builds the around-callback `Cucumber.Hooks` uses to bracket each
-  # scenario hook with testStepStarted/testStepFinished events. `ids` is the
-  # session's hook test-step id list in run order. Returns nil (hooks then
-  # run unbracketed) when the session is nil.
-  @spec hook_around(map() | nil, [String.t()] | nil) ::
-          (non_neg_integer(), String.t() | nil, (-> term()) -> term()) | nil
-  def hook_around(nil, _ids), do: nil
+  # scenario hook of the given kind (:before or :after) with
+  # testStepStarted/testStepFinished events, injecting the hook's own
+  # message reference so attachments recorded inside it land on the hook's
+  # test step. Returns nil (hooks then run unbracketed) when the session is
+  # nil.
+  @spec hook_around(map() | nil, :before | :after) :: Cucumber.Hooks.around() | nil
+  def hook_around(nil, _kind), do: nil
 
-  def hook_around(session, ids) do
+  def hook_around(session, kind) do
+    ids =
+      case kind do
+        :before -> session.before_ids
+        :after -> session.after_ids
+      end
+
     fn index, _name, hook_fun ->
       case step_message(session, Enum.at(ids, index)) do
         nil ->
-          hook_fun.()
+          hook_fun.(%{})
 
         message ->
           step_started(message)
@@ -285,8 +306,16 @@ defmodule Cucumber.Messages.Emitter do
   end
 
   defp run_bracketed_hook(message, hook_fun) do
-    result = hook_fun.()
-    step_finished(message, hook_result_status(result))
+    overrides = %{
+      cucumber_message_ref: %{
+        test_case_started_id: message.test_case_started_id,
+        test_step_id: message.test_step_id
+      }
+    }
+
+    result = hook_fun.(overrides)
+    {status, status_message} = hook_result(result)
+    step_finished(message, status, status_message)
     result
   catch
     kind, reason ->
@@ -294,12 +323,17 @@ defmodule Cucumber.Messages.Emitter do
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
-  # Before-hook results carry control signals; after-hook results are
-  # arbitrary values (ignored by the runner) and count as passed unless the
-  # hook raised.
-  defp hook_result_status({:halted, status, _reason}), do: status
-  defp hook_result_status({:error, _reason}), do: :failed
-  defp hook_result_status(_result), do: :passed
+  # Before-hook results arrive as control tuples ({:halted, ...} from the
+  # hooks module, {:error, ...} verbatim); after-hook results are raw return
+  # values — including bare :skipped/:pending signals, which per CCK
+  # semantics mark only the hook itself. Anything else counts as passed.
+  defp hook_result({:halted, status, reason}), do: {status, reason}
+  defp hook_result({:error, reason}), do: {:failed, inspect(reason)}
+  defp hook_result(:pending), do: {:pending, nil}
+  defp hook_result(:skipped), do: {:skipped, nil}
+  defp hook_result({:pending, message}) when is_binary(message), do: {:pending, message}
+  defp hook_result({:skipped, reason}) when is_binary(reason), do: {:skipped, reason}
+  defp hook_result(_result), do: {:passed, nil}
 
   defp now, do: Messages.timestamp(System.system_time(:nanosecond))
 end

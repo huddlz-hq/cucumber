@@ -159,8 +159,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `parameterType` envelope from a custom parameter type definition
-  (see `Cucumber.ParameterTypes`).
+  Builds a `parameterType` envelope from a custom parameter type definition.
+
+  See `Cucumber.ParameterTypes` for how custom types are defined.
   """
   @spec parameter_type(String.t(), %{
           required(:name) => String.t(),
@@ -180,8 +181,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `hook` envelope. `type` is a `Cucumber.Hooks` hook kind;
-  `tag` and `name` may be nil.
+  Builds a `hook` envelope.
+
+  `type` is a `Cucumber.Hooks` hook kind; `tag` and `name` may be nil.
   """
   @spec hook(String.t(), Cucumber.Hooks.hook_type(), String.t() | nil, String.t() | nil, map()) ::
           envelope()
@@ -210,8 +212,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `testRunFinished` envelope. `success` is false when any scenario
-  failed.
+  Builds a `testRunFinished` envelope.
+
+  `success` is false when any scenario failed.
   """
   @spec test_run_finished(boolean(), instant(), String.t() | nil) :: envelope()
   def test_run_finished(success, timestamp, test_run_started_id) do
@@ -223,8 +226,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `testRunHookStarted` envelope (a `before_all`/`after_all` hook
-  beginning execution).
+  Builds a `testRunHookStarted` envelope.
+
+  Marks a `before_all`/`after_all` hook beginning execution.
   """
   @spec test_run_hook_started(String.t(), String.t() | nil, String.t() | nil, instant()) ::
           envelope()
@@ -268,8 +272,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `testCaseStarted` envelope. `attempt` is 0-based (retries
-  increment it).
+  Builds a `testCaseStarted` envelope.
+
+  `attempt` is 0-based; retries increment it.
   """
   @spec test_case_started(String.t(), String.t(), non_neg_integer(), instant()) :: envelope()
   def test_case_started(id, test_case_id, attempt, timestamp) do
@@ -293,8 +298,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `testStepFinished` envelope. Build `result` with
-  `test_step_result/3`.
+  Builds a `testStepFinished` envelope.
+
+  Build `result` with `test_step_result/3`.
   """
   @spec test_step_finished(String.t(), String.t(), map(), instant()) :: envelope()
   def test_step_finished(test_case_started_id, test_step_id, result, timestamp) do
@@ -309,8 +315,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `TestStepResult` payload for `test_step_finished/4` (and
-  `test_run_hook_finished/3`).
+  Builds a `TestStepResult` payload.
+
+  Used by `test_step_finished/4` and `test_run_hook_finished/3`.
   """
   @spec test_step_result(status(), non_neg_integer(), String.t() | nil) :: map()
   def test_step_result(status, duration_ns, message \\ nil) do
@@ -319,8 +326,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `testCaseFinished` envelope. `will_be_retried` marks a failed
-  attempt that a retry follows.
+  Builds a `testCaseFinished` envelope.
+
+  `will_be_retried` marks a failed attempt that a retry follows.
   """
   @spec test_case_finished(String.t(), instant(), boolean()) :: envelope()
   def test_case_finished(test_case_started_id, timestamp, will_be_retried) do
@@ -360,8 +368,7 @@ defmodule Cucumber.Messages do
   defp content_encoding(:identity), do: "IDENTITY"
 
   @doc """
-  Converts a `System.system_time(:nanosecond)` value into a message
-  timestamp.
+  Converts a `System.system_time(:nanosecond)` value into a timestamp.
   """
   @spec timestamp(integer()) :: instant()
   def timestamp(nanoseconds) do
@@ -369,8 +376,9 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Converts a monotonic nanosecond difference into a message duration
-  (clamped at zero).
+  Converts a monotonic nanosecond difference into a duration.
+
+  Negative differences are clamped at zero.
   """
   @spec duration(integer()) :: instant()
   def duration(nanoseconds), do: timestamp(max(nanoseconds, 0))

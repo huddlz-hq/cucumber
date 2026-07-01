@@ -339,11 +339,35 @@ defmodule Cucumber.Hooks do
 
   @typedoc """
   Wraps each hook invocation — receives the hook's run-order index, its
-  name (nil if unnamed), and a zero-arity function that executes the hook;
-  must return that function's result. The scenario runner uses this to
-  bracket hooks with Cucumber Messages events.
+  name (nil if unnamed), and a one-arity function that executes the hook
+  with the given context overrides merged in; must return that function's
+  result. The scenario runner uses this to bracket hooks with Cucumber
+  Messages events and to inject each hook's message reference.
   """
-  @type around :: (non_neg_integer(), String.t() | nil, (-> term()) -> term())
+  @type around :: (non_neg_integer(), String.t() | nil, (map() -> term()) -> term())
+
+  @doc false
+  # The before_scenario hooks that will run for `tags`, in run order.
+  # Single source of truth shared with the message emitter, which
+  # pre-allocates test-step ids positionally against this list.
+  @spec before_scenario_hooks([hook()], [String.t()]) :: [
+          {String.t() | nil, {module(), atom()}}
+        ]
+  def before_scenario_hooks(hooks, tags) do
+    filter_hooks(hooks, :before_scenario, tags)
+  end
+
+  @doc false
+  # The after_scenario hooks that will run for `tags`, in run order (i.e.
+  # reverse definition order). Same contract as before_scenario_hooks/2.
+  @spec after_scenario_hooks([hook()], [String.t()]) :: [
+          {String.t() | nil, {module(), atom()}}
+        ]
+  def after_scenario_hooks(hooks, tags) do
+    hooks
+    |> filter_hooks(:after_scenario, tags)
+    |> Enum.reverse()
+  end
 
   @doc false
   # `{:halted, status, reason}` is returned when a before hook signals
@@ -357,7 +381,7 @@ defmodule Cucumber.Hooks do
           | {:halted, :pending | :skipped, String.t() | nil}
   def run_before_hooks(hooks, context, tags, around \\ nil) do
     hooks
-    |> filter_hooks(:before_scenario, tags)
+    |> before_scenario_hooks(tags)
     |> run_halting_hooks(context, around || (&unwrapped/3))
   end
 
@@ -373,7 +397,7 @@ defmodule Cucumber.Hooks do
     |> run_halting_hooks(context, &unwrapped/3)
   end
 
-  defp unwrapped(_index, _name, hook_fun), do: hook_fun.()
+  defp unwrapped(_index, _name, hook_fun), do: hook_fun.(%{})
 
   defp run_halting_hooks(filtered_hooks, context, around) do
     filtered_hooks
@@ -391,7 +415,9 @@ defmodule Cucumber.Hooks do
   end
 
   defp invoke_halting_hook(around, index, name, {module, func_name}, context) do
-    case around.(index, name, fn -> apply_before_hook(module, func_name, context) end) do
+    run = fn overrides -> apply_before_hook(module, func_name, Map.merge(context, overrides)) end
+
+    case around.(index, name, run) do
       {:error, reason} -> {:error, reason, name}
       other -> other
     end
@@ -448,12 +474,12 @@ defmodule Cucumber.Hooks do
     around = around || (&unwrapped/3)
 
     hooks
-    |> filter_hooks(:after_scenario, tags)
-    # After hooks run in reverse order
-    |> Enum.reverse()
+    |> after_scenario_hooks(tags)
     |> Enum.with_index()
     |> Enum.each(fn {{name, {module, func_name}}, index} ->
-      around.(index, name, fn -> apply(module, func_name, [context]) end)
+      around.(index, name, fn overrides ->
+        apply(module, func_name, [Map.merge(context, overrides)])
+      end)
     end)
   end
 

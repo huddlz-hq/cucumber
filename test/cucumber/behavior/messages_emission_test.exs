@@ -99,6 +99,31 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     end
   end
 
+  defmodule SkippingAfterHook do
+    use Cucumber.Hooks
+
+    after_scenario _context do
+      {:skipped, "cleanup not needed"}
+    end
+  end
+
+  defmodule AttachingAfterHook do
+    use Cucumber.Hooks
+
+    after_scenario context do
+      Cucumber.attach(context, "teardown evidence", "text/plain")
+      :ok
+    end
+  end
+
+  defmodule RaisingAfterStep do
+    use Cucumber.Hooks
+
+    after_step _context do
+      raise "after step exploded"
+    end
+  end
+
   # --- Harness helpers ---
 
   defp run_messages(sources, opts) do
@@ -473,6 +498,115 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
              {:hook, "FAILED"},
              {"a passing step", "SKIPPED"}
            ]
+
+    # The failure cause reaches the stream
+    failed_hook =
+      Enum.find(payloads(run.messages, "testStepFinished"), fn finished ->
+        finished["testStepResult"]["status"] == "FAILED"
+      end)
+
+    assert failed_hook["testStepResult"]["message"] =~ "database_down"
+  end
+
+  test "an after hook returning :skipped marks only its own test step" do
+    run =
+      run_messages(
+        """
+        Feature: skipping teardown
+          Scenario: passes anyway
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [SkippingAfterHook]
+      )
+
+    # The hook signal marks the hook step, not the scenario (CCK semantics)
+    assert run.passed == 1
+
+    assert finished_steps(run.messages) == [
+             {"a passing step", "PASSED"},
+             {:hook, "SKIPPED"}
+           ]
+
+    skipped_hook =
+      Enum.find(payloads(run.messages, "testStepFinished"), fn finished ->
+        finished["testStepResult"]["status"] == "SKIPPED"
+      end)
+
+    assert skipped_hook["testStepResult"]["message"] == "cleanup not needed"
+  end
+
+  test "attachments from an after hook reference the hook's own test step" do
+    # The background matters: its last step used to leave a stale message
+    # ref in the context the after hooks receive
+    run =
+      run_messages(
+        """
+        Feature: teardown evidence
+          Background:
+            Given a background step
+          Scenario: attaches on teardown
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [AttachingAfterHook]
+      )
+
+    assert run.passed == 1
+
+    [attachment] = payloads(run.messages, "attachment")
+    [test_case] = payloads(run.messages, "testCase")
+
+    after_hook_step = List.last(test_case["testSteps"])
+    assert Map.has_key?(after_hook_step, "hookId")
+    assert attachment["testStepId"] == after_hook_step["id"]
+
+    [case_started] = payloads(run.messages, "testCaseStarted")
+    assert attachment["testCaseStartedId"] == case_started["id"]
+  end
+
+  test "skipped steps are emitted before the after-hook events" do
+    run =
+      run_messages(
+        """
+        Feature: ordering under failure
+          Scenario: fails midway
+            Given a failing step
+            Then another passing step
+        """,
+        steps: [Steps],
+        hooks: [ScenarioHooks]
+      )
+
+    assert run.failures == 1
+
+    # Emission order: before hook, failing step, remaining step SKIPPED,
+    # then the after hook — reference ordering, not SKIPPED-after-teardown
+    assert finished_steps(run.messages) == [
+             {:hook, "PASSED"},
+             {"a failing step", "FAILED"},
+             {"another passing step", "SKIPPED"},
+             {:hook, "PASSED"}
+           ]
+  end
+
+  test "an after_step hook raising reports the step FAILED, not UNKNOWN" do
+    run =
+      run_messages(
+        """
+        Feature: exploding step hook
+          Scenario: body passes
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [RaisingAfterStep]
+      )
+
+    assert run.failures == 1
+    assert finished_steps(run.messages) == [{"a passing step", "FAILED"}]
+
+    [finished] = payloads(run.messages, "testStepFinished")
+    assert finished["testStepResult"]["message"] =~ "after step exploded"
   end
 
   test "run-level hooks emit testRunHook events inside the run envelope" do
@@ -509,10 +643,11 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     last_hook_start =
       length(types) - 1 - Enum.find_index(Enum.reverse(types), &(&1 == "testRunHookStarted"))
 
-    # before_all runs lazily before the first scenario's steps; after_all
-    # runs after every test case, before testRunFinished
+    # before_all runs lazily before the first scenario — and before its
+    # testCase envelope, matching reference ordering; after_all runs after
+    # every test case, before testRunFinished
     assert first_hook_start > Enum.find_index(types, &(&1 == "testRunStarted"))
-    assert first_hook_start < Enum.find_index(types, &(&1 == "testStepStarted"))
+    assert first_hook_start < Enum.find_index(types, &(&1 == "testCase"))
     assert last_hook_start > Enum.find_index(types, &(&1 == "testCaseFinished"))
     assert last_hook_start < Enum.find_index(types, &(&1 == "testRunFinished"))
   end

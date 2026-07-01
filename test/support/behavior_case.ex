@@ -54,8 +54,6 @@ defmodule Cucumber.BehaviorCase do
 
   import ExUnit.CaptureIO
 
-  alias Cucumber.Messages.Emitter
-
   using do
     quote do
       import Cucumber.BehaviorCase,
@@ -154,47 +152,33 @@ defmodule Cucumber.BehaviorCase do
     Cucumber.RunCoordinator.ensure_started()
     Collector.reset()
 
-    # Thread pickle ids across features exactly like compile_features!/1
-    # does, so ids stay unique across a multi-feature run
-    {compiled, next_id} =
+    features =
       sources
       |> Enum.with_index()
-      |> Enum.map_reduce(0, fn {source, index}, start_id ->
+      |> Enum.map(fn {source, index} ->
         file =
           case {Keyword.fetch(opts, :file), index} do
             {{:ok, file}, 0} -> file
             _ -> unique_feature_path()
           end
 
-        feature =
-          source
-          |> Gherkin.Parser.parse()
-          |> Map.put(:file, file)
-          |> Map.put(:source, source)
-
-        compilation = Gherkin.Pickles.compile(feature, start_id)
-
-        module =
-          Cucumber.Compiler.compile_feature!(feature, registry, hook_modules,
-            parameter_types: parameter_types,
-            compilation: compilation
-          )
-
-        {{module, feature, compilation}, compilation.next_id}
+        source
+        |> Gherkin.Parser.parse()
+        |> Map.put(:file, file)
+        |> Map.put(:source, source)
       end)
 
-    modules = Enum.map(compiled, fn {module, _feature, _compilation} -> module end)
-
-    if path = opts[:messages] do
-      Emitter.configure(
-        path,
-        Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
+    # The same shared compilation path compile_features!/1 uses: run-unique
+    # pickle ids threaded across features, message sink configured when a
+    # path is given
+    modules =
+      Cucumber.Compiler.compile_all!(
+        features,
         registry,
-        Cucumber.Hooks.collect_hooks(hook_modules),
+        hook_modules,
         parameter_types,
-        next_id
+        opts[:messages]
       )
-    end
 
     {result, output} = run_isolated(modules)
 

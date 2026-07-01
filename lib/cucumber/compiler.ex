@@ -34,9 +34,25 @@ defmodule Cucumber.Compiler do
     # Start (or reset) the run-wide coordinator before any test executes
     Cucumber.RunCoordinator.ensure_started()
 
-    # Generate a test module for each feature, threading the pickle id
-    # sequence so ids are unique across the whole run (the messages
-    # stream references them run-wide)
+    compile_all!(
+      features,
+      step_registry,
+      hook_modules,
+      parameter_types,
+      Application.get_env(:cucumber, :messages)
+    )
+  end
+
+  @doc false
+  # Compiles a list of parsed features (each carrying :file and :source, as
+  # set by discovery) into test modules, threading the pickle id sequence so
+  # ids are unique across the whole run — the messages stream references
+  # them run-wide. When `messages_path` is set, builds the run's static
+  # envelopes and enables the coordinator's message sink; the runner and the
+  # after_suite flush do the rest. Shared by compile_features!/1 and
+  # Cucumber.BehaviorCase.
+  @spec compile_all!([map()], map(), [module()], map(), String.t() | nil) :: [module()]
+  def compile_all!(features, step_registry, hook_modules, parameter_types, messages_path) do
     {compiled, next_id} =
       Enum.map_reduce(features, 0, fn feature, start_id ->
         compilation = Gherkin.Pickles.compile(feature, start_id)
@@ -50,11 +66,9 @@ defmodule Cucumber.Compiler do
         {{module, feature, compilation}, compilation.next_id}
       end)
 
-    # Opt-in Cucumber Messages: build the run's static envelopes and enable
-    # the coordinator's sink; the runner and the after_suite flush do the rest
-    if path = Application.get_env(:cucumber, :messages) do
+    if messages_path do
       Emitter.configure(
-        path,
+        messages_path,
         Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
         step_registry,
         Cucumber.Hooks.collect_hooks(hook_modules),

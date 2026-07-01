@@ -28,7 +28,12 @@ defmodule Cucumber.RunCoordinator do
       callback flushes the NDJSON file (`flush_messages/1`), reconciling
       test cases the runner never finished (e.g. a killed test process).
       Serializing emission through this process is what keeps the stream
-      ordered under `@async` features.
+      ordered under `@async` features. Note that `ExUnit.after_suite/1`
+      callbacks fire on *every* `ExUnit.run/1` — the sink flushes (and
+      disables itself) when the first run in the VM completes, so a project
+      that invokes a nested `ExUnit.run/1` mid-suite with the sink enabled
+      gets the stream truncated at that point (`Cucumber.BehaviorCase`
+      relies on exactly this per-run firing to capture streams in tests).
   """
 
   use GenServer
@@ -161,6 +166,20 @@ defmodule Cucumber.RunCoordinator do
         __MODULE__,
         {:finish_test_case, test_case_started_id, skip_status, will_be_retried}
       )
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Synthesizes started/finished(SKIPPED) pairs for the given planned step
+  # ids of an open test case that never ran. The runner calls this before
+  # the after-scenario hooks, so skipped pickle steps precede the after-hook
+  # events in the stream.
+  @spec skip_unfinished_steps(String.t(), [String.t()]) :: :ok
+  def skip_unfinished_steps(test_case_started_id, step_ids) do
+    if Process.whereis(__MODULE__) do
+      GenServer.call(__MODULE__, {:skip_unfinished_steps, test_case_started_id, step_ids})
     end
 
     :ok
@@ -379,6 +398,14 @@ defmodule Cucumber.RunCoordinator do
     {:reply, :ok, close_test_case(state, case_started_id, skip_status, will_be_retried)}
   end
 
+  def handle_call({:skip_unfinished_steps, _id, _step_ids}, _from, %{messages: nil} = state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:skip_unfinished_steps, case_started_id, step_ids}, _from, state) do
+    {:reply, :ok, skip_unfinished(state, case_started_id, step_ids)}
+  end
+
   def handle_call({:run_hook_started, ref}, _from, state) do
     {started_id, state} = run_hook_started(state, ref)
     {:reply, started_id, state}
@@ -535,6 +562,20 @@ defmodule Cucumber.RunCoordinator do
 
       _closed_or_unknown ->
         state
+    end
+  end
+
+  # Synthesizes skipped events for the given planned step ids that never
+  # ran (same synthesis close_test_case/4 uses, without closing the case).
+  defp skip_unfinished(state, case_started_id, step_ids) do
+    case Map.fetch(state.messages.open_cases, case_started_id) do
+      :error ->
+        state
+
+      {:ok, tracking} ->
+        Enum.reduce(step_ids, state, fn step_id, state ->
+          synthesize_step_events(state, case_started_id, step_id, tracking, :skipped)
+        end)
     end
   end
 
