@@ -398,6 +398,11 @@ defmodule Cucumber.PendingSkippedTest do
 
   describe "skipped-step bookkeeping" do
     test "unexecuted steps land in the context under :skipped_steps" do
+      # This test drives Runtime.run_scenario directly instead of going
+      # through run_feature/2, so the Collector the steps record to isn't
+      # started for it — start it explicitly (seed-order dependent otherwise)
+      Collector.reset()
+
       registry =
         for {pattern, metadata} <- Steps.__cucumber_steps__(), into: %{} do
           {Cucumber.Discovery.registry_key(pattern), {Steps, metadata}}
