@@ -404,8 +404,11 @@ defmodule Cucumber.Runtime do
       try do
         result = apply(module, metadata.function, [context])
         process_step_result(result, context)
-      rescue
-        e ->
+      catch
+        # `catch` (not `rescue`) so exits and throws get the same step-level
+        # bookkeeping as raised exceptions: after-step hooks with :failed,
+        # and the enhanced error with step history and attachments
+        kind, reason ->
           # After-step hooks see failing steps too (a hook raising here
           # masks the step's own error — that's the hook author's bug)
           Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
@@ -420,7 +423,7 @@ defmodule Cucumber.Runtime do
             Cucumber.StepError.failed_step(
               step,
               pattern_text,
-              format_exception_for_display(e),
+              describe_failure(kind, reason, __STACKTRACE__),
               feature_file,
               scenario_name,
               format_step_history_with_status(step_history, step, context)
@@ -443,6 +446,16 @@ defmodule Cucumber.Runtime do
 
   defp hook_label(nil), do: ""
   defp hook_label(name), do: ~s( "#{name}")
+
+  defp describe_failure(:error, reason, stacktrace) do
+    format_exception_for_display(Exception.normalize(:error, reason, stacktrace))
+  end
+
+  # Exits and throws: the banner names the original kind and reason
+  # (e.g. `** (exit) :timeout`)
+  defp describe_failure(kind, reason, _stacktrace) do
+    Exception.format_banner(kind, reason)
+  end
 
   # Until Cucumber Messages land (#28), attachments surface in failure
   # output: a failing step's error lists everything the scenario attached.

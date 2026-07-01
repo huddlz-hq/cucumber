@@ -247,8 +247,10 @@ config :cucumber, retry: 2  # up to 3 attempts per failing scenario
 
 Or opt individual scenarios (or whole features) in with a `@retry-n` tag,
 which overrides the global config — including `@retry-0` to exempt a
-scenario. A scenario-level tag beats a feature-level one, so `@retry-0`
-on a scenario also exempts it from a feature-wide retry tag:
+scenario. The most specific tag wins: a scenario's tag beats its rule's
+or its feature's, and an `Examples`-level tag beats the outline's — so
+`@retry-0` on a scenario also exempts it from a feature- or rule-wide
+retry tag:
 
 ```gherkin
 @retry-2

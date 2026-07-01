@@ -249,6 +249,46 @@ defmodule Cucumber.RetryTest do
       refute run.output =~ "Cucumber: retrying scenario"
     end
 
+    test "a scenario-level @retry-0 exempts the scenario from a rule-level retry tag" do
+      run =
+        run_feature(
+          """
+          Feature: rule-wide retry with an exemption
+            @retry-2
+            Rule: flaky group
+              @retry-0
+              Scenario: exempt
+                Given a step that passes the second time
+          """,
+          steps: [Steps]
+        )
+
+      assert %{total: 1, failures: 1} = run
+      assert count(run.events, :second_time) == 1
+      refute run.output =~ "Cucumber: retrying scenario"
+    end
+
+    test "an examples-level @retry-n beats an outline-level @retry-0" do
+      run =
+        run_feature(
+          """
+          Feature: outline retry precedence
+            @retry-0
+            Scenario Outline: flaky rows
+              Given a step that passes the second time
+
+              @retry-1
+              Examples:
+                | n |
+                | 1 |
+          """,
+          steps: [Steps]
+        )
+
+      assert %{total: 1, failures: 0, passed: 1} = run
+      assert count(run.events, :second_time) == 2
+    end
+
     test "a scenario-level @retry-n beats a feature-level @retry-0" do
       run =
         run_feature(
@@ -361,6 +401,44 @@ defmodule Cucumber.RetryTest do
       assert %{total: 1, failures: 1} = run
       assert count(run.events, :always_exits) == 2
       assert run.output =~ "simulated_timeout"
+    end
+
+    test "an exiting step gets full step-level bookkeeping: after-step hooks and attachments" do
+      defmodule ExitStepHooks do
+        use Cucumber.Hooks
+
+        after_step context do
+          Collector.record({:after_step_status, context.step_status})
+          :ok
+        end
+      end
+
+      defmodule AttachThenExitSteps do
+        use Cucumber.StepDefinition
+
+        step "a step that attaches then exits", context do
+          Cucumber.attach(context, "exit evidence", "text/plain")
+          exit(:simulated_timeout)
+        end
+      end
+
+      run =
+        run_feature(
+          """
+          Feature: exit bookkeeping
+            Scenario: exits
+              Given a step that attaches then exits
+          """,
+          steps: [AttachThenExitSteps],
+          hooks: [ExitStepHooks]
+        )
+
+      assert %{total: 1, failures: 1} = run
+      # The after-step hook saw the failure, like it does for a raise
+      assert {:after_step_status, :failed} in run.events
+      # The enhanced step error carries the exit banner and the attachments
+      assert run.output =~ "(exit) :simulated_timeout"
+      assert run.output =~ "exit evidence"
     end
   end
 
