@@ -124,6 +124,23 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     end
   end
 
+  defmodule RaisingBeforeStep do
+    use Cucumber.Hooks
+
+    before_step _context do
+      raise "before step exploded"
+    end
+  end
+
+  defmodule AttachingAfterStep do
+    use Cucumber.Hooks
+
+    after_step context do
+      Cucumber.attach(context, "post-step note", "text/plain")
+      :ok
+    end
+  end
+
   # --- Harness helpers ---
 
   defp run_messages(sources, opts) do
@@ -607,6 +624,62 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
 
     [finished] = payloads(run.messages, "testStepFinished")
     assert finished["testStepResult"]["message"] =~ "after step exploded"
+  end
+
+  test "a before_step hook raising reports the step FAILED, not UNKNOWN" do
+    run =
+      run_messages(
+        """
+        Feature: exploding pre-step hook
+          Scenario: body never runs
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [RaisingBeforeStep]
+      )
+
+    assert run.failures == 1
+    assert finished_steps(run.messages) == [{"a passing step", "FAILED"}]
+
+    [finished] = payloads(run.messages, "testStepFinished")
+    assert finished["testStepResult"]["message"] =~ "before step exploded"
+  end
+
+  test "after_step hook attachments land inside the step's event window on both outcomes" do
+    for {feature_step, status, expected_message} <- [
+          {"a passing step", "PASSED", nil},
+          {"a failing step", "FAILED", "boom"}
+        ] do
+      run =
+        run_messages(
+          """
+          Feature: post-step evidence
+            Scenario: one step
+              Given #{feature_step}
+          """,
+          steps: [Steps],
+          hooks: [AttachingAfterStep]
+        )
+
+      [attachment] = payloads(run.messages, "attachment")
+      [finished] = payloads(run.messages, "testStepFinished")
+
+      # The hook's attachment references the step and precedes its finished
+      # event — same ordering whether the step passed or failed — and the
+      # failed step keeps its own error message, not the hook's context
+      assert attachment["testStepId"] == finished["testStepId"]
+      assert finished["testStepResult"]["status"] == status
+
+      if expected_message do
+        assert finished["testStepResult"]["message"] =~ expected_message
+      end
+
+      types = envelope_types(run.messages)
+      attachment_index = Enum.find_index(types, &(&1 == "attachment"))
+      finished_index = Enum.find_index(types, &(&1 == "testStepFinished"))
+      assert attachment_index > Enum.find_index(types, &(&1 == "testStepStarted"))
+      assert attachment_index < finished_index
+    end
   end
 
   test "run-level hooks emit testRunHook events inside the run envelope" do

@@ -26,6 +26,11 @@ defmodule Cucumber.Messages do
 
       config :cucumber, messages: "cucumber-messages.ndjson"
 
+  The file is written when the test suite finishes, via
+  `ExUnit.after_suite/1`. Those callbacks fire on every `ExUnit.run/1`, so
+  a project that invokes a nested `ExUnit.run/1` mid-suite will flush (and
+  close) the stream at that point rather than at the end of the real run.
+
   ## Example
 
   Ids must be unique across the whole stream, so when emitting several

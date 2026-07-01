@@ -459,7 +459,12 @@ defmodule Cucumber.Runtime do
   # running the step body; a :pending/:skipped signal halts the scenario
   # like the step itself returning it.
   defp run_matched_step(context, step, definition, pattern_text, exec, msg) do
-    case Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags) do
+    hook_result =
+      reporting_step_failure(msg, fn ->
+        Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags)
+      end)
+
+    case hook_result do
       {:error, reason, hook_name} ->
         message = "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
         Emitter.step_finished(msg, :failed, message)
@@ -483,15 +488,17 @@ defmodule Cucumber.Runtime do
         # bookkeeping as raised exceptions: after-step hooks with :failed,
         # and the enhanced error with step history and attachments
         kind, reason ->
-          # Report the failure to the message stream before the after-step
-          # hooks run — a hook raising below must not leave the step
-          # unfinished in the stream
           failure_description = describe_failure(kind, reason, __STACKTRACE__)
-          Emitter.step_finished(msg, :failed, failure_description)
 
           # After-step hooks see failing steps too (a hook raising here
-          # masks the step's own error — that's the hook author's bug)
-          Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
+          # masks the step's own error — that's the hook author's bug).
+          # They run before the step's finished event, as on the passing
+          # path, so hook attachments land inside the step's event window
+          reporting_step_failure(msg, fn ->
+            Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
+          end)
+
+          Emitter.step_finished(msg, :failed, failure_description)
 
           # Extract meaningful information from the error
           feature_file = Map.get(context, :feature_file, "unknown")
@@ -520,17 +527,20 @@ defmodule Cucumber.Runtime do
         ctx -> {:passed, ctx}
       end
 
-    run_after_step_hooks_reporting(exec, hook_context, status, msg)
+    reporting_step_failure(msg, fn ->
+      Cucumber.Hooks.run_after_step_hooks(exec.hooks, hook_context, exec.tags, status)
+    end)
+
     outcome
   end
 
-  # An after-step hook raising fails the scenario; the step itself must
-  # still be reported with its real status in the message stream before the
-  # raise escapes — otherwise it would surface as UNKNOWN (the
-  # killed-process status) at reconciliation. The step's own finished event
-  # is emitted by do_execute_step only when this returns normally.
-  defp run_after_step_hooks_reporting(exec, context, status, msg) do
-    Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, status)
+  # A step hook raising fails the scenario; the step itself must still be
+  # reported FAILED in the message stream before the raise escapes —
+  # otherwise it would surface as UNKNOWN (the killed-process status) at
+  # reconciliation. When `fun` returns normally the step's own finished
+  # event follows from the regular emission points.
+  defp reporting_step_failure(msg, fun) do
+    fun.()
   catch
     kind, reason ->
       Emitter.step_finished(msg, :failed, Exception.format_banner(kind, reason))
