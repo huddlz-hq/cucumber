@@ -65,6 +65,7 @@ defmodule Cucumber.Messages do
   """
 
   @gherkin_media_type "text/x.cucumber.gherkin+plain"
+  @markdown_media_type "text/x.cucumber.gherkin+markdown"
 
   # The cucumber/messages schema major version these envelope shapes track.
   # #28c vendors the schema files and pins this against them.
@@ -75,10 +76,21 @@ defmodule Cucumber.Messages do
 
   @doc """
   Builds a `source` envelope carrying a feature file's raw text.
+
+  The media type follows the file extension: Markdown feature files
+  (`.feature.md`) get the MDG media type, everything else plain Gherkin.
   """
   @spec source(String.t(), String.t()) :: envelope()
   def source(uri, data) do
-    %{source: %{uri: uri, data: data, mediaType: @gherkin_media_type}}
+    %{source: %{uri: uri, data: data, mediaType: media_type(uri)}}
+  end
+
+  defp media_type(uri) do
+    if Gherkin.Markdown.markdown_path?(uri) do
+      @markdown_media_type
+    else
+      @gherkin_media_type
+    end
   end
 
   @doc """

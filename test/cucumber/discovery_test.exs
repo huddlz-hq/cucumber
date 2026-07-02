@@ -116,6 +116,44 @@ defmodule Cucumber.DiscoveryTest do
         File.rm_rf(temp_dir)
       end
     end
+
+    test "discovers Markdown feature files alongside plain ones, each with its own parser" do
+      temp_dir = Path.join(System.tmp_dir(), "md_feature_#{:rand.uniform(10_000)}")
+      File.mkdir_p!(temp_dir)
+
+      File.write!(Path.join(temp_dir, "plain.feature"), """
+      Feature: Plain feature
+        Scenario: Plain scenario
+          Given a step
+      """)
+
+      File.write!(Path.join(temp_dir, "markdown.feature.md"), """
+      # Feature: Markdown feature
+
+      Prose the Markdown parser ignores.
+
+      ## Scenario: Markdown scenario
+
+      * Given a step
+      """)
+
+      try do
+        # The same two-pattern shape as the discovery defaults.
+        result =
+          Discovery.discover(
+            features: [Path.join(temp_dir, "*.feature"), Path.join(temp_dir, "*.feature.md")],
+            steps: []
+          )
+
+        names = Enum.map(result.features, & &1.name) |> Enum.sort()
+        assert names == ["Markdown feature", "Plain feature"]
+
+        markdown = Enum.find(result.features, &(&1.name == "Markdown feature"))
+        assert [%{steps: [%{text: "a step"}]}] = markdown.scenarios
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
   end
 
   describe "discover/1 step registry" do

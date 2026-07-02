@@ -254,4 +254,25 @@ defmodule Gherkin.Parser do
   """
   @spec parse(String.t()) :: Gherkin.Feature.t()
   defdelegate parse(gherkin_string), to: Gherkin.NimbleParser
+
+  @doc """
+  Parses feature file content, choosing the parser by the file's path.
+
+  `.feature.md` files parse as Markdown with Gherkin (see
+  `Gherkin.Markdown`); everything else parses as plain Gherkin, exactly
+  like `parse/1`.
+
+  ## Examples
+
+      Gherkin.Parser.parse("# Feature: Cheese", "cheese.feature.md")
+      # Returns %Gherkin.Feature{} struct with parsed data
+  """
+  @spec parse(String.t(), String.t()) :: Gherkin.Feature.t()
+  def parse(content, path) do
+    if Gherkin.Markdown.markdown_path?(path) do
+      Gherkin.Markdown.parse(content)
+    else
+      Gherkin.NimbleParser.parse(content)
+    end
+  end
 end

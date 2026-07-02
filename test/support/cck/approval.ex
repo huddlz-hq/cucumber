@@ -59,6 +59,9 @@ defmodule Cucumber.CckApproval do
 
     * `:drop` — extra envelope types to drop for a specific sample; each
       use must be justified in the approval test's samples table
+    * `:drop_feature_description` — drop `gherkinDocument.feature.description`
+      (that field only; descriptions elsewhere stay compared); for the
+      `markdown` sample, whose reference description is a tokenizer quirk
     * `:drop_step_definition_patterns` — drop `stepDefinition.pattern`;
       for samples that rely on duplicate identical step definitions,
       which this implementation rejects at discovery (the equivalent
@@ -134,6 +137,15 @@ defmodule Cucumber.CckApproval do
         else: definition
 
     scrub_node(%{envelope | "stepDefinition" => definition})
+  end
+
+  defp scrub(%{"gherkinDocument" => %{"feature" => feature} = document} = envelope, opts) do
+    feature =
+      if opts[:drop_feature_description],
+        do: Map.delete(feature, "description"),
+        else: feature
+
+    scrub_node(%{envelope | "gherkinDocument" => %{document | "feature" => feature}})
   end
 
   defp scrub(envelope, _opts), do: scrub_node(envelope)

@@ -53,6 +53,8 @@ defmodule Cucumber.Compiler do
   # Cucumber.BehaviorCase.
   @spec compile_all!([map()], map(), [module()], map(), String.t() | nil) :: [module()]
   def compile_all!(features, step_registry, hook_modules, parameter_types, messages_path) do
+    reject_module_name_collisions!(features)
+
     {compiled, next_id} =
       Enum.map_reduce(features, 0, fn feature, start_id ->
         compilation = Gherkin.Pickles.compile(feature, start_id)
@@ -215,10 +217,34 @@ defmodule Cucumber.Compiler do
     end
   end
 
+  # Two feature files can generate the same test module — `checkout.feature`
+  # and `checkout.feature.md` in one directory both map to
+  # Test.Features.CheckoutTest. Compiling both would silently redefine the
+  # module, dropping the first file's scenarios from the run, so fail loudly
+  # instead (like discovery does for duplicate step definitions).
+  defp reject_module_name_collisions!(features) do
+    features
+    |> Enum.group_by(&generate_module_name(&1.file))
+    |> Enum.each(fn
+      {_module, [_feature]} ->
+        :ok
+
+      {module, features} ->
+        files = features |> Enum.map(& &1.file) |> Enum.sort() |> Enum.join(" and ")
+
+        raise ArgumentError,
+              "feature files #{files} would generate the same test module " <>
+                "#{module}. Rename one of them."
+    end)
+  end
+
   defp generate_module_name(file_path) do
-    # Convert path like "test/features/authentication.feature"
-    # to Test.Features.AuthenticationTest
+    # Convert a path like "test/features/authentication.feature" (or
+    # "authentication.feature.md") to Test.Features.AuthenticationTest.
+    # Path.rootname/1 only strips the final extension, so reduce the
+    # Markdown double extension to a single one first.
     file_path
+    |> String.replace_suffix(".feature.md", ".feature")
     |> Path.rootname()
     |> Path.split()
     |> Enum.map_join(".", &Macro.camelize/1)

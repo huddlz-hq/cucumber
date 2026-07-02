@@ -9,6 +9,7 @@ A behavior-driven development (BDD) testing framework for Elixir that enables wr
 
 - **Auto-discovery**: Automatically finds and runs feature files and step definitions
 - **Gherkin Support**: Write tests in familiar Given/When/Then format
+- **Markdown Feature Files**: Write features as Markdown documents (`.feature.md`) with prose alongside the executable Gherkin
 - **Parameter Typing**: Define step patterns with typed parameters (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`), optional parameters (`{int?}`), optional text (`(s)`), and alternation (`a/b`)
 - **Data Tables**: Pass structured data to your steps
 - **DocStrings**: Include multi-line text blocks in your steps
@@ -57,6 +58,25 @@ Scenario: Adding two numbers
   And I have entered 70 into the calculator
   When I press add
   Then the result should be 120 on the screen
+```
+
+Features can also be written as Markdown documents with a `.feature.md`
+extension ([Markdown with Gherkin](https://github.com/cucumber/gherkin/blob/main/MARKDOWN_WITH_GHERKIN.md)):
+headings carry the Gherkin keywords, steps are bullet-list items, tables are
+indented Markdown tables, docstrings are fenced code blocks, tags are inline
+code spans (`` `@wip` ``), and everything else is prose:
+
+```markdown
+# Feature: Basic Calculator
+
+Anything that isn't Gherkin — like this paragraph — is documentation.
+
+## Scenario: Adding two numbers
+
+* Given I have entered 50 into the calculator
+* And I have entered 70 into the calculator
+* When I press add
+* Then the result should be 120 on the screen
 ```
 
 ### 3. Create Step Definitions

@@ -668,4 +668,36 @@ defmodule Cucumber.CckApproval.Definitions do
       raise "whoops"
     end
   end
+
+  defmodule Markdown do
+    @moduledoc false
+    use Cucumber.StepDefinition
+    import ExUnit.Assertions
+
+    step "some TypeScript code:", context do
+      assert context.docstring
+      :ok
+    end
+
+    step "some classic Gherkin:", context do
+      assert context.docstring
+      :ok
+    end
+
+    step "we use a data table and attach something and then {word}",
+         %{args: [word]} = context do
+      assert context.datatable
+      context = Cucumber.log(context, "We are logging some plain text (#{word})")
+
+      if word == "fail" do
+        raise "You asked me to fail"
+      end
+
+      context
+    end
+
+    step "this might or might not run", _context do
+      :ok
+    end
+  end
 end
