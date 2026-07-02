@@ -6,35 +6,40 @@ This document provides an overview of the Cucumber implementation architecture, 
 
 ```
 Cucumber
-  ├── Discovery (Feature/Step Finding)
-  ├── Gherkin (Parser)
+  ├── Discovery (Feature/Step/Hook Finding)
+  ├── Gherkin (Parser: .feature and .feature.md)
+  ├── Gherkin.Pickles (Scenario Expansion)
   ├── Expression (Parameter Matching)
   ├── Compiler (Test Generation)
-  ├── Runtime (Step Execution)
+  ├── Runtime (Scenario Lifecycle & Step Execution)
+  ├── RunCoordinator (Run-Wide State)
+  ├── Messages (Cucumber Messages NDJSON)
   └── StepError (Error Reporting)
 ```
 
 ### Discovery System
 
-The discovery system automatically finds and loads feature files and step definitions:
+The discovery system automatically finds and loads feature files, step definitions, hooks, and custom parameter types:
 
 ```elixir
 Discovery.discover()
-  ├── Scans for features (test/features/**/*.feature)
+  ├── Scans for features (test/features/**/*.feature and **/*.feature.md)
+  ├── Loads support files (test/features/support/**/*.exs — hooks, parameter types)
   ├── Loads step definitions (test/features/step_definitions/**/*.exs)
-  └── Returns: %{features: [...], step_registry: %{...}}
+  └── Returns: features, step registry, hooks, parameter types
 ```
 
 ### Gherkin Parser
 
-The Gherkin parser uses NimbleParsec to parse `.feature` files into Elixir structs. It handles the syntax of Gherkin, including:
+The Gherkin parser uses NimbleParsec to parse `.feature` files into Elixir structs. A separate line-scanner parser (`Gherkin.Markdown`) parses `.feature.md` ([Markdown with Gherkin](https://github.com/cucumber/gherkin/blob/main/MARKDOWN_WITH_GHERKIN.md)) files into the same structs. Together they handle:
 
 - Feature declarations with descriptions and tags
+- Rules with their own backgrounds, tags, and descriptions
 - Scenario outlines with Examples tables
 - Backgrounds
 - Steps (Given, When, Then, And, But, *)
-- Data tables and doc strings
-- Tags at feature, scenario, and examples levels
+- Data tables and doc strings (with media types)
+- Tags at feature, rule, scenario, and examples levels
 
 The parser is built using bottom-up combinator composition in six levels:
 1. Primitives (whitespace, newlines)
@@ -54,11 +59,14 @@ Feature File (Text) → NimbleParsec Parser → Elixir Structs
 The Expression engine uses NimbleParsec to parse and match step text against step definitions. It supports:
 
 - Cucumber expressions with parameter types (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`)
+- Custom parameter types defined with `Cucumber.ParameterTypes` (regexp + transform)
 - Optional parameters (`{int?}`)
 - Optional text (`(s)` for pluralization)
 - Alternation (`click/tap`)
 - Escape sequences (`\{`, `\}`, `\(`, `\)`, `\/`, `\\`)
 - Parameter conversion (string to typed values)
+
+Step definitions can also use plain regular expressions (`step ~r/.../`), which participate in the same single matching path — so ambiguity between a regex and a cucumber expression is detected like any other ambiguity and raises `Cucumber.AmbiguousStepError`.
 
 ```elixir
 defmodule Cucumber.Expression do
@@ -78,29 +86,40 @@ end
 
 ### Compiler
 
-The compiler generates ExUnit test modules from discovered features:
+Features are first expanded into *pickles* — one concrete, runnable scenario per outline row, with rule backgrounds and tags folded in — by `Gherkin.Pickles`. The compiler then generates ExUnit test modules from them:
 
 ```elixir
 Compiler.compile_features!()
+  ├── Expands features into pickles (outlines × example rows, rules flattened)
   ├── For each feature file:
   │   ├── Generates a test module
-  │   ├── Creates setup from Background
-  │   ├── Creates test cases from Scenarios
+  │   ├── Creates one test case per pickle
   │   └── Adds appropriate tags
   └── Compiles modules into memory
 ```
 
 ### Runtime
 
-The runtime executes steps during test runs:
+Each generated test body is a single call into the runtime, which owns the whole scenario lifecycle inside the test process — before hooks, background steps, scenario steps, and after hooks (which run on pass and on fail):
 
 ```elixir
-Runtime.execute_step(context, step, step_registry)
-  ├── Finds matching step definition
-  ├── Prepares context with args, datatables, docstrings
-  ├── Executes step function
-  └── Processes return value
+Runtime.run_scenario(context, ...)
+  ├── Runs before-scenario hooks (and lazily before_all, once per run)
+  ├── Executes background steps, then scenario steps:
+  │   ├── Finds the matching step definition (0 → undefined, >1 → ambiguous)
+  │   ├── Prepares context with args, datatables, docstrings
+  │   ├── Brackets it with before_step/after_step hooks
+  │   └── Processes the return value (incl. pending/skipped, retry)
+  └── Runs after-scenario hooks in reverse order
 ```
+
+### RunCoordinator
+
+A GenServer holding run-wide state: `before_all` once-guards and their shared context, attachments, retry bookkeeping, and the ordered Cucumber Messages sink. It serializes run-level effects so `@async` features stay safe.
+
+### Messages
+
+With `config :cucumber, messages: "path.ndjson"`, the run emits the standard [Cucumber Messages](https://github.com/cucumber/messages) stream — source, gherkinDocument, pickles, and testCase/testStep lifecycle events — as NDJSON, verified against the reference implementation by the Cucumber Compatibility Kit approval suite in this repo.
 
 ### StepDefinition Macro
 
@@ -124,14 +143,13 @@ end
    - Step registry is built with pattern → module mappings
 
 2. **Compilation Phase**
-   - For each feature, a test module is generated
-   - Background steps become setup blocks
-   - Scenarios become test cases
+   - Features are expanded into pickles (outline rows, rule flattening)
+   - For each feature, a test module is generated with one test per pickle
    - Tags are added for filtering
 
 3. **Execution Phase** (at runtime)
    - ExUnit runs the generated test modules
-   - Each test executes its steps via Runtime
+   - Each test runs its full scenario lifecycle (hooks, background, steps) via Runtime
    - Context is passed between steps
    - Errors are reported with helpful messages
 
@@ -166,7 +184,7 @@ Step Files → Discovery → Registry
 
 ### Context Management
 - ExUnit context is used directly
-- Background steps modify context in setup
+- Hooks and background steps build up the context before scenario steps run — all inside the test process
 - Each step can read and modify context
 
 ## Error Handling
@@ -189,7 +207,7 @@ The StepError module handles all error formatting, ensuring consistent and helpf
 
 The architecture supports several extension points:
 
-1. **Custom Parameter Types**: Add new parameter types to Expression
-2. **Custom Formatters**: Create custom output formats
-3. **Hooks**: Before/after scenario hooks (via ExUnit setup/teardown)
+1. **Custom Parameter Types**: Define your own `{type}` parameters with `Cucumber.ParameterTypes`
+2. **Cucumber Messages**: Consume the NDJSON stream with any standards-based report tooling
+3. **Hooks**: Run-level, scenario, and step hooks with tags and names (via `Cucumber.Hooks`)
 4. **Step Libraries**: Create reusable step definition modules

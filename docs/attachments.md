@@ -4,8 +4,10 @@ Cucumber lets you attach arbitrary data — screenshots, response payloads,
 logs, links — while a scenario runs. Attachments are recorded against the
 step (or hook execution) that attached them. Until a step fails they are
 invisible; a failing step's error output lists everything the scenario
-attached. Once Cucumber Messages support lands, formatters will render
-attachments in reports.
+attached. When Cucumber Messages output is enabled (`config :cucumber,
+messages: "path.ndjson"`), attachments are also emitted as `attachment`
+envelopes in the message stream, attributed to their step or hook, where
+standard Cucumber report tooling can render them.
 
 ## Attaching data
 

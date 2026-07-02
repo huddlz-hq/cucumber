@@ -207,9 +207,34 @@ Feature: Chocolate sales
       Then the sale should not happen
 ```
 
+## Markdown Feature Files
+
+Features can also be written as Markdown documents with a `.feature.md`
+extension, following the [Markdown with Gherkin](https://github.com/cucumber/gherkin/blob/main/MARKDOWN_WITH_GHERKIN.md)
+format. Headings carry the Gherkin keywords (at any heading level), steps are
+bullet-list items, data tables are indented Markdown tables, docstrings are
+fenced code blocks (the info string becomes the media type), tags are inline
+code spans like `` `@wip` ``, and everything else — paragraphs, images,
+links — is prose that renders on GitHub but never executes:
+
+```markdown
+# Feature: Basic Calculator
+
+Anything that isn't Gherkin — like this paragraph — is documentation.
+
+## Rule: Addition is commutative
+
+### Scenario: Adding two numbers
+
+- Given I have entered 50 into the calculator
+- And I have entered 70 into the calculator
+- When I press add
+- Then the result should be 120 on the screen
+```
+
 ## File Organization
 
-Feature files should be placed in a `test/features/` directory and have a `.feature` extension. Organize them logically by feature or domain area:
+Feature files should be placed in a `test/features/` directory and have a `.feature` extension — or `.feature.md` for Markdown with Gherkin. Organize them logically by feature or domain area:
 
 ```
 test/

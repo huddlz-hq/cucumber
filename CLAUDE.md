@@ -85,15 +85,15 @@ This Cucumber implementation consists of several key components:
 
 3. **Compiler** (`lib/cucumber/compiler.ex`) - Generates ExUnit test modules
    - Creates one test module per feature file
-   - Converts backgrounds to setup blocks
-   - Converts scenarios to test cases
+   - Expands features into pickles (`lib/gherkin/pickles.ex`) and creates one test per pickle
    - Adds appropriate tags for filtering
 
-4. **Runtime** (`lib/cucumber/runtime.ex`) - Executes steps during tests
+4. **Runtime** (`lib/cucumber/runtime.ex`) - Runs the scenario lifecycle inside the test body
+   - Hooks, background steps, and scenario steps all run in the test process
    - Finds matching step definitions
    - Manages context between steps
    - Handles datatables and docstrings
-   - Processes step return values
+   - Processes step return values (incl. pending/skipped, retry)
 
 5. **Step Definition** (`lib/cucumber/step_definition.ex`) - DSL for defining steps
    - `step` macro for defining step implementations
@@ -167,7 +167,7 @@ Step definitions must return one of the following values (matching ExUnit's setu
 
 - **Auto-discovery**: Features and steps are automatically found
 - **Tagged tests**: Filter scenarios by tags using ExUnit's tag system
-- **Background steps**: Common setup steps become ExUnit setup blocks
+- **Background steps**: Common setup steps run before each scenario's steps
 - **Data tables**: Tabular data with headers, rows, and map access
 - **Docstrings**: Multi-line text in feature files
 - **Context management**: ExUnit context used for sharing state

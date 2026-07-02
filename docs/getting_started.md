@@ -18,7 +18,7 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.8.0"}
+    {:cucumber, "~> 0.9", only: [:dev, :test]}
   ]
 end
 ```
@@ -50,7 +50,7 @@ end
 
 ### 2. Create a Feature File
 
-Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension.
+Feature files use the Gherkin syntax and should be placed in `test/features/` with a `.feature` extension (or `.feature.md` for [Markdown with Gherkin](feature_files.md)).
 
 ```gherkin
 # test/features/user_authentication.feature

@@ -5,19 +5,26 @@
 
 A behavior-driven development (BDD) testing framework for Elixir that enables writing executable specifications in natural language. Cucumber for Elixir bridges the gap between technical and non-technical stakeholders by allowing tests to be written in plain language while being executed as code.
 
+Cucumber for Elixir is **CCK compliant**: the official [Cucumber Compatibility Kit](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the [Cucumber Messages](https://github.com/cucumber/messages) we emit against the reference implementation's output sample by sample.
+
 ## Features
 
 - **Auto-discovery**: Automatically finds and runs feature files and step definitions
-- **Gherkin Support**: Write tests in familiar Given/When/Then format
+- **Gherkin Support**: Write tests in familiar Given/When/Then format, including `Rule:` groupings with their own backgrounds and tags
 - **Markdown Feature Files**: Write features as Markdown documents (`.feature.md`) with prose alongside the executable Gherkin
-- **Parameter Typing**: Define step patterns with typed parameters (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`), optional parameters (`{int?}`), optional text (`(s)`), and alternation (`a/b`)
+- **Parameter Typing**: Define step patterns with typed parameters (`{string}`, `{int}`, `{float}`, `{word}`, `{atom}`), optional parameters (`{int?}`), optional text (`(s)`), alternation (`a/b`), and your own custom parameter types
+- **Regex Steps**: Match steps with regular expressions when a cucumber expression won't cut it
 - **Data Tables**: Pass structured data to your steps
-- **DocStrings**: Include multi-line text blocks in your steps
+- **DocStrings**: Include multi-line text blocks in your steps, with optional media types
 - **Background Steps**: Define common setup steps for all scenarios
 - **Scenario Outlines**: Run the same scenario with different data using Examples tables
 - **Tag Filtering**: Run subsets of scenarios using tags
 - **Async Test Execution**: Run feature tests concurrently with the `@async` tag
-- **Hooks**: Before/After scenario hooks with tag-based filtering
+- **Hooks**: Run-level (`before_all`/`after_all`), scenario, and step hooks with tag-based filtering and optional names
+- **Pending & Skipped Steps**: Halt a scenario as pending (fails) or skipped (doesn't) from any step or before-hook
+- **Retry**: Re-run flaky scenarios via `config :cucumber, retry: n` or `@retry-n` tags
+- **Attachments**: Attach screenshots, logs, and payloads to steps with `Cucumber.attach/4`
+- **Cucumber Messages**: Emit the standard NDJSON message stream for cross-tool reporting
 - **Context Passing**: Share state between steps with a simple context map
 - **Enhanced Error Reporting**: Detailed error messages with clickable file:line references, step execution history, and formatted HTML output
 - **ExUnit Integration**: Seamlessly integrates with Elixir's built-in test framework
@@ -29,7 +36,7 @@ Add `cucumber` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:cucumber, "~> 0.8.0"}
+    {:cucumber, "~> 0.9", only: [:dev, :test]}
   ]
 end
 ```
@@ -196,7 +203,7 @@ Note: Database tests can safely run async when using Ecto's SQL sandbox in share
 
 ## Hooks
 
-Cucumber supports hooks that run before and after scenarios. All hooks execute in ExUnit's setup block, **before** background steps:
+Cucumber supports hooks that run before and after scenarios (plus run-level `before_all`/`after_all` and per-step hooks — see the [Hooks guide](https://hexdocs.pm/cucumber/hooks.html)). Before-scenario hooks run inside the test process, **before** background steps:
 
 ```elixir
 # test/features/support/database_hooks.exs
@@ -243,10 +250,10 @@ Feature: User Management
 ```
 
 Execution order:
-1. All matching hooks run in ExUnit setup (global + feature tags + scenario tags)
+1. All matching before hooks run (global + feature tags + scenario tags), in definition order
 2. Background steps execute
 3. Scenario steps execute
-4. After hooks run via `on_exit`
+4. After hooks run in reverse definition order — in the test process, on pass and on fail
 
 ## Documentation
 
@@ -255,7 +262,8 @@ For comprehensive documentation and guides, please visit [HexDocs](https://hexdo
 - [Getting Started](https://hexdocs.pm/cucumber/getting_started.html)
 - [Feature Files](https://hexdocs.pm/cucumber/feature_files.html)
 - [Step Definitions](https://hexdocs.pm/cucumber/step_definitions.html)
-- [Hooks](https://hexdocs.pm/cucumber/hooks.html) - Before/After scenario hooks
+- [Hooks](https://hexdocs.pm/cucumber/hooks.html) - Run-level, scenario, and step hooks
+- [Attachments](https://hexdocs.pm/cucumber/attachments.html)
 - [Error Handling](https://hexdocs.pm/cucumber/error_handling.html)
 - [Best Practices](https://hexdocs.pm/cucumber/best_practices.html)
 - [Architecture](https://hexdocs.pm/cucumber/architecture.html)
