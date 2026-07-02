@@ -111,10 +111,12 @@ defmodule Gherkin.NimbleParser do
   # ============================================================
 
   # --- Tags ---
-  # Single tag: @tag_name
+  # Single tag: @tag_name, line-wrapped so each tag carries its own source
+  # line (for Cucumber Messages tag locations)
   tag =
     ignore(string("@"))
-    |> utf8_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-], min: 1)
+    |> line(utf8_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?-], min: 1))
+    |> reduce({__MODULE__, :build_tag, []})
     |> label("tag name")
 
   # Tag line: @tag1 @tag2 @tag3
@@ -132,7 +134,7 @@ defmodule Gherkin.NimbleParser do
   # Multiple tag lines (before features, scenarios, examples).
   # Blank and comment lines may be interspersed (e.g. between two @tag lines,
   # or between the last @tag and the following keyword). flatten_tags filters
-  # to binaries so skippable_line's empty output is harmless.
+  # to {name, line} tuples so skippable_line's empty output is harmless.
   tags =
     repeat(choice([tag_line, skippable_line]))
     |> reduce({__MODULE__, :flatten_tags, []})
@@ -180,7 +182,9 @@ defmodule Gherkin.NimbleParser do
       |> ignore(newline)
 
     # The opening delimiter is line-wrapped so the docstring's source
-    # line is captured (for Cucumber Messages locations)
+    # line is captured (for Cucumber Messages locations). The delimiter
+    # itself is threaded through as a reduce argument — it is part of the
+    # gherkinDocument docString node.
     optional_ws
     |> line(
       ignore(string(delimiter))
@@ -191,11 +195,11 @@ defmodule Gherkin.NimbleParser do
     |> concat(optional_ws)
     |> ignore(string(delimiter))
     |> concat(eol)
+    |> reduce({__MODULE__, :build_docstring, [delimiter]})
   end
 
   docstring =
     choice([docstring_for.(~s(""")), docstring_for.("```")])
-    |> reduce({__MODULE__, :build_docstring, []})
     |> unwrap_and_tag(:docstring)
     |> label("docstring")
 
@@ -470,14 +474,14 @@ defmodule Gherkin.NimbleParser do
 
     case parse_feature(normalized) do
       {:ok, [feature], "", _context, _line, _offset} ->
-        feature
+        put_comments(feature, normalized)
 
       {:ok, [feature], rest, _context, {line, col}, _offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
         if String.trim(rest) == "" do
-          feature
+          put_comments(feature, normalized)
         else
           raise Gherkin.ParseError,
             message: "Unexpected content; parser stopped before end of file",
@@ -495,17 +499,76 @@ defmodule Gherkin.NimbleParser do
     end
   end
 
+  # Comment lines are content-less to the grammar (skipped like blank
+  # lines), but the gherkinDocument message collects them. A scan over the
+  # source finds them: any line whose first non-blank character is `#`,
+  # except inside docstrings, where `#` is literal content. Lines here are
+  # 0-based, matching the parser's line convention.
+  defp put_comments(feature, source) do
+    lines = String.split(source, ~r/\r?\n/)
+    docstring_lines = docstring_line_ranges(feature, lines)
+
+    comments =
+      lines
+      |> Enum.with_index()
+      |> Enum.filter(fn {text, index} ->
+        String.starts_with?(String.trim_leading(text), "#") and
+          not MapSet.member?(docstring_lines, index)
+      end)
+      |> Enum.map(fn {text, index} -> {index, String.trim_trailing(text)} end)
+
+    %{feature | comments: comments}
+  end
+
+  defp docstring_line_ranges(feature, lines) do
+    feature
+    |> all_steps()
+    |> Enum.filter(& &1.docstring_line)
+    |> Enum.flat_map(fn step ->
+      opening = step.docstring_line
+      closing = closing_delimiter_line(lines, opening + 1, step.docstring_delimiter)
+      Enum.to_list(opening..closing)
+    end)
+    |> MapSet.new()
+  end
+
+  # The closing delimiter is the next line consisting of optional
+  # whitespace and the delimiter alone — the same shape the docstring
+  # combinator consumed, so it always exists in a parsed feature.
+  defp closing_delimiter_line(lines, from, delimiter) do
+    Enum.find(from..(length(lines) - 1), from, fn index ->
+      lines |> Enum.at(index, "") |> String.trim() == delimiter
+    end)
+  end
+
+  defp all_steps(feature) do
+    backgrounds =
+      [feature.background | Enum.map(feature.rules, & &1.background)]
+      |> Enum.reject(&is_nil/1)
+
+    scenarios = feature.scenarios ++ Enum.flat_map(feature.rules, & &1.scenarios)
+
+    Enum.flat_map(backgrounds ++ scenarios, & &1.steps)
+  end
+
   # ============================================================
   # BUILD HELPERS (post_traverse callbacks)
   # ============================================================
 
   @doc false
-  # Builds the {content, media_type, line} triple for a docstring from the
-  # parser output: the line-wrapped opening (carrying the tagged media type)
-  # followed by the raw content lines.
-  def build_docstring([{[{:media_type, media_type}], {line, _offset}} | lines]) do
+  # A tag as {name, line} from the line-wrapped tag name.
+  def build_tag([{[name], {line, _offset}}]) do
+    {name, line - 1}
+  end
+
+  @doc false
+  # Builds the {content, media_type, line, delimiter} tuple for a docstring
+  # from the parser output: the line-wrapped opening (carrying the tagged
+  # media type) followed by the raw content lines. The delimiter arrives as
+  # a reduce argument from the per-delimiter combinator.
+  def build_docstring([{[{:media_type, media_type}], {line, _offset}} | lines], delimiter) do
     media_type = if media_type == "", do: nil, else: media_type
-    {join_docstring(lines), media_type, line - 1}
+    {join_docstring(lines), media_type, line - 1, delimiter}
   end
 
   @doc false
@@ -567,11 +630,19 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def flatten_tags(tag_lines) do
-    # tag_lines is a list of lists (each tag_line is wrapped)
-    # Flatten to a single list of tag strings
+    # tag_lines is a list of lists (each tag_line is wrapped).
+    # Flatten to a single list of {name, line} tuples.
     tag_lines
     |> List.flatten()
-    |> Enum.filter(&is_binary/1)
+    |> Enum.filter(&is_tuple/1)
+  end
+
+  # Splits extract_tagged's {name, line} tag tuples into the parallel
+  # `tags` / `tag_lines` struct fields.
+  defp split_tags(args) do
+    args
+    |> extract_tagged(:tags)
+    |> Enum.unzip()
   end
 
   @doc false
@@ -588,8 +659,14 @@ defmodule Gherkin.NimbleParser do
 
   defp add_step_attachment(step, nil), do: step
 
-  defp add_step_attachment(step, {:docstring, {content, media_type, line}}) do
-    %{step | docstring: content, docstring_media_type: media_type, docstring_line: line}
+  defp add_step_attachment(step, {:docstring, {content, media_type, line, delimiter}}) do
+    %{
+      step
+      | docstring: content,
+        docstring_media_type: media_type,
+        docstring_line: line,
+        docstring_delimiter: delimiter
+    }
   end
 
   defp add_step_attachment(step, {:datatable, rows}) do
@@ -623,7 +700,7 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_examples(args) do
-    tags = extract_tagged(args, :tags)
+    {tags, tag_lines} = split_tags(args)
     table = extract_tagged(args, :table)
     {name, line_num} = extract_examples_name(args)
 
@@ -634,6 +711,7 @@ defmodule Gherkin.NimbleParser do
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
+      tag_lines: tag_lines,
       table_header: header,
       table_header_line: header_line,
       table_body: body,
@@ -688,7 +766,7 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_scenario(args) do
-    tags = extract_tagged(args, :tags)
+    {tags, tag_lines} = split_tags(args)
     steps = extract_tagged(args, :steps)
     {name, line_num} = extract_scenario_name(args)
 
@@ -697,6 +775,7 @@ defmodule Gherkin.NimbleParser do
       description: extract_tagged_single(args, :description) || "",
       steps: steps,
       tags: tags,
+      tag_lines: tag_lines,
       line: if(line_num, do: line_num - 1, else: nil),
       keyword: extract_line_keyword(args, "Scenario")
     }
@@ -704,7 +783,7 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_scenario_outline(args) do
-    tags = extract_tagged(args, :tags)
+    {tags, tag_lines} = split_tags(args)
     steps = extract_tagged(args, :steps)
     examples = extract_tagged(args, :examples)
     {name, line_num} = extract_scenario_name(args)
@@ -714,6 +793,7 @@ defmodule Gherkin.NimbleParser do
       description: extract_tagged_single(args, :description) || "",
       steps: steps,
       tags: tags,
+      tag_lines: tag_lines,
       examples: examples,
       line: if(line_num, do: line_num - 1, else: nil),
       keyword: extract_line_keyword(args, "Scenario Outline")
@@ -722,7 +802,7 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_rule(args) do
-    tags = extract_tagged(args, :tags)
+    {tags, tag_lines} = split_tags(args)
     scenarios = extract_tagged(args, :scenarios)
     background = extract_tagged_single(args, :background)
     {name, line_num} = extract_rule_name(args)
@@ -731,6 +811,7 @@ defmodule Gherkin.NimbleParser do
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
+      tag_lines: tag_lines,
       background: background,
       scenarios: scenarios,
       line: if(line_num, do: line_num - 1, else: nil)
@@ -739,7 +820,7 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_feature(args) do
-    tags = extract_tagged(args, :tags)
+    {tags, tag_lines} = split_tags(args)
     background = extract_tagged_single(args, :background)
     scenarios = extract_tagged(args, :scenarios)
     rules = extract_tagged(args, :rules)
@@ -754,6 +835,7 @@ defmodule Gherkin.NimbleParser do
       name: name,
       description: extract_tagged_single(args, :description) || "",
       tags: tags,
+      tag_lines: tag_lines,
       background: background,
       scenarios: scenarios,
       rules: rules,

@@ -289,11 +289,27 @@ defmodule Cucumber.Runtime do
   end
 
   defp with_after_hooks(exec, context, fun) do
-    fun.()
-  after
-    # Unexecuted pickle steps get their SKIPPED events now, so they precede
-    # the after-hook events in the message stream (reference ordering)
-    Emitter.skip_unexecuted_steps(exec.msg)
+    result =
+      try do
+        {:ok, fun.()}
+      catch
+        kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+      end
+
+    # Unexecuted pickle steps get their skip events now, so they precede
+    # the after-hook events in the message stream (reference ordering).
+    # How the scenario stopped decides their status (CCK failedish
+    # semantics): after a deliberate skip — the only non-raising early
+    # stop — everything is SKIPPED; after a failed-ish stop (failure,
+    # pending, undefined, ambiguous), unmatched steps keep their
+    # UNDEFINED/AMBIGUOUS status.
+    outcome =
+      case result do
+        {:ok, _context} -> :skipped
+        {:raised, _kind, _reason, _stacktrace} -> :failedish
+      end
+
+    Emitter.skip_unexecuted_steps(exec.msg, outcome)
 
     Cucumber.Hooks.run_after_hooks(
       exec.hooks,
@@ -301,6 +317,11 @@ defmodule Cucumber.Runtime do
       exec.tags,
       Emitter.hook_around(exec.msg, :after)
     )
+
+    case result do
+      {:ok, context} -> context
+      {:raised, kind, reason, stacktrace} -> :erlang.raise(kind, reason, stacktrace)
+    end
   end
 
   # A skipped scenario is not a failure: print a one-line notice and let the

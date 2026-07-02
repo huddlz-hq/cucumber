@@ -166,4 +166,21 @@ defmodule Cucumber.HooksTest do
       assert scenario2.hook_count == 3
     end
   end
+
+  describe "collect_hooks/1" do
+    test "loads modules that are compiled into the application but not yet loaded" do
+      # Hook modules under test/support (or any compiled application) are
+      # loaded lazily; collect_hooks must not silently drop a module the
+      # code server hasn't loaded yet. Cucumber.ReloadableHooks exists only
+      # for this test — unload it to reproduce the pre-load state.
+      {:module, module} = Code.ensure_loaded(Cucumber.ReloadableHooks)
+      :code.purge(module)
+      :code.delete(module)
+      :code.purge(module)
+      refute :erlang.module_loaded(module)
+
+      assert [{:before_scenario, nil, nil, {^module, _fun}}] =
+               Cucumber.Hooks.collect_hooks([module])
+    end
+  end
 end

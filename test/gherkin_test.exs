@@ -695,4 +695,91 @@ defmodule Gherkin.ParserTest do
       assert examples.table_body == [["one"]]
     end
   end
+
+  describe "parse/1 source metadata for Cucumber Messages" do
+    test "each tag records its own source line, parallel to tags" do
+      gherkin = """
+      @feature-tag
+      Feature: Tagged
+
+        @one
+        @two @three
+        Scenario: s
+          Given a step
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.tags == ["feature-tag"]
+      assert result.tag_lines == [0]
+
+      [scenario] = result.scenarios
+      assert scenario.tags == ["one", "two", "three"]
+      assert scenario.tag_lines == [3, 4, 4]
+    end
+
+    test "docstrings record the delimiter style used" do
+      gherkin = """
+      Feature: Docstrings
+
+        Scenario: standard
+          Given a doc string:
+            \"\"\"
+            content
+            \"\"\"
+
+        Scenario: backticks
+          Given a doc string:
+            ```
+            content
+            ```
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      [standard, backticks] = result.scenarios
+      assert hd(standard.steps).docstring_delimiter == ~s(""")
+      assert hd(backticks.steps).docstring_delimiter == "```"
+    end
+
+    test "comments are collected with their lines and raw text" do
+      gherkin = """
+      # top note
+      Feature: Commented
+
+        # scenario note
+        Scenario: s
+          Given a step
+        # trailing note
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.comments == [
+               {0, "# top note"},
+               {3, "  # scenario note"},
+               {6, "  # trailing note"}
+             ]
+    end
+
+    test "a # line inside a docstring is content, not a comment" do
+      gherkin = """
+      Feature: Docstring hash
+
+        Scenario: s
+          Given a doc string:
+            \"\"\"
+            # this is content
+            \"\"\"
+        # this is a comment
+      """
+
+      result = Gherkin.Parser.parse(gherkin)
+
+      assert result.comments == [{7, "  # this is a comment"}]
+
+      [scenario] = result.scenarios
+      assert hd(scenario.steps).docstring == "# this is content"
+    end
+  end
 end

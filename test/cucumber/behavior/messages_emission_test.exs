@@ -87,6 +87,14 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     end
   end
 
+  defmodule FailingAfterAllHook do
+    use Cucumber.Hooks
+
+    after_all _context do
+      raise "cleanup exploded"
+    end
+  end
+
   defmodule RunHooks do
     use Cucumber.Hooks
 
@@ -362,6 +370,124 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
 
     [run_finished] = payloads(run.messages, "testRunFinished")
     assert run_finished["success"] == true
+  end
+
+  test "unexecuted unmatched steps keep UNDEFINED/AMBIGUOUS after a failed-ish stop, but not after a skip" do
+    # CCK failedish-combinations semantics: a step that can never match
+    # stays UNDEFINED/AMBIGUOUS when the scenario stopped for a failed-ish
+    # reason (failure, pending, undefined, ambiguous)...
+    run =
+      run_messages(
+        """
+        Feature: failedish
+          Scenario: failure first
+            Given a failing step
+            And a step nobody defined
+            And an ambiguous thing
+        """,
+        steps: [Steps, AmbiguousSteps]
+      )
+
+    assert finished_steps(run.messages) == [
+             {"a failing step", "FAILED"},
+             {"a step nobody defined", "UNDEFINED"},
+             {"an ambiguous thing", "AMBIGUOUS"}
+           ]
+
+    # ...but after a deliberate skip, nothing that follows runs *by
+    # design*, so everything — matched or not — is SKIPPED.
+    run =
+      run_messages(
+        """
+        Feature: failedish
+          Scenario: skip first
+            Given a skipping step
+            And a step nobody defined
+        """,
+        steps: [Steps]
+      )
+
+    assert finished_steps(run.messages) == [
+             {"a skipping step", "SKIPPED"},
+             {"a step nobody defined", "SKIPPED"}
+           ]
+  end
+
+  test "failed-ish stops that bypass the runner's skip pass still report unmatched steps UNDEFINED" do
+    # A raising background step and a failing before-scenario hook both
+    # abort before the runner's skip_unexecuted_steps call; their cases
+    # close through the coordinator's close_test_case synthesis, which
+    # must apply the same match-status overrides.
+    run =
+      run_messages(
+        """
+        Feature: failedish via background
+          Background:
+            Given a failing step
+
+          Scenario: never reaches its steps
+            Given a step nobody defined
+        """,
+        steps: [Steps]
+      )
+
+    assert finished_steps(run.messages) == [
+             {"a failing step", "FAILED"},
+             {"a step nobody defined", "UNDEFINED"}
+           ]
+
+    run =
+      run_messages(
+        """
+        Feature: failedish via before hook
+          Scenario: never starts
+            Given a step nobody defined
+        """,
+        steps: [Steps],
+        hooks: [FailingBeforeHook]
+      )
+
+    assert {:hook, "FAILED"} in finished_steps(run.messages)
+    assert {"a step nobody defined", "UNDEFINED"} in finished_steps(run.messages)
+  end
+
+  test "a failing after_all hook fails the run in testRunFinished even when every scenario passed" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "cucumber_messages_#{System.unique_integer([:positive])}.ndjson"
+      )
+
+    on_exit(fn -> File.rm(path) end)
+
+    # The after_all error surfaces as a raise when the nested run
+    # finishes; the stream is flushed first.
+    assert_raise RuntimeError, "cleanup exploded", fn ->
+      run_features(
+        [
+          """
+          Feature: green
+            Scenario: passes
+              Given a passing step
+          """
+        ],
+        steps: [Steps],
+        hooks: [FailingAfterAllHook],
+        messages: path
+      )
+    end
+
+    messages =
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+
+    [hook_finished] = payloads(messages, "testRunHookFinished")
+    assert hook_finished["result"]["status"] == "FAILED"
+
+    [run_finished] = payloads(messages, "testRunFinished")
+    assert run_finished["success"] == false
   end
 
   test "undefined and ambiguous steps get their statuses and definition ids" do

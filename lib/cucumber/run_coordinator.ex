@@ -172,14 +172,19 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Synthesizes started/finished(SKIPPED) pairs for the given planned step
-  # ids of an open test case that never ran. The runner calls this before
-  # the after-scenario hooks, so skipped pickle steps precede the after-hook
-  # events in the stream.
-  @spec skip_unfinished_steps(String.t(), [String.t()]) :: :ok
-  def skip_unfinished_steps(test_case_started_id, step_ids) do
+  # Synthesizes started/finished pairs for the given planned step ids of an
+  # open test case that never ran. The runner calls this before the
+  # after-scenario hooks, so skipped pickle steps precede the after-hook
+  # events in the stream. After a `:failedish` stop, steps that match no
+  # definition (or several) report UNDEFINED/AMBIGUOUS; after a `:skipped`
+  # stop everything is SKIPPED.
+  @spec skip_unfinished_steps(String.t(), [String.t()], :skipped | :failedish) :: :ok
+  def skip_unfinished_steps(test_case_started_id, step_ids, outcome) do
     if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, {:skip_unfinished_steps, test_case_started_id, step_ids})
+      GenServer.call(
+        __MODULE__,
+        {:skip_unfinished_steps, test_case_started_id, step_ids, outcome}
+      )
     end
 
     :ok
@@ -346,7 +351,8 @@ defmodule Cucumber.RunCoordinator do
       hook_ids: config.hook_ids,
       run_started_id: nil,
       cases: %{},
-      open_cases: %{}
+      open_cases: %{},
+      run_hook_failed: false
     }
 
     {:reply, :ok, %{state | messages: messages}}
@@ -398,12 +404,12 @@ defmodule Cucumber.RunCoordinator do
     {:reply, :ok, close_test_case(state, case_started_id, skip_status, will_be_retried)}
   end
 
-  def handle_call({:skip_unfinished_steps, _id, _step_ids}, _from, %{messages: nil} = state) do
+  def handle_call({:skip_unfinished_steps, _id, _ids, _outcome}, _from, %{messages: nil} = state) do
     {:reply, :ok, state}
   end
 
-  def handle_call({:skip_unfinished_steps, case_started_id, step_ids}, _from, state) do
-    {:reply, :ok, skip_unfinished(state, case_started_id, step_ids)}
+  def handle_call({:skip_unfinished_steps, case_started_id, step_ids, outcome}, _from, state) do
+    {:reply, :ok, skip_unfinished(state, case_started_id, step_ids, outcome)}
   end
 
   def handle_call({:run_hook_started, ref}, _from, state) do
@@ -427,7 +433,9 @@ defmodule Cucumber.RunCoordinator do
       |> Map.keys()
       |> Enum.reduce(state, &close_test_case(&2, &1, :unknown, false))
 
-    success = Map.get(suite_result, :failures, 0) == 0
+    # A failed BeforeAll/AfterAll hook fails the run even when every test
+    # case passed (the AfterAll error surfaces after ExUnit counted results).
+    success = Map.get(suite_result, :failures, 0) == 0 and not state.messages.run_hook_failed
     finished = Cucumber.Messages.test_run_finished(success, now(), state.messages.run_started_id)
     state = append_envelopes(state, [finished])
 
@@ -534,9 +542,13 @@ defmodule Cucumber.RunCoordinator do
   end
 
   # Tracks which planned test steps of each open test case have started and
-  # finished, so close_test_case/4 can synthesize events for the rest.
+  # finished, so close_test_case/4 can synthesize events for the rest. Each
+  # planned step carries its match-derived status override: a step that
+  # never runs is reported UNDEFINED/AMBIGUOUS when that's *why* it can
+  # never pass, regardless of why the scenario stopped.
   defp track_envelope(state, %{testCase: %{id: id, testSteps: test_steps}}) do
-    put_in(state, [:messages, :cases, id], Enum.map(test_steps, & &1.id))
+    planned = Enum.map(test_steps, &{&1.id, match_status_override(&1)})
+    put_in(state, [:messages, :cases, id], planned)
   end
 
   defp track_envelope(state, %{testCaseStarted: %{id: id, testCaseId: test_case_id}}) do
@@ -565,19 +577,41 @@ defmodule Cucumber.RunCoordinator do
     end
   end
 
-  # Synthesizes skipped events for the given planned step ids that never
-  # ran (same synthesis close_test_case/4 uses, without closing the case).
-  defp skip_unfinished(state, case_started_id, step_ids) do
+  # A pickle step with no matching definition can only ever be UNDEFINED,
+  # and one with several matches AMBIGUOUS — even when it is synthesized
+  # because the scenario stopped earlier. Hook steps have no override.
+  defp match_status_override(%{stepDefinitionIds: []}), do: :undefined
+  defp match_status_override(%{stepDefinitionIds: [_, _ | _]}), do: :ambiguous
+  defp match_status_override(_step), do: nil
+
+  # Synthesizes skip events for the given planned step ids that never ran
+  # (same synthesis close_test_case/4 uses, without closing the case).
+  # Match-status overrides apply only to failed-ish stops: a scenario that
+  # skipped itself reports everything after the skip as SKIPPED, even
+  # steps that could never have matched.
+  defp skip_unfinished(state, case_started_id, step_ids, outcome) do
     case Map.fetch(state.messages.open_cases, case_started_id) do
       :error ->
         state
 
       {:ok, tracking} ->
+        overrides =
+          case outcome do
+            :failedish -> Map.new(Map.get(state.messages.cases, tracking.test_case_id, []))
+            :skipped -> %{}
+          end
+
         Enum.reduce(step_ids, state, fn step_id, state ->
-          synthesize_step_events(state, case_started_id, step_id, tracking, :skipped)
+          status = Map.get(overrides, step_id) || :skipped
+          synthesize_step_events(state, case_started_id, step_id, tracking, status)
         end)
     end
   end
+
+  # Flush-time crash reconciliation keeps its blanket UNKNOWN — a dead test
+  # process says nothing about why steps didn't run.
+  defp close_status(_override, :unknown), do: :unknown
+  defp close_status(override, skip_status), do: override || skip_status
 
   defp close_test_case(state, case_started_id, skip_status, will_be_retried) do
     case Map.fetch(state.messages.open_cases, case_started_id) do
@@ -588,9 +622,16 @@ defmodule Cucumber.RunCoordinator do
       {:ok, tracking} ->
         planned = Map.get(state.messages.cases, tracking.test_case_id, [])
 
+        # Match-status overrides apply here too (see close_status/2):
+        # failed-ish stops that never reach the runner's
+        # skip_unfinished_steps call (a failing before-scenario hook, a
+        # raising background step) close through this path alone.
+        # Deliberate skips are unaffected: their steps were already
+        # synthesized SKIPPED before the case closes.
         state =
-          Enum.reduce(planned, state, fn step_id, state ->
-            synthesize_step_events(state, case_started_id, step_id, tracking, skip_status)
+          Enum.reduce(planned, state, fn {step_id, override}, state ->
+            status = close_status(override, skip_status)
+            synthesize_step_events(state, case_started_id, step_id, tracking, status)
           end)
 
         finished = Cucumber.Messages.test_case_finished(case_started_id, now(), will_be_retried)
@@ -640,7 +681,15 @@ defmodule Cucumber.RunCoordinator do
 
   defp run_hook_finished(state, started_id, status, duration) do
     result = Cucumber.Messages.test_step_result(status, duration)
-    append_envelopes(state, [Cucumber.Messages.test_run_hook_finished(started_id, result, now())])
+
+    state =
+      append_envelopes(state, [
+        Cucumber.Messages.test_run_hook_finished(started_id, result, now())
+      ])
+
+    if status == :failed,
+      do: put_in(state, [:messages, :run_hook_failed], true),
+      else: state
   end
 
   defp write_messages(%{path: path, envelopes: envelopes}) do

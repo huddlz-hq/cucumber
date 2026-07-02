@@ -308,7 +308,10 @@ defmodule Cucumber.Hooks do
   def collect_hooks(modules) do
     modules
     |> Enum.flat_map(fn module ->
-      if function_exported?(module, :__cucumber_hooks__, 0) do
+      # ensure_loaded?: hook modules may be compiled into an application
+      # (e.g. under test/support) rather than loaded via Code.require_file;
+      # function_exported? alone would silently drop them.
+      if Code.ensure_loaded?(module) and function_exported?(module, :__cucumber_hooks__, 0) do
         module.__cucumber_hooks__()
       else
         []
