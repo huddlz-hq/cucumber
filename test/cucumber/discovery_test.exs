@@ -395,10 +395,10 @@ defmodule Cucumber.DiscoveryTest do
   end
 
   describe "discover/1 repeated discovery" do
-    test "returns the same results when files were already loaded" do
-      temp_dir = Path.join(System.tmp_dir(), "rediscover_test_#{:rand.uniform(10_000)}")
-      step_dir = Path.join(temp_dir, "steps")
-      support_dir = Path.join(temp_dir, "support")
+    @tag :tmp_dir
+    test "returns the same results when files were already loaded", %{tmp_dir: tmp_dir} do
+      step_dir = Path.join(tmp_dir, "steps")
+      support_dir = Path.join(tmp_dir, "support")
       File.mkdir_p!(step_dir)
       File.mkdir_p!(support_dir)
 
@@ -430,25 +430,21 @@ defmodule Cucumber.DiscoveryTest do
         features: []
       ]
 
-      try do
-        first = Discovery.discover(opts)
-        # Code.require_file/1 returns nil for already-loaded files, so a
-        # second pass must serve modules from the cache instead of crashing
-        # or dropping them
-        second = Discovery.discover(opts)
+      first = Discovery.discover(opts)
+      # Code.require_file/1 returns nil for already-loaded files, so a
+      # second pass must serve modules from the cache instead of crashing
+      # or dropping them
+      second = Discovery.discover(opts)
 
-        assert second.step_modules == first.step_modules
-        assert second.step_registry == first.step_registry
-        assert second.hook_modules == first.hook_modules
-        assert Map.has_key?(second.step_registry, {:expression, "a rediscovered step"})
-      after
-        File.rm_rf(temp_dir)
-      end
+      assert second.step_modules == first.step_modules
+      assert second.step_registry == first.step_registry
+      assert second.hook_modules == first.hook_modules
+      assert Map.has_key?(second.step_registry, {:expression, "a rediscovered step"})
     end
 
-    test "serves the cache when a later pass spells the path differently" do
-      temp_dir = Path.join(System.tmp_dir(), "respell_test_#{:rand.uniform(10_000)}")
-      step_dir = Path.join(temp_dir, "steps")
+    @tag :tmp_dir
+    test "serves the cache when a later pass spells the path differently", %{tmp_dir: tmp_dir} do
+      step_dir = Path.join(tmp_dir, "steps")
       File.mkdir_p!(step_dir)
 
       rand_suffix = :rand.uniform(10_000)
@@ -465,24 +461,22 @@ defmodule Cucumber.DiscoveryTest do
 
       base_opts = [support: [], features: []]
 
-      try do
-        first = Discovery.discover([{:steps, [Path.join(step_dir, "*.exs")]} | base_opts])
+      first = Discovery.discover([{:steps, [Path.join(step_dir, "*.exs")]} | base_opts])
 
-        # Code.require_file/1 dedupes on the expanded path, so a different
-        # spelling of the same file must hit the same cache entry
-        respelled_pattern = Path.join([temp_dir, ".", "steps", "*.exs"])
-        second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
+      # Code.require_file/1 dedupes on the expanded path, so a different
+      # spelling of the same file must hit the same cache entry
+      respelled_pattern = Path.join([tmp_dir, ".", "steps", "*.exs"])
+      second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
 
-        assert second.step_modules == first.step_modules
-        assert Map.has_key?(second.step_registry, {:expression, "a respelled step"})
-      after
-        File.rm_rf(temp_dir)
-      end
+      assert second.step_modules == first.step_modules
+      assert Map.has_key?(second.step_registry, {:expression, "a respelled step"})
     end
 
-    test "fails loudly when a file was loaded by someone other than discovery" do
-      temp_dir = Path.join(System.tmp_dir(), "preloaded_test_#{:rand.uniform(10_000)}")
-      step_dir = Path.join(temp_dir, "steps")
+    @tag :tmp_dir
+    test "fails loudly when a file was loaded by someone other than discovery", %{
+      tmp_dir: tmp_dir
+    } do
+      step_dir = Path.join(tmp_dir, "steps")
       File.mkdir_p!(step_dir)
 
       rand_suffix = :rand.uniform(10_000)
@@ -498,20 +492,16 @@ defmodule Cucumber.DiscoveryTest do
       end
       """)
 
-      try do
-        Code.require_file(step_file)
+      Code.require_file(step_file)
 
-        # Discovery can't know which modules the earlier load defined, so it
-        # must not silently produce an empty registry
-        assert_raise RuntimeError, ~r/already loaded before Cucumber discovery/, fn ->
-          Discovery.discover(
-            steps: [Path.join(step_dir, "*.exs")],
-            support: [],
-            features: []
-          )
-        end
-      after
-        File.rm_rf(temp_dir)
+      # Discovery can't know which modules the earlier load defined, so it
+      # must not silently produce an empty registry
+      assert_raise RuntimeError, ~r/already loaded before Cucumber discovery/, fn ->
+        Discovery.discover(
+          steps: [Path.join(step_dir, "*.exs")],
+          support: [],
+          features: []
+        )
       end
     end
   end
