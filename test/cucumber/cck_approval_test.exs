@@ -19,7 +19,6 @@ defmodule Cucumber.CckApprovalTest do
       implementation raises `Cucumber.UndefinedParameterTypeError` at
       discovery, before a run exists (behavior covered in
       `test/cucumber/behavior/parameter_types_test.exs`)
-    * `markdown` — Markdown feature files are not supported (#29)
     * `pending-exception`, `skipped-exception` — pending/skipped are
       return values here (`:pending`/`:skipped`), not throwable
       exceptions; the equivalent behavior is approved via the `pending`
@@ -32,7 +31,7 @@ defmodule Cucumber.CckApprovalTest do
     * `global-hooks-attachments` — attachments from BeforeAll/AfterAll
       hooks (`attachment.testRunHookStartedId`) are not supported
 
-  Per-sample comparison allowances (the `:drop` /
+  Per-sample comparison allowances (the `:drop` / `:drop_keys` /
   `:drop_step_definition_patterns` options below) are documented inline.
   """
 
@@ -44,8 +43,8 @@ defmodule Cucumber.CckApprovalTest do
   # {sample, run options}. Options besides :steps/:hooks/:parameter_types:
   #   :retry - sets `config :cucumber, retry: N` for the run (the CCK runs
   #     these samples with `--retry 2`)
-  #   :drop / :drop_step_definition_patterns - comparison allowances,
-  #     passed through to Cucumber.CckApproval (justify inline!)
+  #   :drop / :drop_keys / :drop_step_definition_patterns - comparison
+  #     allowances, passed through to Cucumber.CckApproval (justify inline!)
   @samples [
     {"minimal", steps: [Definitions.Minimal]},
     {"cdata", steps: [Definitions.Cdata]},
@@ -129,7 +128,13 @@ defmodule Cucumber.CckApprovalTest do
        "multiple-features-1.feature",
        "multiple-features-2.feature",
        "multiple-features-3.feature"
-     ]}
+     ]},
+    # The reference stream's feature description ("| boz | boo |") is an
+    # emergent quirk of the reference tokenizer's error recovery, not MDG
+    # behavior — Gherkin.Markdown deliberately captures no markdown
+    # descriptions (see its moduledoc), so the field is excluded.
+    {"markdown",
+     steps: [Definitions.Markdown], files: ["markdown.feature.md"], drop_keys: ["description"]}
   ]
 
   for {sample, opts} <- @samples do
@@ -181,7 +186,7 @@ defmodule Cucumber.CckApprovalTest do
     CckApproval.assert_equivalent(
       decode(File.read!(path)),
       reference(sample),
-      Keyword.take(opts, [:drop, :drop_step_definition_patterns])
+      Keyword.take(opts, [:drop, :drop_keys, :drop_step_definition_patterns])
     )
   end
 

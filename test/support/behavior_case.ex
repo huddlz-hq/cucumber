@@ -166,7 +166,7 @@ defmodule Cucumber.BehaviorCase do
         file = Enum.at(named_files, index) || unique_feature_path()
 
         source
-        |> Gherkin.Parser.parse()
+        |> Gherkin.Parser.parse(file)
         |> Map.put(:file, file)
         |> Map.put(:source, source)
       end)

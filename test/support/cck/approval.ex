@@ -59,6 +59,9 @@ defmodule Cucumber.CckApproval do
 
     * `:drop` — extra envelope types to drop for a specific sample; each
       use must be justified in the approval test's samples table
+    * `:drop_keys` — extra fields to drop wherever they occur, like the
+      built-in dropped-fields list; each use must be justified in the
+      approval test's samples table
     * `:drop_step_definition_patterns` — drop `stepDefinition.pattern`;
       for samples that rely on duplicate identical step definitions,
       which this implementation rejects at discovery (the equivalent
@@ -133,23 +136,25 @@ defmodule Cucumber.CckApproval do
         do: Map.delete(definition, "pattern"),
         else: definition
 
-    scrub_node(%{envelope | "stepDefinition" => definition})
+    scrub_node(%{envelope | "stepDefinition" => definition}, dropped_keys(opts))
   end
 
-  defp scrub(envelope, _opts), do: scrub_node(envelope)
+  defp scrub(envelope, opts), do: scrub_node(envelope, dropped_keys(opts))
 
-  defp scrub_node(map) when is_map(map) do
+  defp dropped_keys(opts), do: @dropped_keys ++ Keyword.get(opts, :drop_keys, [])
+
+  defp scrub_node(map, drop) when is_map(map) do
     map
-    |> Map.drop(@dropped_keys)
+    |> Map.drop(drop)
     |> Map.new(fn
       {"uri", uri} -> {"uri", Path.basename(uri)}
       {"description", text} -> {"description", squish(text)}
-      {key, value} -> {key, scrub_node(value)}
+      {key, value} -> {key, scrub_node(value, drop)}
     end)
   end
 
-  defp scrub_node(list) when is_list(list), do: Enum.map(list, &scrub_node/1)
-  defp scrub_node(value), do: value
+  defp scrub_node(list, drop) when is_list(list), do: Enum.map(list, &scrub_node(&1, drop))
+  defp scrub_node(value, _drop), do: value
 
   defp squish(text) do
     text

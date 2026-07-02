@@ -10,13 +10,15 @@ defmodule Cucumber.Discovery do
      Each module using `Cucumber.StepDefinition` is registered.
   3. A **step registry** is built from all loaded step modules, mapping patterns to
      their implementing module and metadata. Duplicate patterns raise immediately.
-  4. **Feature files** are parsed (default: `test/features/**/*.feature`) using
-     `Gherkin.Parser` and annotated with their source file path.
+  4. **Feature files** are parsed (default: `test/features/**/*.feature`
+     plus `test/features/**/*.feature.md`) using `Gherkin.Parser` and
+     annotated with their source file path. `.feature.md` files parse as
+     Markdown with Gherkin (see `Gherkin.Markdown`).
 
   All default paths can be overridden via application config or opts passed to `discover/1`.
   """
 
-  @default_features_pattern "test/features/**/*.feature"
+  @default_features_patterns ["test/features/**/*.feature", "test/features/**/*.feature.md"]
   @default_steps_pattern "test/features/step_definitions/**/*.exs"
   @default_support_pattern "test/features/support/**/*.exs"
 
@@ -88,7 +90,7 @@ defmodule Cucumber.Discovery do
     else
       # Use defaults
       case type do
-        :features -> [@default_features_pattern]
+        :features -> @default_features_patterns
         :steps -> [@default_steps_pattern]
         :support -> [@default_support_pattern]
       end
@@ -239,7 +241,7 @@ defmodule Cucumber.Discovery do
 
   defp parse_feature(path) do
     content = File.read!(path)
-    feature = Gherkin.Parser.parse(content)
+    feature = Gherkin.Parser.parse(content, path)
 
     # The raw text is kept for the `source` message (#28) — the parsed AST
     # cannot reproduce it.
