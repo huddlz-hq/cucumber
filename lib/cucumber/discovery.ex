@@ -111,11 +111,23 @@ defmodule Cucumber.Discovery do
     {hook_modules, parameter_type_modules}
   end
 
-  defp load_support_modules(path) do
-    # Code.require_file returns nil if already loaded
+  defp load_support_modules(path), do: loaded_modules(path)
+
+  # Code.require_file/1 returns nil when the file was already loaded in this
+  # VM, so cache each file's modules on first load; otherwise a second
+  # discovery pass would crash on step files and silently drop hooks and
+  # parameter types.
+  defp loaded_modules(path) do
+    cache_key = {__MODULE__, :modules, path}
+
     case Code.require_file(path) do
-      nil -> []
-      modules -> Enum.map(modules, fn {module, _} -> module end)
+      nil ->
+        :persistent_term.get(cache_key, [])
+
+      modules ->
+        module_names = Enum.map(modules, fn {module, _} -> module end)
+        :persistent_term.put(cache_key, module_names)
+        module_names
     end
   end
 
@@ -148,15 +160,9 @@ defmodule Cucumber.Discovery do
   end
 
   defp load_step_module(path) do
-    # Load the file and get the module
-    modules = Code.require_file(path)
-
-    # Find the step definition module(s)
-    modules
-    |> Enum.map(fn {module, _} -> module end)
-    |> Enum.find(fn module ->
-      function_exported?(module, :__cucumber_steps__, 0)
-    end)
+    path
+    |> loaded_modules()
+    |> Enum.find(&function_exported?(&1, :__cucumber_steps__, 0))
   end
 
   defp build_step_registry(modules, parameter_types) do

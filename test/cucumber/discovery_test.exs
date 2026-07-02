@@ -394,6 +394,59 @@ defmodule Cucumber.DiscoveryTest do
     end
   end
 
+  describe "discover/1 repeated discovery" do
+    test "returns the same results when files were already loaded" do
+      temp_dir = Path.join(System.tmp_dir(), "rediscover_test_#{:rand.uniform(10_000)}")
+      step_dir = Path.join(temp_dir, "steps")
+      support_dir = Path.join(temp_dir, "support")
+      File.mkdir_p!(step_dir)
+      File.mkdir_p!(support_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+
+      File.write!(Path.join(step_dir, "steps.exs"), """
+      defmodule RediscoverSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a rediscovered step", context do
+          context
+        end
+      end
+      """)
+
+      File.write!(Path.join(support_dir, "hooks.exs"), """
+      defmodule RediscoverHooks#{rand_suffix} do
+        use Cucumber.Hooks
+
+        before_scenario context do
+          {:ok, context}
+        end
+      end
+      """)
+
+      opts = [
+        steps: [Path.join(step_dir, "*.exs")],
+        support: [Path.join(support_dir, "*.exs")],
+        features: []
+      ]
+
+      try do
+        first = Discovery.discover(opts)
+        # Code.require_file/1 returns nil for already-loaded files, so a
+        # second pass must serve modules from the cache instead of crashing
+        # or dropping them
+        second = Discovery.discover(opts)
+
+        assert second.step_modules == first.step_modules
+        assert second.step_registry == first.step_registry
+        assert second.hook_modules == first.hook_modules
+        assert Map.has_key?(second.step_registry, {:expression, "a rediscovered step"})
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
+  end
+
   describe "discover/1 with empty patterns" do
     test "returns empty results for non-matching patterns" do
       result =
