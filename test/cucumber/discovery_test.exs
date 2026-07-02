@@ -394,6 +394,122 @@ defmodule Cucumber.DiscoveryTest do
     end
   end
 
+  describe "discover/1 repeated discovery" do
+    @tag :tmp_dir
+    test "returns the same results when files were already loaded", %{tmp_dir: tmp_dir} do
+      step_dir = Path.join(tmp_dir, "steps")
+      support_dir = Path.join(tmp_dir, "support")
+      File.mkdir_p!(step_dir)
+      File.mkdir_p!(support_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+
+      File.write!(Path.join(step_dir, "steps.exs"), """
+      defmodule RediscoverSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a rediscovered step", context do
+          context
+        end
+      end
+      """)
+
+      File.write!(Path.join(support_dir, "hooks.exs"), """
+      defmodule RediscoverHooks#{rand_suffix} do
+        use Cucumber.Hooks
+
+        before_scenario context do
+          {:ok, context}
+        end
+      end
+      """)
+
+      opts = [
+        steps: [Path.join(step_dir, "*.exs")],
+        support: [Path.join(support_dir, "*.exs")],
+        features: []
+      ]
+
+      first = Discovery.discover(opts)
+      # Code.require_file/1 returns nil for already-loaded files, so a
+      # second pass must serve modules from the cache instead of crashing
+      # or dropping them
+      second = Discovery.discover(opts)
+
+      assert second.step_modules == first.step_modules
+      assert second.step_registry == first.step_registry
+      assert second.hook_modules == first.hook_modules
+      assert Map.has_key?(second.step_registry, {:expression, "a rediscovered step"})
+    end
+
+    @tag :tmp_dir
+    test "serves the cache when a later pass spells the path differently", %{tmp_dir: tmp_dir} do
+      step_dir = Path.join(tmp_dir, "steps")
+      File.mkdir_p!(step_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+
+      File.write!(Path.join(step_dir, "steps.exs"), """
+      defmodule RespellSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a respelled step", context do
+          context
+        end
+      end
+      """)
+
+      base_opts = [support: [], features: []]
+
+      first = Discovery.discover([{:steps, [Path.join(step_dir, "*.exs")]} | base_opts])
+
+      # Code.require_file/1 dedupes on the expanded path, so a different
+      # spelling of the same file must hit the same cache entry. Relative
+      # vs. absolute survives Path.wildcard (which normalizes "/./" away);
+      # ExUnit's tmp_dir lives under the project root, so a relative
+      # spelling exists
+      respelled_pattern = Path.join(Path.relative_to_cwd(step_dir), "*.exs")
+      refute Path.type(respelled_pattern) == :absolute
+      second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
+
+      assert second.step_modules == first.step_modules
+      assert Map.has_key?(second.step_registry, {:expression, "a respelled step"})
+    end
+
+    @tag :tmp_dir
+    test "fails loudly when a file was loaded by someone other than discovery", %{
+      tmp_dir: tmp_dir
+    } do
+      step_dir = Path.join(tmp_dir, "steps")
+      File.mkdir_p!(step_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+      step_file = Path.join(step_dir, "steps.exs")
+
+      File.write!(step_file, """
+      defmodule PreloadedSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a preloaded step", context do
+          context
+        end
+      end
+      """)
+
+      Code.require_file(step_file)
+
+      # Discovery can't know which modules the earlier load defined, so it
+      # must not silently produce an empty registry
+      assert_raise RuntimeError, ~r/already loaded before Cucumber discovery/, fn ->
+        Discovery.discover(
+          steps: [Path.join(step_dir, "*.exs")],
+          support: [],
+          features: []
+        )
+      end
+    end
+  end
+
   describe "discover/1 with empty patterns" do
     test "returns empty results for non-matching patterns" do
       result =
