@@ -127,6 +127,35 @@ defmodule Cucumber.Behavior.MarkdownTest do
     assert Atom.to_string(result.module) == "Test.Fixtures.Generated.CheckoutFlowTest"
   end
 
+  test "a .feature and a .feature.md with the same basename fail loudly, not silently" do
+    # Both would compile to the same test module; redefinition would drop
+    # the first file's scenarios from the run.
+    plain = """
+    Feature: Plain checkout
+    Scenario: from plain
+      Given the register is empty
+    """
+
+    markdown = """
+    # Feature: Markdown checkout
+    ## Scenario: from markdown
+    * Given the register is empty
+    """
+
+    message =
+      ~r/checkout\.feature and .*checkout\.feature\.md would generate the same test module/
+
+    assert_raise ArgumentError, message, fn ->
+      run_features([plain, markdown],
+        steps: [Steps],
+        files: [
+          "test/fixtures/generated/collision/checkout.feature",
+          "test/fixtures/generated/collision/checkout.feature.md"
+        ]
+      )
+    end
+  end
+
   test "the messages stream carries the Markdown media type and .feature.md uri" do
     file = unique_markdown_path()
 
