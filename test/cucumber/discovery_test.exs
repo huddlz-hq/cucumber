@@ -464,8 +464,12 @@ defmodule Cucumber.DiscoveryTest do
       first = Discovery.discover([{:steps, [Path.join(step_dir, "*.exs")]} | base_opts])
 
       # Code.require_file/1 dedupes on the expanded path, so a different
-      # spelling of the same file must hit the same cache entry
-      respelled_pattern = Path.join([tmp_dir, ".", "steps", "*.exs"])
+      # spelling of the same file must hit the same cache entry. Relative
+      # vs. absolute survives Path.wildcard (which normalizes "/./" away);
+      # ExUnit's tmp_dir lives under the project root, so a relative
+      # spelling exists
+      respelled_pattern = Path.join(Path.relative_to_cwd(step_dir), "*.exs")
+      refute Path.type(respelled_pattern) == :absolute
       second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
 
       assert second.step_modules == first.step_modules
