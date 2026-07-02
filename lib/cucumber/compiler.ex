@@ -216,9 +216,12 @@ defmodule Cucumber.Compiler do
   end
 
   defp generate_module_name(file_path) do
-    # Convert path like "test/features/authentication.feature"
-    # to Test.Features.AuthenticationTest
+    # Convert a path like "test/features/authentication.feature" (or
+    # "authentication.feature.md") to Test.Features.AuthenticationTest.
+    # Path.rootname/1 only strips the final extension, so reduce the
+    # Markdown double extension to a single one first.
     file_path
+    |> String.replace_suffix(".feature.md", ".feature")
     |> Path.rootname()
     |> Path.split()
     |> Enum.map_join(".", &Macro.camelize/1)

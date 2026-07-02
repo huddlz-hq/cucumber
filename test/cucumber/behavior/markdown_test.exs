@@ -112,6 +112,21 @@ defmodule Cucumber.Behavior.MarkdownTest do
     assert result.output =~ "#{file}:4"
   end
 
+  test "generated module names strip the .feature.md extension" do
+    result =
+      run_markdown(
+        """
+        # Feature: Module naming
+        ## Scenario: s
+        * Given the register is empty
+        """,
+        file: "test/fixtures/generated/checkout_flow.feature.md"
+      )
+
+    assert result.failures == 0
+    assert Atom.to_string(result.module) == "Test.Fixtures.Generated.CheckoutFlowTest"
+  end
+
   test "the messages stream carries the Markdown media type and .feature.md uri" do
     file = unique_markdown_path()
 

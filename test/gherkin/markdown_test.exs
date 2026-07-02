@@ -168,6 +168,18 @@ defmodule Gherkin.MarkdownTest do
       assert feature.name == ""
       assert [%{name: "s"}] = feature.scenarios
     end
+
+    test "a non-Feature Gherkin heading as the first line also falls back to the whole line" do
+      feature =
+        Markdown.parse("""
+        ## Scenario: taken as the feature name
+        ## Scenario: a real scenario
+        * Given a step
+        """)
+
+      assert feature.name == "## Scenario: taken as the feature name"
+      assert [%{name: "a real scenario", steps: [_]}] = feature.scenarios
+    end
   end
 
   describe "steps" do
@@ -207,6 +219,20 @@ defmodule Gherkin.MarkdownTest do
 
       [scenario] = feature.scenarios
       assert [%{text: "a real step"}] = scenario.steps
+    end
+
+    test "a step containing an inline tag span is still a step" do
+      feature =
+        Markdown.parse("""
+        # Feature: Inline spans
+        ## Scenario: s
+        * Given I run the `@daily` job
+        * Then done
+        """)
+
+      [scenario] = feature.scenarios
+      assert Enum.map(scenario.steps, & &1.text) == ["I run the `@daily` job", "done"]
+      assert scenario.tags == []
     end
 
     test "a step before any Scenario or Background raises" do
@@ -443,6 +469,19 @@ defmodule Gherkin.MarkdownTest do
         """)
       end
     end
+
+    test "a tag before a Background raises instead of leaking onto the next scenario" do
+      assert_raise Gherkin.ParseError, ~r/line 2.*no tags before a Background/s, fn ->
+        Markdown.parse("""
+        # Feature: Tagged background
+        `@wip`
+        ## Background:
+        * Given setup
+        ## Scenario: s
+        * Given a step
+        """)
+      end
+    end
   end
 
   describe "tags" do
@@ -474,6 +513,19 @@ defmodule Gherkin.MarkdownTest do
 
       [rule] = feature.rules
       assert rule.tags == ["ruled"]
+    end
+
+    test "prose that merely mentions a tag span is prose, not a tag line" do
+      feature =
+        Markdown.parse("""
+        # Feature: Prose mentions
+        Use `@wip` to mark work in progress.
+        ## Scenario: s
+        * Given a step
+        """)
+
+      assert feature.tags == []
+      assert [%{tags: [], steps: [_]}] = feature.scenarios
     end
   end
 

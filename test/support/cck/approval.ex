@@ -59,9 +59,9 @@ defmodule Cucumber.CckApproval do
 
     * `:drop` — extra envelope types to drop for a specific sample; each
       use must be justified in the approval test's samples table
-    * `:drop_keys` — extra fields to drop wherever they occur, like the
-      built-in dropped-fields list; each use must be justified in the
-      approval test's samples table
+    * `:drop_feature_description` — drop `gherkinDocument.feature.description`
+      (that field only; descriptions elsewhere stay compared); for the
+      `markdown` sample, whose reference description is a tokenizer quirk
     * `:drop_step_definition_patterns` — drop `stepDefinition.pattern`;
       for samples that rely on duplicate identical step definitions,
       which this implementation rejects at discovery (the equivalent
@@ -136,25 +136,32 @@ defmodule Cucumber.CckApproval do
         do: Map.delete(definition, "pattern"),
         else: definition
 
-    scrub_node(%{envelope | "stepDefinition" => definition}, dropped_keys(opts))
+    scrub_node(%{envelope | "stepDefinition" => definition})
   end
 
-  defp scrub(envelope, opts), do: scrub_node(envelope, dropped_keys(opts))
+  defp scrub(%{"gherkinDocument" => %{"feature" => feature} = document} = envelope, opts) do
+    feature =
+      if opts[:drop_feature_description],
+        do: Map.delete(feature, "description"),
+        else: feature
 
-  defp dropped_keys(opts), do: @dropped_keys ++ Keyword.get(opts, :drop_keys, [])
+    scrub_node(%{envelope | "gherkinDocument" => %{document | "feature" => feature}})
+  end
 
-  defp scrub_node(map, drop) when is_map(map) do
+  defp scrub(envelope, _opts), do: scrub_node(envelope)
+
+  defp scrub_node(map) when is_map(map) do
     map
-    |> Map.drop(drop)
+    |> Map.drop(@dropped_keys)
     |> Map.new(fn
       {"uri", uri} -> {"uri", Path.basename(uri)}
       {"description", text} -> {"description", squish(text)}
-      {key, value} -> {key, scrub_node(value, drop)}
+      {key, value} -> {key, scrub_node(value)}
     end)
   end
 
-  defp scrub_node(list, drop) when is_list(list), do: Enum.map(list, &scrub_node(&1, drop))
-  defp scrub_node(value, _drop), do: value
+  defp scrub_node(list) when is_list(list), do: Enum.map(list, &scrub_node/1)
+  defp scrub_node(value), do: value
 
   defp squish(text) do
     text

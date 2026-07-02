@@ -86,7 +86,7 @@ defmodule Cucumber.Messages do
   end
 
   defp media_type(uri) do
-    if String.ends_with?(uri, ".feature.md") do
+    if Gherkin.Markdown.markdown_path?(uri) do
       @markdown_media_type
     else
       @gherkin_media_type

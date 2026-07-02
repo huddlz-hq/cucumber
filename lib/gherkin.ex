@@ -269,7 +269,7 @@ defmodule Gherkin.Parser do
   """
   @spec parse(String.t(), String.t()) :: Gherkin.Feature.t()
   def parse(content, path) do
-    if String.ends_with?(path, ".feature.md") do
+    if Gherkin.Markdown.markdown_path?(path) do
       Gherkin.Markdown.parse(content)
     else
       Gherkin.NimbleParser.parse(content)

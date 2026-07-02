@@ -80,6 +80,8 @@ This Cucumber implementation consists of several key components:
    - Backgrounds (setup steps common to all scenarios)
    - Scenarios (with steps and tags)
    - Steps (with keywords, text, docstrings, and datatables)
+   - `lib/gherkin/markdown.ex` parses Markdown with Gherkin (`.feature.md`)
+     into the same structs
 
 3. **Compiler** (`lib/cucumber/compiler.ex`) - Generates ExUnit test modules
    - Creates one test module per feature file
@@ -104,7 +106,7 @@ This Cucumber implementation consists of several key components:
 
 ## Feature Files
 
-Feature files follow the Gherkin syntax and should be placed in the `test/features/` directory with a `.feature` extension.
+Feature files follow the Gherkin syntax and should be placed in the `test/features/` directory with a `.feature` extension — or `.feature.md` for Markdown with Gherkin, where headings carry the keywords and steps are bullet items.
 
 Example:
 ```gherkin

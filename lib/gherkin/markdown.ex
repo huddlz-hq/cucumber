@@ -31,7 +31,7 @@ defmodule Gherkin.Markdown do
   trimmed line is taken as the feature name — and any later `# Feature:`
   heading is ignored.
 
-  Two deliberate divergences from the reference tokenizer, both lenient:
+  Three deliberate divergences from the reference tokenizer, all lenient:
 
     * A fenced code block with no step to attach to (in prose) is skipped
       entirely, so code samples containing `* Given ...` lines don't parse
@@ -39,6 +39,9 @@ defmodule Gherkin.Markdown do
     * The reference captures prose that follows a GFM separator row as a
       section description — an emergent quirk of its error-tolerant token
       matching, not MDG behavior. This parser captures no descriptions.
+    * The reference treats any line *containing* a backticked tag span as
+      a tag line; here a tag line must consist solely of tag spans, so
+      prose that merely mentions `` `@wip` `` stays prose.
 
   Produces the same `Gherkin.Feature` structs as `Gherkin.NimbleParser`,
   with 0-based line numbers referring to the original Markdown source, so
@@ -54,6 +57,24 @@ defmodule Gherkin.Markdown do
   @tag_regex ~r/`@([^`]+)`/
   @fence_regex ~r/^(```+)(.*)$/
   @separator_cell_regex ~r/^:?-+:?$/
+
+  @doc """
+  Whether a path names a Markdown feature file.
+
+  The single authority for the `.feature.md` extension — parser dispatch
+  (`Gherkin.Parser.parse/2`) and the Cucumber Messages media type both use
+  it, so they cannot disagree.
+
+  ## Examples
+
+      Gherkin.Markdown.markdown_path?("test/features/cheese.feature.md")
+      # => true
+
+      Gherkin.Markdown.markdown_path?("test/features/cheese.feature")
+      # => false
+  """
+  @spec markdown_path?(String.t()) :: boolean()
+  def markdown_path?(path), do: String.ends_with?(path, ".feature.md")
 
   @doc """
   Parses a Markdown feature file string into a `Gherkin.Feature` struct.
@@ -93,13 +114,7 @@ defmodule Gherkin.Markdown do
   end
 
   defp handle_line({raw, index}, state) do
-    tags = Regex.scan(@tag_regex, raw, capture: :all_but_first)
-
     cond do
-      tags != [] ->
-        tagged = for [name] <- tags, do: {name, index}
-        %{state | pending_tags: state.pending_tags ++ tagged}
-
       state.feature == nil ->
         start_feature(raw, index, state)
 
@@ -110,6 +125,9 @@ defmodule Gherkin.Markdown do
       match = Regex.run(@step_regex, raw, capture: :all_but_first) ->
         [keyword, text] = match
         handle_step(keyword, String.trim(text), index, raw, state)
+
+      tags = tag_line(raw) ->
+        collect_tags(tags, index, state)
 
       match = Regex.run(@fence_regex, String.trim_leading(raw), capture: :all_but_first) ->
         [delimiter, info] = match
@@ -123,20 +141,45 @@ defmodule Gherkin.Markdown do
     end
   end
 
+  # --- Tags --------------------------------------------------------------
+
+  # A tag line consists solely of backticked tag spans (`` `@wip` `@slow` ``):
+  # removing every span must leave only whitespace. Returns the tag names,
+  # or nil when the line is anything else.
+  defp tag_line(raw) do
+    tags = Regex.scan(@tag_regex, raw, capture: :all_but_first)
+
+    if tags != [] and String.trim(Regex.replace(@tag_regex, raw, "")) == "" do
+      for [name] <- tags, do: name
+    end
+  end
+
+  defp collect_tags(tags, line, state) do
+    tagged = Enum.map(tags, &{&1, line})
+    %{state | pending_tags: state.pending_tags ++ tagged}
+  end
+
   # --- Feature line ----------------------------------------------------
 
   # The first line that isn't a tag line becomes the feature: a proper
   # `# Feature:` heading when it is one, otherwise the whole trimmed line
-  # is the feature name (the reference tokenizer's fallback). GFM separator
-  # rows are the one exception — they are comments and skipped.
+  # is the feature name (the reference tokenizer's fallback — which also
+  # applies to headings with other Gherkin keywords, since only a feature
+  # line is expected here). GFM separator rows are the one exception —
+  # they are comments and skipped.
   defp start_feature(raw, index, state) do
     cond do
+      tags = tag_line(raw) ->
+        collect_tags(tags, index, state)
+
       separator_row?(raw) ->
         state
 
       match = Regex.run(@header_regex, raw, capture: :all_but_first) ->
-        ["Feature", name] = match
-        set_feature(String.trim(name), index, state)
+        case match do
+          ["Feature", name] -> set_feature(String.trim(name), index, state)
+          _other_keyword -> set_feature(String.trim(raw), index, state)
+        end
 
       true ->
         set_feature(String.trim(raw), index, state)
@@ -178,6 +221,16 @@ defmodule Gherkin.Markdown do
 
     if container_scenarios != [] or container_background != nil do
       parse_error("a single Background before the first Scenario", line)
+    end
+
+    # Backgrounds cannot be tagged (same as plain Gherkin); silently
+    # leaving the tags pending would mis-tag the next scenario instead.
+    case state.pending_tags do
+      [{_name, first_tag_line} | _rest] ->
+        parse_error("no tags before a Background", first_tag_line)
+
+      [] ->
+        :ok
     end
 
     %{state | section: {:background, %{name: name, line: line, steps: []}}}
@@ -294,11 +347,13 @@ defmodule Gherkin.Markdown do
     end
   end
 
+  # Rows accumulate prepended, like every other list in this parser;
+  # finalize_step/1 restores source order when the section closes.
   defp add_table_row(step, cells, line) do
     %{
       step
-      | datatable: (step.datatable || []) ++ [cells],
-        datatable_lines: (step.datatable_lines || []) ++ [line]
+      | datatable: [cells | step.datatable || []],
+        datatable_lines: [line | step.datatable_lines || []]
     }
   end
 
@@ -404,7 +459,7 @@ defmodule Gherkin.Markdown do
   defp close_section(%{section: nil} = state), do: state
 
   defp close_section(%{section: {:background, acc}} = state) do
-    background = %Background{name: acc.name, line: acc.line, steps: Enum.reverse(acc.steps)}
+    background = %Background{name: acc.name, line: acc.line, steps: finalize_steps(acc.steps)}
 
     case state.rule do
       nil -> %{state | background: background, section: nil}
@@ -419,7 +474,7 @@ defmodule Gherkin.Markdown do
       line: acc.line,
       tags: acc.tags,
       tag_lines: acc.tag_lines,
-      steps: Enum.reverse(acc.steps)
+      steps: finalize_steps(acc.steps)
     }
 
     add_scenario(%{state | section: nil}, scenario)
@@ -434,11 +489,28 @@ defmodule Gherkin.Markdown do
       line: acc.line,
       tags: acc.tags,
       tag_lines: acc.tag_lines,
-      steps: Enum.reverse(acc.steps),
+      steps: finalize_steps(acc.steps),
       examples: Enum.reverse(acc.examples)
     }
 
     add_scenario(%{state | section: nil}, outline)
+  end
+
+  # Steps (and their table rows) accumulate prepended; restore source order.
+  defp finalize_steps(steps) do
+    steps
+    |> Enum.reverse()
+    |> Enum.map(&finalize_step/1)
+  end
+
+  defp finalize_step(%Step{datatable: nil} = step), do: step
+
+  defp finalize_step(step) do
+    %{
+      step
+      | datatable: Enum.reverse(step.datatable),
+        datatable_lines: Enum.reverse(step.datatable_lines)
+    }
   end
 
   defp add_scenario(%{rule: nil} = state, scenario) do

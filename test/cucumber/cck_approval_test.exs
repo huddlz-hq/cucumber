@@ -31,8 +31,8 @@ defmodule Cucumber.CckApprovalTest do
     * `global-hooks-attachments` — attachments from BeforeAll/AfterAll
       hooks (`attachment.testRunHookStartedId`) are not supported
 
-  Per-sample comparison allowances (the `:drop` / `:drop_keys` /
-  `:drop_step_definition_patterns` options below) are documented inline.
+  Per-sample comparison allowances (the `:drop` / `:drop_feature_description`
+  / `:drop_step_definition_patterns` options below) are documented inline.
   """
 
   use Cucumber.BehaviorCase
@@ -43,8 +43,9 @@ defmodule Cucumber.CckApprovalTest do
   # {sample, run options}. Options besides :steps/:hooks/:parameter_types:
   #   :retry - sets `config :cucumber, retry: N` for the run (the CCK runs
   #     these samples with `--retry 2`)
-  #   :drop / :drop_keys / :drop_step_definition_patterns - comparison
-  #     allowances, passed through to Cucumber.CckApproval (justify inline!)
+  #   :drop / :drop_feature_description / :drop_step_definition_patterns -
+  #     comparison allowances, passed through to Cucumber.CckApproval
+  #     (justify inline!)
   @samples [
     {"minimal", steps: [Definitions.Minimal]},
     {"cdata", steps: [Definitions.Cdata]},
@@ -132,9 +133,9 @@ defmodule Cucumber.CckApprovalTest do
     # The reference stream's feature description ("| boz | boo |") is an
     # emergent quirk of the reference tokenizer's error recovery, not MDG
     # behavior — Gherkin.Markdown deliberately captures no markdown
-    # descriptions (see its moduledoc), so the field is excluded.
+    # descriptions (see its moduledoc), so that one field is excluded.
     {"markdown",
-     steps: [Definitions.Markdown], files: ["markdown.feature.md"], drop_keys: ["description"]}
+     steps: [Definitions.Markdown], files: ["markdown.feature.md"], drop_feature_description: true}
   ]
 
   for {sample, opts} <- @samples do
@@ -186,7 +187,7 @@ defmodule Cucumber.CckApprovalTest do
     CckApproval.assert_equivalent(
       decode(File.read!(path)),
       reference(sample),
-      Keyword.take(opts, [:drop, :drop_keys, :drop_step_definition_patterns])
+      Keyword.take(opts, [:drop, :drop_feature_description, :drop_step_definition_patterns])
     )
   end
 
