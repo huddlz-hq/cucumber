@@ -12,7 +12,7 @@ defmodule Cucumber.Messages do
   Two groups of builders live here:
 
     * **Static messages** — derivable from source files alone: `meta/0`,
-      `source/2`, `gherkin_document/2`, `pickle/1`, `step_definition/3`,
+      `source/2`, `gherkin_document/3`, `pickle/1`, `step_definition/3`,
       `parameter_type/2`, and `hook/5`.
     * **Run-time messages** — describing an execution: `test_run_started/2`,
       `test_case/4`, `test_case_started/4`, `test_step_started/3`,
@@ -43,7 +43,11 @@ defmodule Cucumber.Messages do
 
           envelopes = [
             Cucumber.Messages.source(feature.file, feature.source),
-            Cucumber.Messages.gherkin_document(feature.file, compilation.document)
+            Cucumber.Messages.gherkin_document(
+              feature.file,
+              compilation.document,
+              compilation.comments
+            )
             | Enum.map(compilation.pickles, &Cucumber.Messages.pickle/1)
           ]
 

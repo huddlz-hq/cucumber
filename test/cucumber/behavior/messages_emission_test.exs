@@ -413,6 +413,44 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
            ]
   end
 
+  test "failed-ish stops that bypass the runner's skip pass still report unmatched steps UNDEFINED" do
+    # A raising background step and a failing before-scenario hook both
+    # abort before the runner's skip_unexecuted_steps call; their cases
+    # close through the coordinator's close_test_case synthesis, which
+    # must apply the same match-status overrides.
+    run =
+      run_messages(
+        """
+        Feature: failedish via background
+          Background:
+            Given a failing step
+
+          Scenario: never reaches its steps
+            Given a step nobody defined
+        """,
+        steps: [Steps]
+      )
+
+    assert finished_steps(run.messages) == [
+             {"a failing step", "FAILED"},
+             {"a step nobody defined", "UNDEFINED"}
+           ]
+
+    run =
+      run_messages(
+        """
+        Feature: failedish via before hook
+          Scenario: never starts
+            Given a step nobody defined
+        """,
+        steps: [Steps],
+        hooks: [FailingBeforeHook]
+      )
+
+    assert {:hook, "FAILED"} in finished_steps(run.messages)
+    assert {"a step nobody defined", "UNDEFINED"} in finished_steps(run.messages)
+  end
+
   test "a failing after_all hook fails the run in testRunFinished even when every scenario passed" do
     path =
       Path.join(

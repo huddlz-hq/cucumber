@@ -608,6 +608,11 @@ defmodule Cucumber.RunCoordinator do
     end
   end
 
+  # Flush-time crash reconciliation keeps its blanket UNKNOWN — a dead test
+  # process says nothing about why steps didn't run.
+  defp close_status(_override, :unknown), do: :unknown
+  defp close_status(override, skip_status), do: override || skip_status
+
   defp close_test_case(state, case_started_id, skip_status, will_be_retried) do
     case Map.fetch(state.messages.open_cases, case_started_id) do
       :error ->
@@ -617,9 +622,16 @@ defmodule Cucumber.RunCoordinator do
       {:ok, tracking} ->
         planned = Map.get(state.messages.cases, tracking.test_case_id, [])
 
+        # Match-status overrides apply here too (see close_status/2):
+        # failed-ish stops that never reach the runner's
+        # skip_unfinished_steps call (a failing before-scenario hook, a
+        # raising background step) close through this path alone.
+        # Deliberate skips are unaffected: their steps were already
+        # synthesized SKIPPED before the case closes.
         state =
-          Enum.reduce(planned, state, fn {step_id, _override}, state ->
-            synthesize_step_events(state, case_started_id, step_id, tracking, skip_status)
+          Enum.reduce(planned, state, fn {step_id, override}, state ->
+            status = close_status(override, skip_status)
+            synthesize_step_events(state, case_started_id, step_id, tracking, status)
           end)
 
         finished = Cucumber.Messages.test_case_finished(case_started_id, now(), will_be_retried)

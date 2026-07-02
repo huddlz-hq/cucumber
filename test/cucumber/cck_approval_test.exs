@@ -201,12 +201,16 @@ defmodule Cucumber.CckApprovalTest do
   defp with_retry_config(nil, fun), do: fun.()
 
   defp with_retry_config(retries, fun) do
+    previous = Application.fetch_env(:cucumber, :retry)
     Application.put_env(:cucumber, :retry, retries)
 
     try do
       fun.()
     after
-      Application.delete_env(:cucumber, :retry)
+      case previous do
+        {:ok, value} -> Application.put_env(:cucumber, :retry, value)
+        :error -> Application.delete_env(:cucumber, :retry)
+      end
     end
   end
 end
