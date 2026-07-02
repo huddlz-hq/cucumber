@@ -445,6 +445,75 @@ defmodule Cucumber.DiscoveryTest do
         File.rm_rf(temp_dir)
       end
     end
+
+    test "serves the cache when a later pass spells the path differently" do
+      temp_dir = Path.join(System.tmp_dir(), "respell_test_#{:rand.uniform(10_000)}")
+      step_dir = Path.join(temp_dir, "steps")
+      File.mkdir_p!(step_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+
+      File.write!(Path.join(step_dir, "steps.exs"), """
+      defmodule RespellSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a respelled step", context do
+          context
+        end
+      end
+      """)
+
+      base_opts = [support: [], features: []]
+
+      try do
+        first = Discovery.discover([{:steps, [Path.join(step_dir, "*.exs")]} | base_opts])
+
+        # Code.require_file/1 dedupes on the expanded path, so a different
+        # spelling of the same file must hit the same cache entry
+        respelled_pattern = Path.join([temp_dir, ".", "steps", "*.exs"])
+        second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
+
+        assert second.step_modules == first.step_modules
+        assert Map.has_key?(second.step_registry, {:expression, "a respelled step"})
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
+
+    test "fails loudly when a file was loaded by someone other than discovery" do
+      temp_dir = Path.join(System.tmp_dir(), "preloaded_test_#{:rand.uniform(10_000)}")
+      step_dir = Path.join(temp_dir, "steps")
+      File.mkdir_p!(step_dir)
+
+      rand_suffix = :rand.uniform(10_000)
+      step_file = Path.join(step_dir, "steps.exs")
+
+      File.write!(step_file, """
+      defmodule PreloadedSteps#{rand_suffix} do
+        use Cucumber.StepDefinition
+
+        step "a preloaded step", context do
+          context
+        end
+      end
+      """)
+
+      try do
+        Code.require_file(step_file)
+
+        # Discovery can't know which modules the earlier load defined, so it
+        # must not silently produce an empty registry
+        assert_raise RuntimeError, ~r/already loaded before Cucumber discovery/, fn ->
+          Discovery.discover(
+            steps: [Path.join(step_dir, "*.exs")],
+            support: [],
+            features: []
+          )
+        end
+      after
+        File.rm_rf(temp_dir)
+      end
+    end
   end
 
   describe "discover/1 with empty patterns" do

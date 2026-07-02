@@ -101,7 +101,7 @@ defmodule Cucumber.Discovery do
     modules =
       patterns
       |> expand_patterns()
-      |> Enum.flat_map(&load_support_modules/1)
+      |> Enum.flat_map(&loaded_modules/1)
 
     hook_modules = Enum.filter(modules, &function_exported?(&1, :__cucumber_hooks__, 0))
 
@@ -111,18 +111,32 @@ defmodule Cucumber.Discovery do
     {hook_modules, parameter_type_modules}
   end
 
-  defp load_support_modules(path), do: loaded_modules(path)
-
   # Code.require_file/1 returns nil when the file was already loaded in this
   # VM, so cache each file's modules on first load; otherwise a second
   # discovery pass would crash on step files and silently drop hooks and
-  # parameter types.
+  # parameter types. Keyed on the expanded path because require_file
+  # dedupes on the expanded path, so two spellings of one file must share
+  # a cache entry.
   defp loaded_modules(path) do
-    cache_key = {__MODULE__, :modules, path}
+    cache_key = {__MODULE__, :modules, Path.expand(path)}
 
     case Code.require_file(path) do
       nil ->
-        :persistent_term.get(cache_key, [])
+        # nil with no cache entry means someone other than discovery loaded
+        # the file, so its modules are unknowable here. (A concurrent
+        # discovery pass racing this one would land here too — loudly,
+        # rather than silently building an empty registry.)
+        case :persistent_term.get(cache_key, :missing) do
+          :missing ->
+            raise "#{path} was already loaded before Cucumber discovery ran, " <>
+                    "so its modules cannot be discovered (Code.require_file/1 " <>
+                    "returns nil for already-loaded files). Remove the earlier " <>
+                    "Code.require_file call and let Cucumber load step and " <>
+                    "support files itself."
+
+          modules ->
+            modules
+        end
 
       modules ->
         module_names = Enum.map(modules, fn {module, _} -> module end)

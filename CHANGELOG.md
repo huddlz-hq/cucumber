@@ -33,7 +33,7 @@ This release completes the Cucumber Compatibility Kit roadmap (#17–#29). Cucum
 - **Step failure stack traces point at the feature file** (#22). The first frame of a failing step's trace is now `feature_file:step_line`, followed by the step definition; internal runtime frames are filtered out.
 - The parser no longer hangs on a feature file that ends in description text.
 - `Cucumber.Hooks.collect_hooks/1` now finds hook modules compiled into the application but not yet loaded (previously they were silently dropped).
-- Repeated discovery in the same VM (e.g. under `mix test.watch`) no longer crashes on already-loaded step files or silently drops hooks and parameter types — `Cucumber.Discovery` now caches each file's modules for the runs where `Code.require_file/1` returns `nil`.
+- Running discovery more than once in the same VM no longer crashes on already-loaded step files or silently drops hooks and parameter types — `Cucumber.Discovery` now caches each file's modules for the passes where `Code.require_file/1` returns `nil`. A step or support file loaded by something other than discovery (where the modules are unknowable) now raises a clear error instead of yielding an empty registry.
 - `context.docstring_media_type` now substitutes scenario outline placeholders, like the docstring content does.
 
 ### Improvements
