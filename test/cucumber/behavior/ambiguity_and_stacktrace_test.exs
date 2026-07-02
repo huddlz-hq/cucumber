@@ -167,5 +167,37 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       assert first_frame =~ "test/fixtures/generated/missing_frames.feature:3"
       refute run.output =~ "lib/cucumber/runtime.ex"
     end
+
+    test "captured output stays plain text when the outer run is on a TTY" do
+      # On a TTY, Elixir enables ANSI globally and the nested run's
+      # formatter would color its output, breaking every assertion that
+      # parses run.output (the frame extraction above grabs an escape
+      # sequence instead of the frame). Force the TTY condition
+      ansi_before = Application.get_env(:elixir, :ansi_enabled, false)
+      Application.put_env(:elixir, :ansi_enabled, true)
+
+      try do
+        run =
+          run_feature(
+            """
+            Feature: plain output
+              Scenario: failing
+                Given a passing step
+                And a step that raises
+            """,
+            steps: [FailingSteps],
+            file: "test/fixtures/generated/plain_output.feature"
+          )
+
+        assert run.failures == 1
+        refute run.output =~ "\e["
+
+        stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
+        [first_frame | _] = String.split(stacktrace_section, "\n", trim: true)
+        assert first_frame =~ "test/fixtures/generated/plain_output.feature:4"
+      after
+        Application.put_env(:elixir, :ansi_enabled, ansi_before)
+      end
+    end
   end
 end

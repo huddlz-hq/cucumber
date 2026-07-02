@@ -125,7 +125,9 @@ defmodule Cucumber.BehaviorCase do
 
     * `:total`, `:failures`, `:skipped`, `:excluded` - from `ExUnit.run/1`
     * `:passed` - convenience: total minus failures/skipped/excluded
-    * `:output` - everything the nested run printed (assert error messages here)
+    * `:output` - everything the nested run printed (assert error messages
+      here; ANSI colors are disabled in the nested run, so the output is
+      plain text even when the outer run is on a TTY)
     * `:events` - events recorded via `Collector.record/1`, in order
     * `:attachments` - `Cucumber.Attachment` structs recorded during the run
     * `:messages` - the decoded message envelopes (only with `:messages`)
@@ -227,7 +229,9 @@ defmodule Cucumber.BehaviorCase do
     config = ExUnit.configuration()
 
     try do
-      ExUnit.configure(include: [], exclude: [])
+      # Colors off so captured output is plain text regardless of whether
+      # the outer run is on a TTY — assertions parse this output
+      ExUnit.configure(include: [], exclude: [], colors: [enabled: false])
 
       case Keyword.fetch(opts, :seed) do
         {:ok, seed} -> ExUnit.configure(seed: seed)
@@ -241,7 +245,12 @@ defmodule Cucumber.BehaviorCase do
 
       {Process.delete(__MODULE__), output}
     after
-      ExUnit.configure(include: config[:include], exclude: config[:exclude], seed: config[:seed])
+      ExUnit.configure(
+        include: config[:include],
+        exclude: config[:exclude],
+        seed: config[:seed],
+        colors: config[:colors]
+      )
     end
   end
 
