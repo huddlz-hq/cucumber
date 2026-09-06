@@ -1,68 +1,86 @@
-# Release process
+# Release Process
 
-## Prepare
+This document outlines the process for creating and publishing new releases of the Cucumber package.
 
-1. Update the version in `mix.exs` and the release notes in `CHANGELOG.md`.
-2. Commit the changes, merge to `main`, and wait for CI to pass on that commit.
-3. Use the toolchain in `mise.toml`, install dependencies with `mix deps.get`, and
-   authenticate with Hex. The checkout must have an `origin` remote.
-4. Run the preflight from a clean `main` checkout:
+## Using the Release Script
 
-   ```sh
-   ./scripts/release.sh 1.0.0 --check
-   ```
+The easiest way to create a release is to use the provided release script:
 
-`--check` runs all release validation without publishing, creating tags, or pushing.
-It requires network access for the dependency audit and remote tag lookup.
-Remove or commit untracked files first. Ignored build output is allowed, but every
-file selected for the Hex package must match the release commit byte for byte.
-This catches ignored files accidentally placed under packaged directories too.
-
-## Publish
-
-```sh
-./scripts/release.sh 1.0.0
+```bash
+./scripts/release.sh <version>
 ```
 
-The script checks the branch, clean checkout, version, and local/remote tags;
-runs validation; verifies the actual package contents against the original commit;
-and rechecks the checkout and tags before invoking `mix hex.publish` in the dev
-environment (so ExDoc is available). Existing lightweight or annotated tags are
-accepted only when they resolve to the release commit.
+For example:
+```bash
+./scripts/release.sh 0.2.0
+```
 
-After successful publication it creates the tag if needed, then atomically pushes
-that tag and the validated commit to `main`. It does not edit the version or
-changelog, create a release commit, or repair formatting. Create the GitHub release
-from the printed link and copy the changelog entry into its release notes.
+The script will:
 
-Hex publication and Git pushes cannot be one transaction. If publishing partially
-succeeds or the push fails, inspect Hex and the remote before retrying. Once Hex
-confirms the package and docs are published, a failed Git push can be retried with
-`git push --atomic origin main refs/tags/v1.0.0` from the same validated commit.
-Do not move an existing release tag to a different commit.
+1. Check that you're on the main branch with a clean working directory
+2. Update the version in `mix.exs`
+3. Add a new entry to `CHANGELOG.md` and open it for editing
+4. Run tests and generate documentation
+5. Commit the version bump
+6. Publish the package to Hex.pm
+7. Create a Git tag for the version (only after successful publishing)
+8. Push the changes and tag to GitHub
 
-## Validation coverage
+## Manual Release Process
 
-`bash scripts/validate.sh` runs compilation with warnings as errors, formatting
-checks, strict Credo, the full default test suite (including pinned CCK approvals,
-Messages schema validation, and fixture integrity), dependency auditing, a dev
-compilation, docs with warnings as errors, and a Hex package build. It writes build
-outputs but does not format source or unlock dependencies. `mix precommit` remains
-the convenience command for development and can modify source/lockfiles.
+If you prefer to release manually, follow these steps:
 
-CI tests Elixir 1.18.0 / OTP 26 (the declared minimum), Elixir 1.19 / OTP 28, and
-Elixir 1.20.2 / OTP 28 and 29. These follow the upstream
-[Elixir/OTP compatibility table](https://elixir.hexdocs.pm/main/compatibility-and-deprecations.html).
-The docs/package job also audits dependencies and verifies pinned CCK provenance
-against GitHub. Upstream drift (`scripts/check_cck.exs main`) remains an explicit
-maintenance check, not a release gate against a moving target. Performance
-benchmarks remain opt-in.
+1. Update the version in `mix.exs`:
+   ```elixir
+   @version "0.2.0"
+   ```
 
-Run `bash scripts/test_release.sh` to exercise release failures and successful
-ordering with temporary Git repositories and mocked Mix/push commands. It never
-publishes a package or contacts a remote service.
+2. Update the `CHANGELOG.md` with details of changes in this version
 
-## Version numbering
+3. Run tests to ensure everything works:
+   ```bash
+   mix test
+   ```
 
-Use [Semantic Versioning](https://semver.org/): major for incompatible changes,
-minor for backward-compatible features, and patch for backward-compatible fixes.
+4. Build documentation:
+   ```bash
+   mix docs
+   ```
+
+5. Commit the version bump:
+   ```bash
+   git add mix.exs CHANGELOG.md
+   git commit -m "Bump version to 0.2.0"
+   ```
+
+6. Publish to Hex.pm:
+   ```bash
+   mix hex.publish
+   ```
+
+7. Create a Git tag (only after successful publishing):
+   ```bash
+   git tag v0.2.0
+   ```
+
+8. Push changes and tag to GitHub:
+   ```bash
+   git push origin main
+   git push origin v0.2.0
+   ```
+
+9. Create a GitHub release:
+   - Go to https://github.com/huddlz-hq/cucumber/releases/new
+   - Select the tag you just created
+   - Add release notes (can be copied from CHANGELOG.md)
+   - Publish the release
+
+## Version Numbering
+
+This project follows [Semantic Versioning](https://semver.org/):
+
+- MAJOR version for incompatible API changes (1.0.0)
+- MINOR version for backward-compatible functionality additions (0.2.0)
+- PATCH version for backward-compatible bug fixes (0.1.1)
+
+During initial development (0.x.y), minor version increments may include breaking changes.
