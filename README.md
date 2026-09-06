@@ -5,7 +5,7 @@
 
 A behavior-driven development (BDD) testing framework for Elixir that enables writing executable specifications in natural language. Cucumber for Elixir bridges the gap between technical and non-technical stakeholders by allowing tests to be written in plain language while being executed as code.
 
-Cucumber for Elixir is **CCK compliant**: the official [Cucumber Compatibility Kit](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the [Cucumber Messages](https://github.com/cucumber/messages) we emit against the reference implementation's output sample by sample.
+Cucumber for Elixir tests **40 of 46 pinned [Cucumber Compatibility Kit](https://github.com/cucumber/compatibility-kit) samples**, with documented comparison allowances. Raw emitted streams are validated against the Messages 33.0.2 schema and checked for reference and lifecycle integrity before normalized comparison. See the [compatibility boundaries](docs/compatibility.md) for exclusions, deltas, and reproducible checks.
 
 ## Features
 

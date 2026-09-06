@@ -8,7 +8,8 @@ defmodule Cucumber.CckApproval do
   stream is *equivalent* — same envelopes, in the same order, with consistent
   internal references — even though ids, timings, and platform details
   necessarily differ. `assert_equivalent/3` normalizes both streams with the
-  same rules and asserts they are identical.
+  same rules and asserts they are identical. Both raw streams first pass
+  schema and lifecycle validation; normalization cannot bypass those checks.
 
   ## Normalization rules
 
@@ -18,9 +19,6 @@ defmodule Cucumber.CckApproval do
     * `suggestion` — snippet suggestions for undefined steps; this
       implementation reports suggestions in the step error instead of the
       message stream
-    * `undefinedParameterType` — this implementation raises
-      `Cucumber.UndefinedParameterTypeError` at discovery instead of
-      emitting a stream (see the filtered samples list)
 
   Dropped fields (wherever they occur):
 
@@ -70,7 +68,7 @@ defmodule Cucumber.CckApproval do
 
   import ExUnit.Assertions
 
-  @dropped_envelopes ~w(meta suggestion undefinedParameterType)
+  @dropped_envelopes ~w(meta suggestion)
   @definition_envelopes ~w(stepDefinition hook parameterType)
   @dropped_keys ~w(timestamp duration sourceReference stepMatchArgumentsLists message exception column)
 
@@ -82,6 +80,9 @@ defmodule Cucumber.CckApproval do
   sequences when the streams have different shapes).
   """
   def assert_equivalent(actual, reference, opts \\ []) do
+    Cucumber.CckStream.assert_valid(actual)
+    Cucumber.CckStream.assert_valid(reference)
+
     actual = normalize(actual, opts)
     reference = normalize(reference, opts)
 

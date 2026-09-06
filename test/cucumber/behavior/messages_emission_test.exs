@@ -159,7 +159,9 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
       )
 
     on_exit(fn -> File.rm(path) end)
-    run_features(List.wrap(sources), Keyword.put(opts, :messages, path))
+    run = run_features(List.wrap(sources), Keyword.put(opts, :messages, path))
+    Cucumber.CckStream.assert_valid(run.messages)
+    run
   end
 
   defp envelope_types(messages) do

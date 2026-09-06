@@ -138,6 +138,14 @@ defmodule Cucumber.CckApprovalTest do
      steps: [Definitions.Markdown], files: ["markdown.feature.md"], drop_feature_description: true}
   ]
 
+  test "every pinned upstream sample is approved or explicitly excluded" do
+    excluded =
+      ~w(global-hooks-attachments multiple-features-reversed pending-exception skipped-exception test-run-exception unknown-parameter-type)
+
+    approved = Enum.map(@samples, &elem(&1, 0))
+    assert Enum.sort(approved ++ excluded) == Cucumber.CckFixtures.manifest()["samples"]
+  end
+
   for {sample, opts} <- @samples do
     @sample sample
     @opts opts
@@ -184,8 +192,10 @@ defmodule Cucumber.CckApprovalTest do
       message -> assert_raise(RuntimeError, message, run)
     end
 
+    actual = decode(File.read!(path))
+
     CckApproval.assert_equivalent(
-      decode(File.read!(path)),
+      actual,
       reference(sample),
       Keyword.take(opts, [:drop, :drop_feature_description, :drop_step_definition_patterns])
     )

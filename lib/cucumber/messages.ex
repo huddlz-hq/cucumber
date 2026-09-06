@@ -60,16 +60,15 @@ defmodule Cucumber.Messages do
   (expression matching returns converted values, not source offsets), and
   `parameterType`/`hook` envelopes have no source line (their macros don't
   record one). The CCK approval harness (`test/cucumber/cck_approval_test.exs`)
-  normalizes these; its samples table documents the two samples with
+  normalizes these; its samples table documents the three samples with
   further per-sample divergences.
   """
 
   @gherkin_media_type "text/x.cucumber.gherkin+plain"
   @markdown_media_type "text/x.cucumber.gherkin+markdown"
 
-  # The cucumber/messages schema major version these envelope shapes track.
-  # #28c vendors the schema files and pins this against them.
-  @protocol_version "27.0.0"
+  # Validated against the pinned upstream schema in test/fixtures/messages/.
+  @protocol_version "33.0.2"
 
   @typedoc "A single-key envelope map, e.g. `%{pickle: %{...}}`."
   @type envelope :: %{required(atom()) => map()}

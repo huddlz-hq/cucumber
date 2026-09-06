@@ -21,3 +21,14 @@ are listed with reasons in the approval test's moduledoc.
 
 They are deliberately **not** under `test/features/` — several samples
 represent failing test runs and must never join the live suite.
+
+## Provenance
+
+Every vendored sample file matches upstream commit
+`bed15e9c30fb5e37c19be7ecfe6aa2a2f7d890f7` byte for byte. `upstream.json`
+records the full 46-sample inventory and upstream Git blob hashes.
+`mix test test/cucumber/cck_fixtures_test.exs` checks this offline;
+`MIX_ENV=test mix run scripts/check_cck.exs` verifies it against GitHub.
+Pass `main` to the script to detect upstream drift. See
+[compatibility boundaries](../../../docs/compatibility.md) for the complete
+sample/allowance matrix and update procedure.

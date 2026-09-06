@@ -78,7 +78,8 @@ defmodule Cucumber.MixProject do
         "docs/attachments.md",
         "docs/error_handling.md",
         "docs/best_practices.md",
-        "docs/architecture.md"
+        "docs/architecture.md",
+        "docs/compatibility.md"
       ],
       groups_for_extras: [
         Guides: Path.wildcard("docs/*.md")
