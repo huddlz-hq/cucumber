@@ -90,11 +90,14 @@ defmodule Cucumber.MixProject do
   defp aliases do
     [
       precommit: [
+        "hex.audit",
         "compile --warnings-as-errors",
-        "format",
+        "format --check-formatted",
         "credo --strict",
-        "deps.unlock --unused",
-        "test"
+        "deps.unlock --check-unused",
+        "test",
+        "cmd bash scripts/test_release.sh",
+        "cmd env MIX_ENV=dev mix do hex.build + compile --warnings-as-errors + docs --warnings-as-errors"
       ]
     ]
   end

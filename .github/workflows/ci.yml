@@ -45,29 +45,9 @@ jobs:
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
       - run: mix deps.get
-      - run: mix compile --warnings-as-errors
-      - run: mix format --check-formatted
-      - run: mix credo --strict
-      - run: mix test
-
-  release-validation:
-    name: Docs, dependency audit, and package
-    runs-on: ubuntu-latest
-    env:
-      MIX_ENV: dev
-    steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.20.2"
-          otp-version: "29"
-      - run: mix deps.get
-      - run: bash scripts/test_release.sh
-      - run: mix hex.audit
-      - run: mix compile --warnings-as-errors
-      - run: mix docs --warnings-as-errors
-      - run: mix hex.build
+      - run: mix precommit
       - name: Verify pinned CCK provenance
-        run: MIX_ENV=test mix run scripts/check_cck.exs
+        if: matrix.elixir == '1.20.2' && matrix.otp == '29'
+        run: mix run scripts/check_cck.exs
         env:
           GH_TOKEN: ${{ github.token }}

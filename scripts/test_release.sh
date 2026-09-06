@@ -19,8 +19,8 @@ cat > "$test_dir/bin/mix" <<'MOCK'
 #!/bin/bash
 set -eu
 echo "${MIX_ENV:-unset} $*" >> "$CALLS"
-[ "$*" != "${FAIL_COMMAND:-}" ] || exit 1
-if [ "$1" = test ]; then
+[ "$1" != "${FAIL_COMMAND:-}" ] || exit 1
+if [ "$1" = precommit ]; then
   case "${MUTATION:-}" in
     tracked) echo changed >> README.md ;;
     untracked) echo stray > stray.txt ;;
@@ -46,7 +46,7 @@ setup() {
   git config user.email test@example.invalid
   git config user.name 'Release test'
   mkdir scripts lib
-  cp "$source_dir/release.sh" "$source_dir/validate.sh" scripts/
+  cp "$source_dir/release.sh" scripts/
   printf '@version "1.0.0"\n' > mix.exs
   echo source > lib/source.ex
   echo readme > README.md
@@ -86,7 +86,7 @@ setup wrong_remote_tag
 for mutation in tracked untracked ignored commit; do
   setup "mutation_$mutation"; export MUTATION=$mutation; reject
 done
-for command in 'compile --warnings-as-errors' 'format --check-formatted' 'credo --strict' test hex.audit 'docs --warnings-as-errors' hex.build hex.publish; do
+for command in precommit hex.publish; do
   setup "failure_${command// /_}"
   export FAIL_COMMAND="$command"
   if [ "$command" = hex.publish ]; then
@@ -98,11 +98,15 @@ for command in 'compile --warnings-as-errors' 'format --check-formatted' 'credo 
     reject
   fi
 done
+setup failure_package_build
+export FAIL_COMMAND="hex.build"
+# Fail any invocation of this task, including the release output path.
+reject
 setup check_only
 bash scripts/release.sh 1.0.0 --check > "$test_dir/output" 2>&1
 ! grep -Eq 'hex.publish|^push ' "$CALLS"
 ! git show-ref --verify --quiet refs/tags/v1.0.0
-grep -q '^dev docs --warnings-as-errors$' "$CALLS"
+grep -q '^test precommit$' "$CALLS"
 echo "PASS: check_only"
 for tag_type in new lightweight annotated; do
   setup "success_$tag_type"
