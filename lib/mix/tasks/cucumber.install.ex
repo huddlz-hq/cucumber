@@ -69,11 +69,7 @@ if Code.ensure_loaded?(Igniter) do
         {:ok, zipper} ->
           code = quote do: Cucumber.compile_features!()
 
-          {:ok,
-           zipper
-           |> Zipper.insert_right(code)
-           |> Zipper.root()
-           |> Zipper.zip()}
+          {:ok, Common.add_code(zipper, code)}
 
         :error ->
           code =
@@ -86,7 +82,7 @@ if Code.ensure_loaded?(Igniter) do
            zipper
            |> Zipper.root()
            |> Zipper.zip()
-           |> Zipper.append_child(code)}
+           |> Common.add_code(code)}
       end
     end
 
