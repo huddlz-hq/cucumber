@@ -33,7 +33,7 @@ current_version=$(sed -n 's/^[[:space:]]*@version "\([^"]*\)".*/\1/p' mix.exs)
 [ "$current_version" = "$VERSION" ] || fail "Version in mix.exs ($current_version) does not match $VERSION"
 assert_tag
 
-MIX_ENV=test mix precommit
+MIX_ENV=test mix validate
 
 # Inspect the actual Hex file selection, including ignored files. Every packaged
 # byte must come from the release commit, not a stray file under lib/ or docs/.

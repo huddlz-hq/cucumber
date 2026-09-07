@@ -31,7 +31,8 @@ defmodule Cucumber.MixProject do
     [
       preferred_envs: [
         "test.watch": :test,
-        precommit: :test
+        precommit: :test,
+        validate: :test
       ]
     ]
   end
@@ -90,6 +91,13 @@ defmodule Cucumber.MixProject do
   defp aliases do
     [
       precommit: [
+        "compile --warnings-as-errors",
+        "format",
+        "credo --strict",
+        "deps.unlock --unused",
+        "test"
+      ],
+      validate: [
         "hex.audit",
         "compile --warnings-as-errors",
         "format --check-formatted",

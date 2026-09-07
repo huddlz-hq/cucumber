@@ -45,7 +45,7 @@ jobs:
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
       - run: mix deps.get
-      - run: mix precommit
+      - run: mix validate
       - name: Verify pinned CCK provenance
         if: matrix.elixir == '1.20.2' && matrix.otp == '29'
         run: mix run scripts/check_cck.exs
