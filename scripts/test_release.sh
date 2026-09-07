@@ -20,7 +20,7 @@ cat > "$test_dir/bin/mix" <<'MOCK'
 set -eu
 echo "${MIX_ENV:-unset} $*" >> "$CALLS"
 [ "$1" != "${FAIL_COMMAND:-}" ] || exit 1
-if [ "$1" = precommit ]; then
+if [ "$1" = validate ]; then
   case "${MUTATION:-}" in
     tracked) echo changed >> README.md ;;
     untracked) echo stray > stray.txt ;;
@@ -86,7 +86,7 @@ setup wrong_remote_tag
 for mutation in tracked untracked ignored commit; do
   setup "mutation_$mutation"; export MUTATION=$mutation; reject
 done
-for command in precommit hex.publish; do
+for command in validate hex.publish; do
   setup "failure_${command// /_}"
   export FAIL_COMMAND="$command"
   if [ "$command" = hex.publish ]; then
@@ -106,7 +106,7 @@ setup check_only
 bash scripts/release.sh 1.0.0 --check > "$test_dir/output" 2>&1
 ! grep -Eq 'hex.publish|^push ' "$CALLS"
 ! git show-ref --verify --quiet refs/tags/v1.0.0
-grep -q '^test precommit$' "$CALLS"
+grep -q '^test validate$' "$CALLS"
 echo "PASS: check_only"
 for tag_type in new lightweight annotated; do
   setup "success_$tag_type"
