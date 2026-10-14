@@ -5,7 +5,7 @@ defmodule Cucumber.Messages.Emitter do
 
   Two roles:
 
-    * **Configuration** — `configure/5` builds the run's static envelopes
+    * **Configuration** — `configure/6` (deprecated) builds the run's static envelopes
       (meta, sources, gherkin documents, pickles, step definitions, hooks,
       parameter types) plus the id maps run-time messages reference, and
       hands them to the coordinator. Called by
@@ -20,6 +20,12 @@ defmodule Cucumber.Messages.Emitter do
 
   Every session function is nil-safe: when the sink is disabled the session
   is nil and all of this is a no-op, so the runner carries no conditionals.
+
+  > #### Deprecated {: .warning}
+  >
+  > This module is driven by the compiler and will become internal in 2.0.
+  > Enable Cucumber Messages with `config :cucumber, messages: path`
+  > instead of calling it directly.
   """
 
   alias Cucumber.Messages
@@ -33,7 +39,25 @@ defmodule Cucumber.Messages.Emitter do
   `features_with_compilations` pairs each discovered feature with its
   `Gherkin.Pickles.Compilation`; `next_id` continues the compilation id
   sequence so every id in the stream is run-unique.
+
+  `step_registry` is the `Cucumber.StepRegistry` discovery builds; it
+  carries the run's parameter types, so `parameter_types` is ignored.
   """
+  @deprecated "Configure messages with `config :cucumber, messages: path`; removed in 2.0"
+  @spec configure(
+          String.t(),
+          [{map(), Gherkin.Pickles.Compilation.t()}],
+          StepRegistry.t(),
+          [tuple()],
+          map(),
+          non_neg_integer()
+        ) :: :ok
+  def configure(path, features_with_compilations, step_registry, hooks, _parameter_types, next_id) do
+    configure(path, features_with_compilations, step_registry, hooks, next_id)
+  end
+
+  @doc false
+  # Called by Cucumber.Compiler. The registry carries the parameter types.
   @spec configure(
           String.t(),
           [{map(), Gherkin.Pickles.Compilation.t()}],

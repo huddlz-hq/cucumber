@@ -5,3 +5,7 @@
 ## Consequences
 
 Future changes to Discovery, Runtime and Compiler are not semver-breaking. Do not re-expose them to tests or users. Tests and harnesses go through `Cucumber.StepRegistry` or `Cucumber.compile_features!/1`.
+
+## Messages API
+
+`Cucumber.Messages` and `Cucumber.Messages.Emitter` stay public in 1.x, because they were documented as public builders and are not part of the pipeline exception above. Their signatures that took the old registry shape keep working as `@deprecated` shims until 2.0: `Messages.step_definition/3` (in favour of `step_definition/2`, which takes a `Cucumber.StepRegistry.Definition`) and `Messages.Emitter.configure/6` (in favour of the internal `configure/5`; messages are enabled with `config :cucumber, messages: path`). In 2.0 the shims are removed and `Cucumber.Messages.Emitter` becomes internal.

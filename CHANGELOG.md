@@ -9,6 +9,13 @@
 - `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
 - `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
 
+### Deprecated
+
+These keep working in 1.x and will be removed in 2.0:
+
+- `Cucumber.Messages.step_definition/3` (registry key + source reference). Use `step_definition/2`, which takes a `Cucumber.StepRegistry.Definition`.
+- `Cucumber.Messages.Emitter.configure/6`. Its `parameter_types` argument is now ignored, because the step registry carries the parameter types. Enable messages with `config :cucumber, messages: path`. `Cucumber.Messages.Emitter` will become internal in 2.0.
+
 ### Bug Fixes
 
 - Regex step definitions with flags (e.g. `~r/.../i`) no longer crash when a step matches them on Elixir versions where `Regex.opts/1` returns a list.

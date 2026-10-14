@@ -158,6 +158,37 @@ defmodule Cucumber.MessagesTest do
     end
   end
 
+  describe "step_definition/3 (deprecated)" do
+    # Called through apply/3 so the deprecation doesn't warn at compile time
+    test "still builds envelopes from expression keys" do
+      reference = %{uri: "test/steps.exs", location: %{line: 7}}
+
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
+      assert apply(Messages, :step_definition, [
+               "9",
+               {:expression, "I have {int} cukes"},
+               reference
+             ]) ==
+               %{
+                 stepDefinition: %{
+                   id: "9",
+                   pattern: %{source: "I have {int} cukes", type: "CUCUMBER_EXPRESSION"},
+                   sourceReference: reference
+                 }
+               }
+    end
+
+    test "still builds envelopes from regex keys" do
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
+      envelope = apply(Messages, :step_definition, ["3", {:regex, {"^exactly (\\d+)$", ""}}, %{}])
+
+      assert envelope.stepDefinition.pattern == %{
+               source: "^exactly (\\d+)$",
+               type: "REGULAR_EXPRESSION"
+             }
+    end
+  end
+
   describe "parameter_type/2" do
     test "carries the name and regex source" do
       definition = %{name: "flight", regexp: ~r/([A-Z]{3})-([A-Z]{3})/, transform: nil}

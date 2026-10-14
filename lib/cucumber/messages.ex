@@ -12,7 +12,7 @@ defmodule Cucumber.Messages do
   Two groups of builders live here:
 
     * **Static messages** — derivable from source files alone: `meta/0`,
-      `source/2`, `gherkin_document/3`, `pickle/1`, `step_definition/3`,
+      `source/2`, `gherkin_document/3`, `pickle/1`, `step_definition/2`,
       `parameter_type/2`, and `hook/5`.
     * **Run-time messages** — describing an execution: `test_run_started/2`,
       `test_case/4`, `test_case_started/4`, `test_step_started/3`,
@@ -174,6 +174,31 @@ defmodule Cucumber.Messages do
     }
 
     step_definition_envelope(id, definition.source, type, source_reference)
+  end
+
+  @doc """
+  Builds a `stepDefinition` envelope from a pattern key and a source reference.
+
+  `key` is `{:expression, source}` or `{:regex, {source, opts}}`, the step
+  registry key shape before `Cucumber.StepRegistry`; `source_reference` is a
+  `%{uri: ..., location: %{line: ...}}` map.
+
+  ## Examples
+
+      Cucumber.Messages.step_definition("9", {:expression, "I have {int} cukes"}, %{})
+  """
+  @deprecated "Use step_definition/2 with a Cucumber.StepRegistry.Definition; removed in 2.0"
+  @spec step_definition(
+          String.t(),
+          {:expression, String.t()} | {:regex, {String.t(), term()}},
+          map()
+        ) :: envelope()
+  def step_definition(id, {:expression, source}, source_reference) do
+    step_definition_envelope(id, source, "CUCUMBER_EXPRESSION", source_reference)
+  end
+
+  def step_definition(id, {:regex, {source, _opts}}, source_reference) do
+    step_definition_envelope(id, source, "REGULAR_EXPRESSION", source_reference)
   end
 
   defp step_definition_envelope(id, source, type, source_reference) do
