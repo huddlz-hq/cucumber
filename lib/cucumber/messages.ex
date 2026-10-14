@@ -401,6 +401,24 @@ defmodule Cucumber.Messages do
   was recorded during a scenario (both optional in the schema), or
   `:test_run_hook_started_id` when it was recorded by a `before_all` or
   `after_all` hook.
+
+  ## Examples
+
+      attachment = %Cucumber.Attachment{
+        body: "provisioned",
+        media_type: "text/plain",
+        encoding: :identity
+      }
+
+      Cucumber.Messages.attachment(attachment, %{test_run_hook_started_id: "7"})
+      # => %{
+      #      attachment: %{
+      #        body: "provisioned",
+      #        mediaType: "text/plain",
+      #        contentEncoding: "IDENTITY",
+      #        testRunHookStartedId: "7"
+      #      }
+      #    }
   """
   @spec attachment(Cucumber.Attachment.t(), map() | nil) :: envelope()
   def attachment(%Cucumber.Attachment{} = attachment, ref) do

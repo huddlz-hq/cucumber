@@ -205,20 +205,27 @@ defmodule Cucumber.CckValidationTest do
     attachment_index = Enum.find_index(stream, &match?(%{"attachment" => _}, &1))
     attachment = Enum.at(stream, attachment_index)
     %{"attachment" => %{"testRunHookStartedId" => hook_started_id}} = attachment
-    without = List.delete_at(stream, attachment_index)
+    stream_without_attachment = List.delete_at(stream, attachment_index)
 
-    hook_started = index_of(without, "testRunHookStarted", "id", hook_started_id)
+    hook_started =
+      index_of(stream_without_attachment, "testRunHookStarted", "id", hook_started_id)
 
     hook_finished =
-      index_of(without, "testRunHookFinished", "testRunHookStartedId", hook_started_id)
+      index_of(
+        stream_without_attachment,
+        "testRunHookFinished",
+        "testRunHookStartedId",
+        hook_started_id
+      )
 
-    case_started = Enum.find_index(without, &match?(%{"testCaseStarted" => _}, &1))
+    case_started =
+      Enum.find_index(stream_without_attachment, &match?(%{"testCaseStarted" => _}, &1))
 
     # Before its hook started, right after it finished, and later inside a
     # test case
     for index <- [hook_started, hook_finished + 1, case_started + 1] do
       assert_raise ExUnit.AssertionError, fn ->
-        without |> List.insert_at(index, attachment) |> CckStream.assert_valid()
+        stream_without_attachment |> List.insert_at(index, attachment) |> CckStream.assert_valid()
       end
     end
   end

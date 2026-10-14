@@ -858,6 +858,42 @@ defmodule Gherkin.ParserTest do
       assert %{scenario: 5, scenario_tags: [4], steps: [6, 9], datatables: [[7, 8], nil]} =
                from_gherkin
     end
+
+    test "an unexpected-content parse error reports its true line" do
+      gherkin = """
+
+
+      Feature: Leading blanks
+
+        Scenario: s
+          Given a step
+
+        this is not valid gherkin
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert Exception.message(error) =~ "Unexpected content"
+      assert error.line == 8
+    end
+
+    test "a ragged table row parse error reports its true line" do
+      gherkin = """
+
+
+      Feature: Leading blanks
+
+        Scenario: s
+          Given a table:
+            | a | b |
+            | 1 |
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert Exception.message(error) =~ "2 cells to match the first row, got 1"
+      assert error.line == 8
+    end
   end
 
   defp source_lines(feature) do

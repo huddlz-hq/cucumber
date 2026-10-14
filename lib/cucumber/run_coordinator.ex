@@ -248,39 +248,61 @@ defmodule Cucumber.RunCoordinator do
               do: bracket_run_hook(hook, context, &run_after_all_hook/2)
 
         case Enum.find(results, &match?({:error, _}, &1)) do
-          nil -> :ok
-          {:error, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
+          nil ->
+            :ok
+
+          {:error, %{kind: kind, reason: reason, stacktrace: stacktrace}} ->
+            :erlang.raise(kind, reason, stacktrace)
         end
     end
   end
 
+  # An after_all hook's context is not handed on, so it passes with the
+  # context it was given. Its error is the raise to replay once every
+  # after_all hook has run.
   defp run_after_all_hook({name, {module, func_name}}, context) do
     case apply(module, func_name, [context]) do
-      {:error, reason} -> {:error, {:error, after_all_error(name, reason), []}}
-      _other -> :ok
+      {:error, reason} ->
+        {:error, %{kind: :error, reason: after_all_error(name, reason), stacktrace: []}}
+
+      _other ->
+        {:ok, context}
     end
   catch
     kind, reason ->
-      {:error, {kind, reason, __STACKTRACE__}}
+      {:error, %{kind: kind, reason: reason, stacktrace: __STACKTRACE__}}
   end
 
+  # The result of running one run-level hook: it passed with the context it
+  # hands on, or failed with an error whose shape the hook kind defines.
+  @typep run_hook_result :: {:ok, map()} | {:error, term()}
+
   # Runs one run-level hook via `run_hook.(hook, context)`, bracketed with
-  # testRunHookStarted/Finished envelopes through the coordinator; the hook's
-  # own context carries its started id. The hook FAILED when `run_hook`
-  # returns `{:error, _}`. Returns `run_hook`'s result.
+  # testRunHookStarted/Finished envelopes through the coordinator.
+  #
+  # The hook's own context carries its testRunHookStarted id as the message
+  # ref, so attachments it records (Cucumber.attach/4) land on the hook in
+  # the message stream. The ref is stripped from the context the hook hands
+  # on, so it never leaks into the next hook or a scenario.
+  @spec bracket_run_hook(
+          {term(), {module(), atom()}},
+          map(),
+          ({term(), {module(), atom()}}, map() -> run_hook_result())
+        ) :: run_hook_result()
   defp bracket_run_hook({_name, ref} = hook, context, run_hook) do
     started_id = run_hook_started_call(ref)
     started_at = System.monotonic_time(:nanosecond)
-    result = run_hook.(hook, put_run_hook_ref(context, started_id))
-    status = if match?({:error, _}, result), do: :failed, else: :passed
+    hook_context = if started_id, do: put_run_hook_ref(context, started_id), else: context
+
+    {status, result} =
+      case run_hook.(hook, hook_context) do
+        {:ok, context} -> {:passed, {:ok, Map.delete(context, :cucumber_message_ref)}}
+        {:error, _error} = error -> {:failed, error}
+      end
+
     run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
     result
   end
-
-  # The hook's own context carries its testRunHookStarted id as the message
-  # ref, so attachments it records (Cucumber.attach/4) land on the hook in
-  # the message stream. The ref is never part of the context a hook hands on.
-  defp put_run_hook_ref(context, nil), do: context
 
   defp put_run_hook_ref(context, started_id),
     do: Map.put(context, :cucumber_message_ref, %{test_run_hook_started_id: started_id})
@@ -523,7 +545,7 @@ defmodule Cucumber.RunCoordinator do
     {context, first_error} =
       Enum.reduce(hooks, {%{}, nil}, fn hook, {context, first_error} ->
         case bracket_run_hook(hook, context, &run_before_all_hook/2) do
-          {:ok, context} -> {Map.delete(context, :cucumber_message_ref), first_error}
+          {:ok, context} -> {context, first_error}
           {:error, error} -> {context, first_error || error}
         end
       end)

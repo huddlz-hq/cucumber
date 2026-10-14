@@ -14,8 +14,32 @@ defmodule Cucumber.HookExpansionTest do
   alias Cucumber.BehaviorCase.Collector
   alias Cucumber.RunCoordinator
 
+  # One single-scenario `@async` feature per name, each scenario running
+  # `step`, so several feature modules reach the run hooks concurrently.
+  defp async_features(names, step) do
+    for name <- names do
+      """
+      @async
+      Feature: #{name}
+        Scenario: #{name} scenario
+          Given #{step}
+      """
+    end
+  end
+
   defmodule BeforeAllWaiters do
     @moduledoc false
+
+    # The once-guard's {module, name, arity}, taken from a capture and
+    # checked when this file compiles, so renaming the function fails
+    # loudly instead of silently matching no stack frames.
+    guard = Function.info(&RunCoordinator.before_all_context/1)
+    Code.ensure_loaded!(guard[:module])
+
+    unless function_exported?(guard[:module], guard[:name], guard[:arity]),
+      do: raise("RunCoordinator.before_all_context/1 no longer exists")
+
+    @before_all_context {guard[:module], guard[:name], guard[:arity]}
 
     # Called from a BeforeAll hook: blocks until `others` other processes
     # are observably waiting on the run's BeforeAll once-guard — each one is
@@ -52,7 +76,9 @@ defmodule Cucumber.HookExpansionTest do
     defp in_before_all_context?(pid) do
       case Process.info(pid, :current_stacktrace) do
         {:current_stacktrace, frames} ->
-          Enum.any?(frames, &match?({RunCoordinator, :before_all_context, 1, _location}, &1))
+          Enum.any?(frames, fn {module, name, arity, _location} ->
+            {module, name, arity} == @before_all_context
+          end)
 
         nil ->
           false
@@ -183,14 +209,7 @@ defmodule Cucumber.HookExpansionTest do
     test "BeforeAll runs exactly once when several async modules reach it concurrently" do
       run =
         run_features(
-          for name <- ~w(alpha beta gamma delta) do
-            """
-            @async
-            Feature: #{name}
-              Scenario: #{name} scenario
-                Given the before-all context is visible
-            """
-          end,
+          async_features(~w(alpha beta gamma delta), "the before-all context is visible"),
           steps: [Steps],
           hooks: [BlockingBeforeAllHooks]
         )
@@ -219,14 +238,7 @@ defmodule Cucumber.HookExpansionTest do
     test "modules waiting on a BeforeAll whose process dies fail instead of hanging" do
       run =
         run_features(
-          for name <- ~w(alpha beta gamma) do
-            """
-            @async
-            Feature: #{name}
-              Scenario: #{name} scenario
-                Given a step passes
-            """
-          end,
+          async_features(~w(alpha beta gamma), "a step passes"),
           steps: [Steps],
           hooks: [DyingBeforeAllHooks]
         )
@@ -295,14 +307,7 @@ defmodule Cucumber.HookExpansionTest do
     test "concurrent async modules all fail with the first BeforeAll error" do
       run =
         run_features(
-          for name <- ~w(alpha beta gamma) do
-            """
-            @async
-            Feature: #{name}
-              Scenario: #{name} scenario
-                Given a step passes
-            """
-          end,
+          async_features(~w(alpha beta gamma), "a step passes"),
           steps: [Steps],
           hooks: [BeforeAllErrorHooks]
         )
