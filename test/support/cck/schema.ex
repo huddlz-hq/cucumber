@@ -1,6 +1,6 @@
 defmodule Cucumber.CckSchema do
   @moduledoc """
-  Offline validator for the JSON Schema vocabulary used by Messages 33.0.2.
+  Offline validator for the JSON Schema vocabulary used by Messages 34.2.1.
 
   Reads the unmodified upstream bundle. This is intentionally not a general
   JSON Schema implementation: unknown validation keywords fail closed.

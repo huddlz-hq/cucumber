@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 42 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
+- Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
+
 ## v1.0.0 (2026-07-02)
 
 This release completes the Cucumber Compatibility Kit roadmap (#17–#29) and marks 1.0. Cucumber for Elixir is now CCK compliant: the official [CCK](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the Cucumber Messages we emit against the reference implementation's output. Full documentation for every feature below lives in the [guides](https://hexdocs.pm/cucumber).
