@@ -3,6 +3,7 @@ defmodule Cucumber.CckFixtures do
   import ExUnit.Assertions
 
   @root "test/fixtures/cck"
+  @external_resource Path.join(@root, "upstream.json")
   @manifest @root |> Path.join("upstream.json") |> File.read!() |> JSON.decode!()
 
   def manifest, do: @manifest
