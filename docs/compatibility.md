@@ -29,14 +29,15 @@ and exactly once, globally unique IDs, references to earlier envelopes of the
 right message type, one completed run, paired run hooks, and complete ordered
 steps within each active attempt. Attachments must reference that attempt's active
 step, or — for attachments from `before_all`/`after_all` hooks — a run hook that
-has started and not yet finished. Attempt state is independent so concurrent scenarios may interleave.
-Both actual and reference streams pass these checks **before** approval
-normalization. The Messages emission behavior tests also use these checks,
-including abrupt process termination and hook failures. Mutation tests exercise
-rejection paths and acceptance of interleaved attempts.
+has started and not yet finished. Attempt state is independent so concurrent
+scenarios may interleave. Both actual and reference streams pass these checks
+**before** approval normalization. The Messages emission behavior tests also use
+these checks, including abrupt process termination and hook failures. Mutation
+tests exercise rejection paths and acceptance of interleaved attempts.
 
 This validator targets complete execution streams for the supported subset. It
-does not validate arbitrary partial streams, every semantic relationship in the Messages model, or compatibility with every consumer.
+does not validate arbitrary partial streams, every semantic relationship in the
+Messages model, or compatibility with every consumer.
 
 ## Sample matrix
 

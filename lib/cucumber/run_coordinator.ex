@@ -243,38 +243,38 @@ defmodule Cucumber.RunCoordinator do
       {after_all_hooks, before_all_context} ->
         context = Map.put(before_all_context, :suite_result, suite_result)
 
-        errors =
-          after_all_hooks
-          |> Enum.reverse()
-          |> Enum.flat_map(fn hook -> run_after_all_hook(hook, context) end)
+        results =
+          for hook <- Enum.reverse(after_all_hooks),
+              do: bracket_run_hook(hook, context, &run_after_all_hook/2)
 
-        case errors do
-          [] -> :ok
-          [{kind, reason, stacktrace} | _rest] -> :erlang.raise(kind, reason, stacktrace)
+        case Enum.find(results, &match?({:error, _}, &1)) do
+          nil -> :ok
+          {:error, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
         end
     end
   end
 
-  defp run_after_all_hook({name, ref}, context) do
-    started_id = run_hook_started_call(ref)
-    started_at = System.monotonic_time(:nanosecond)
-    errors = apply_after_all_hook(name, ref, put_run_hook_ref(context, started_id))
-    status = if errors == [], do: :passed, else: :failed
-    run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
-    errors
-  end
-
-  defp apply_after_all_hook(name, {module, func_name}, context) do
+  defp run_after_all_hook({name, {module, func_name}}, context) do
     case apply(module, func_name, [context]) do
-      {:error, reason} ->
-        [{:error, after_all_error(name, reason), []}]
-
-      _other ->
-        []
+      {:error, reason} -> {:error, {:error, after_all_error(name, reason), []}}
+      _other -> :ok
     end
   catch
     kind, reason ->
-      [{kind, reason, __STACKTRACE__}]
+      {:error, {kind, reason, __STACKTRACE__}}
+  end
+
+  # Runs one run-level hook via `run_hook.(hook, context)`, bracketed with
+  # testRunHookStarted/Finished envelopes through the coordinator; the hook's
+  # own context carries its started id. The hook FAILED when `run_hook`
+  # returns `{:error, _}`. Returns `run_hook`'s result.
+  defp bracket_run_hook({_name, ref} = hook, context, run_hook) do
+    started_id = run_hook_started_call(ref)
+    started_at = System.monotonic_time(:nanosecond)
+    result = run_hook.(hook, put_run_hook_ref(context, started_id))
+    status = if match?({:error, _}, result), do: :failed, else: :passed
+    run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
+    result
   end
 
   # The hook's own context carries its testRunHookStarted id as the message
@@ -521,21 +521,8 @@ defmodule Cucumber.RunCoordinator do
   # testRunHookStarted/Finished envelopes through the coordinator.
   defp execute_before_all(hooks) do
     {context, first_error} =
-      Enum.reduce(hooks, {%{}, nil}, fn {_name, ref} = hook, {context, first_error} ->
-        started_id = run_hook_started_call(ref)
-        started_at = System.monotonic_time(:nanosecond)
-        result = run_before_all_hook(hook, put_run_hook_ref(context, started_id))
-
-        status =
-          case result do
-            {:ok, _context} -> :passed
-            {:error, _error} -> :failed
-          end
-
-        duration = System.monotonic_time(:nanosecond) - started_at
-        run_hook_finished_call(started_id, status, duration)
-
-        case result do
+      Enum.reduce(hooks, {%{}, nil}, fn hook, {context, first_error} ->
+        case bracket_run_hook(hook, context, &run_before_all_hook/2) do
           {:ok, context} -> {Map.delete(context, :cucumber_message_ref), first_error}
           {:error, error} -> {context, first_error || error}
         end
