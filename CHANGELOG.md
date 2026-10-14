@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- Attaching from a `before_all` hook (`Cucumber.attach/4`, `Cucumber.log/2`, `Cucumber.link/2`) no longer deadlocks the run coordinator and fails every scenario (#57). `before_all` hooks now run in the calling test process; the coordinator still guarantees they run exactly once per run, and concurrent `@async` features wait for the first caller's result. The attachment is recorded with no phase.
 - A `.feature` file that starts with blank lines now reports its true line numbers everywhere they surface — error `file:line` links, the `scenario_line` tag, failure stack frames, and Cucumber Messages locations. Previously the parser stripped leading newlines before parsing, shifting every line up by the number of leading blank lines and disagreeing with the `.feature.md` parser (#58).
 
 ## v1.0.0 (2026-07-02)

@@ -188,6 +188,46 @@ defmodule Cucumber.AttachmentsTest do
       assert Enum.all?(run.attachments, &(&1.scenario_name == "hooks attach"))
     end
 
+    test "attachments from a before_all hook record with no phase" do
+      defmodule AttachingBeforeAllHooks do
+        use Cucumber.Hooks
+
+        before_all context do
+          context
+          |> Cucumber.log("from before_all")
+          |> Cucumber.link("https://cucumber.io")
+
+          {:ok, Map.put(context, :provisioned, true)}
+        end
+      end
+
+      run =
+        run_feature(
+          """
+          Feature: run hook attribution
+            Scenario: runs after before_all
+              Given the string "mid" is attached as "text/plain"
+          """,
+          steps: [Steps],
+          hooks: [AttachingBeforeAllHooks]
+        )
+
+      assert %{total: 1, failures: 0, passed: 1} = run
+
+      assert [
+               %Attachment{
+                 body: "from before_all",
+                 media_type: "text/x.cucumber.log+plain",
+                 phase: nil,
+                 step_text: nil,
+                 scenario_name: nil,
+                 attempt: nil
+               },
+               %Attachment{body: "https://cucumber.io", media_type: "text/uri-list", phase: nil},
+               %Attachment{body: "mid", phase: :step}
+             ] = run.attachments
+    end
+
     test "attachments from step hooks attribute to the bracketed step" do
       defmodule AttachingStepHooks do
         use Cucumber.Hooks
