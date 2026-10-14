@@ -463,27 +463,44 @@ defmodule Gherkin.NimbleParser do
   """
   def parse(gherkin_string) do
     case parse_feature(gherkin_string) do
-      {:ok, [feature], rest, _context, {line, col}, _offset} ->
+      {:ok, [feature], rest, _context, {line, line_offset}, offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
         if String.trim(rest) != "" do
           raise Gherkin.ParseError,
-            message: "Unexpected content; parser stopped before end of file",
+            message: "a step, table row, doc string, tag, comment or keyword line",
             line: line,
-            column: col,
-            rest: String.slice(rest, 0, 80)
+            column: error_column(gherkin_string, line_offset, offset, rest),
+            rest: error_snippet(rest)
         end
 
         feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!(gherkin_string)
 
-      {:error, message, rest, _context, {line, col}, _offset} ->
+      {:error, message, rest, _context, {line, line_offset}, offset} ->
         raise Gherkin.ParseError,
-          message: message,
+          # ParseError.message/1 supplies the "Expected"
+          message: String.replace_prefix(message, "expected ", ""),
           line: line,
-          column: col,
-          rest: String.slice(rest, 0, 50)
+          column: error_column(gherkin_string, line_offset, offset, rest),
+          rest: error_snippet(rest)
     end
+  end
+
+  # NimbleParsec reports the byte offset where the error line starts and
+  # where parsing stopped; the column is 1-based, in characters, and skips
+  # the indentation still ahead in `rest`.
+  defp error_column(source, line_offset, offset, rest) do
+    before = binary_part(source, line_offset, offset - line_offset)
+    [indent] = Regex.run(~r/\A[ \t]*/, rest)
+    String.length(before) + byte_size(indent) + 1
+  end
+
+  # The line parsing stopped on, trimmed and capped like the Markdown
+  # parser's snippets.
+  defp error_snippet(rest) do
+    [line | _] = String.split(rest, ~r/\r?\n/, parts: 2)
+    line |> String.trim() |> String.slice(0, 50)
   end
 
   # Comment lines are content-less to the grammar (skipped like blank

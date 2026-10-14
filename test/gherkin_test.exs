@@ -669,7 +669,7 @@ defmodule Gherkin.ParserTest do
       this is not valid gherkin
       """
 
-      assert_raise Gherkin.ParseError, ~r/Unexpected content/, fn ->
+      assert_raise Gherkin.ParseError, ~r/line 6.*Expected a step/s, fn ->
         Gherkin.Parser.parse(gherkin)
       end
     end
@@ -941,6 +941,44 @@ defmodule Gherkin.ParserTest do
 
       assert error.line == 9
       assert Exception.message(error) =~ "2 cells to match the first row, got 1"
+    end
+  end
+
+  describe "parse/1 error messages" do
+    test "a line the parser cannot read says what it expected there" do
+      gherkin = "Feature: Broken\n\nScenario: s\n  Given a step\n  Invalid line here\n"
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert Exception.message(error) =~
+               "Expected a step, table row, doc string, tag, comment or keyword line"
+
+      refute Exception.message(error) =~ "Unexpected"
+    end
+
+    test "the column is where the unreadable line's content starts" do
+      gherkin = "Feature: Broken\n\nScenario: s\n  Given a step\n  Invalid line here\n"
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert {error.line, error.column} == {5, 3}
+    end
+
+    test "the snippet is the unreadable line alone" do
+      gherkin =
+        "Feature: Broken\n\nScenario: s\n  Given a step\n  Invalid line here\n  Given more\n"
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert error.rest == "Invalid line here"
+    end
+
+    test "a file that is not a feature says so once, at column 1" do
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse("Not a feature\n") end
+
+      assert {error.line, error.column} == {1, 1}
+      assert Exception.message(error) =~ "Expected feature"
+      refute Exception.message(error) =~ ~r/expected expected/i
     end
   end
 end
