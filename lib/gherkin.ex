@@ -182,6 +182,8 @@ defmodule Gherkin.Step do
   - docstring_media_type: Optional media type annotation on the opening
     docstring delimiter (e.g. `json` in `\"\"\"json`)
   - datatable: Optional table data (pipe-delimited)
+  - argument_order: The step's arguments (`:datatable`, `:docstring`) in
+    source order; a step may carry both, either one first
   - line: Line number in the source file
 
   `docstring_line`, `docstring_delimiter`, and `datatable_lines` record the
@@ -195,6 +197,7 @@ defmodule Gherkin.Step do
             docstring: nil,
             docstring_media_type: nil,
             datatable: nil,
+            argument_order: [],
             line: nil,
             docstring_line: nil,
             docstring_delimiter: nil,
@@ -206,6 +209,7 @@ defmodule Gherkin.Step do
           docstring: String.t() | nil,
           docstring_media_type: String.t() | nil,
           datatable: [[String.t()]] | nil,
+          argument_order: [:datatable | :docstring],
           line: non_neg_integer() | nil,
           docstring_line: non_neg_integer() | nil,
           docstring_delimiter: String.t() | nil,

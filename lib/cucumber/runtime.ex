@@ -734,8 +734,13 @@ defmodule Cucumber.Runtime do
     Enum.reject(trace, &match?({Process, _, _, _}, &1))
   end
 
+  # Step arguments belong to their step: clear the previous step's before
+  # adding this one's, so a step never sees an argument it wasn't given.
+  @step_argument_keys [:datatable, :docstring, :docstring_media_type]
+
   defp prepare_context(context, args, step) do
     context
+    |> Map.drop(@step_argument_keys)
     |> Map.put(:args, args)
     |> add_datatable(step.datatable)
     |> add_docstring(step.docstring, step.docstring_media_type)

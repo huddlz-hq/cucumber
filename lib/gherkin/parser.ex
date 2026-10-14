@@ -11,7 +11,7 @@ defmodule Gherkin.NimbleParser do
   - Level 1: Primitives (whitespace, newlines, rest_of_line)
   - Level 2: Keywords (Given, When, Then, Feature:, etc.)
   - Level 3: Elements (tags, datatables, docstrings)
-  - Level 4: Steps (keyword + text + optional attachments)
+  - Level 4: Steps (keyword + text + optional step arguments)
   - Level 5: Scenarios (Background, Scenario, ScenarioOutline, Examples)
   - Level 6: Feature (top-level parser)
   """
@@ -225,19 +225,20 @@ defmodule Gherkin.NimbleParser do
     ])
 
   # Messages 34 supports a docstring and data table on the same step, in either order.
-  attachments =
+  # Gherkin ignores blank and comment lines before and between them.
+  step_arguments =
     choice([
-      docstring |> optional(datatable),
-      datatable |> optional(docstring)
+      blank_lines |> concat(docstring) |> optional(blank_lines |> concat(datatable)),
+      blank_lines |> concat(datatable) |> optional(blank_lines |> concat(docstring))
     ])
 
-  # Complete step with optional docstring/datatable attachments
+  # Complete step with optional docstring/datatable step arguments
   step =
     lookahead_not(section_marker)
     |> concat(optional_ws)
     |> line(concat(step_keyword, step_text))
     |> concat(eol)
-    |> optional(attachments)
+    |> optional(step_arguments)
     |> reduce({__MODULE__, :build_step, []})
     |> label("step")
 
@@ -654,18 +655,21 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_step(args) do
-    # args structure: [{[keyword, text], {line, _offset}} | attachments]
-    [step_data | attachments] = args
+    # args structure: [{[keyword, text], {line, _offset}} | step_arguments]
+    [step_data | step_arguments] = args
     {[keyword, text], {line_num, _offset}} = step_data
 
-    Enum.reduce(
-      attachments,
-      %Step{keyword: keyword, text: text, line: line_num - 1},
-      &add_step_attachment(&2, &1)
-    )
+    step =
+      Enum.reduce(
+        step_arguments,
+        %Step{keyword: keyword, text: text, line: line_num - 1},
+        &add_step_argument(&2, &1)
+      )
+
+    %{step | argument_order: Enum.map(step_arguments, &elem(&1, 0))}
   end
 
-  defp add_step_attachment(step, {:docstring, {content, media_type, line, delimiter}}) do
+  defp add_step_argument(step, {:docstring, {content, media_type, line, delimiter}}) do
     %{
       step
       | docstring: content,
@@ -675,7 +679,7 @@ defmodule Gherkin.NimbleParser do
     }
   end
 
-  defp add_step_attachment(step, {:datatable, rows}) do
+  defp add_step_argument(step, {:datatable, rows}) do
     {cells, lines} = Enum.unzip(rows)
     %{step | datatable: cells, datatable_lines: lines}
   end

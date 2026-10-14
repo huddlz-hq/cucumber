@@ -452,38 +452,52 @@ defmodule Cucumber.Messages do
 
   # Pickle step arguments carry content only — no ids or locations
   # (those live in the gherkinDocument nodes the astNodeIds point to).
-  defp pickle_step_argument(%{docstring: docstring, datatable: [_ | _]} = step)
-       when is_binary(docstring) do
-    %{docString: doc_string} = pickle_step_argument(%{step | datatable: nil})
-    %{dataTable: data_table} = pickle_step_argument(%{step | docstring: nil})
-    doc_line = step.docstring_line || step.line || 0
-    table_line = List.first(step.datatable_lines || []) || step.line || 0
-    doc_first = doc_line <= table_line
+  # A step with both arguments numbers each (from 1) by its argument order.
+  defp pickle_step_argument(step) do
+    case {pickle_doc_string(step), pickle_data_table(step)} do
+      {nil, nil} ->
+        nil
 
-    %{
-      docString: Map.put(doc_string, :argumentIndex, if(doc_first, do: 1, else: 2)),
-      dataTable: Map.put(data_table, :argumentIndex, if(doc_first, do: 2, else: 1))
-    }
+      {doc_string, nil} ->
+        %{docString: doc_string}
+
+      {nil, data_table} ->
+        %{dataTable: data_table}
+
+      {doc_string, data_table} ->
+        %{
+          docString: Map.put(doc_string, :argumentIndex, argument_index(step, :docstring)),
+          dataTable: Map.put(data_table, :argumentIndex, argument_index(step, :datatable))
+        }
+    end
   end
 
-  defp pickle_step_argument(%{docstring: docstring} = step) when is_binary(docstring) do
-    doc_string =
-      case step.docstring_media_type do
-        nil -> %{content: docstring}
-        media_type -> %{content: docstring, mediaType: media_type}
-      end
-
-    %{docString: doc_string}
+  defp pickle_doc_string(%{docstring: docstring} = step) when is_binary(docstring) do
+    case step.docstring_media_type do
+      nil -> %{content: docstring}
+      media_type -> %{content: docstring, mediaType: media_type}
+    end
   end
 
-  defp pickle_step_argument(%{datatable: [_ | _] = datatable}) do
+  defp pickle_doc_string(_step), do: nil
+
+  defp pickle_data_table(%{datatable: [_ | _] = datatable}) do
     rows =
       Enum.map(datatable, fn row ->
         %{cells: Enum.map(row, &%{value: &1})}
       end)
 
-    %{dataTable: %{rows: rows}}
+    %{rows: rows}
   end
 
-  defp pickle_step_argument(_step), do: nil
+  defp pickle_data_table(_step), do: nil
+
+  # Parsed steps always record their argument order; a hand-built step
+  # with both arguments but no order numbers the doc string first.
+  defp argument_index(%{argument_order: [_, _] = order}, argument) do
+    Enum.find_index(order, &(&1 == argument)) + 1
+  end
+
+  defp argument_index(_step, :docstring), do: 1
+  defp argument_index(_step, :datatable), do: 2
 end

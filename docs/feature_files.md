@@ -169,6 +169,27 @@ Scenario: Submit structured feedback
 The content arrives in your step as `context.docstring`; the media type (if
 given) as `context.docstring_media_type`.
 
+### Both on One Step
+
+A step may carry one data table and one doc string together, in either order.
+Blank and comment lines may separate them:
+
+```gherkin
+Scenario: Import a price list
+  When I import this price list:
+    | Product    | Price  |
+    | Smartphone | 699.99 |
+    # the import notes
+    """
+    Prices include tax.
+    """
+  Then the catalog should list 1 product
+```
+
+The step receives both `context.datatable` and `context.docstring`. A step
+argument belongs only to the step it is written under: the next step sees
+`context.datatable` and `context.docstring` only if it has its own.
+
 ### Descriptions
 
 Free-form description text can follow any section header — `Feature:`,

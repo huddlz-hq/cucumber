@@ -385,6 +385,50 @@ defmodule Gherkin.MarkdownTest do
       end
     end
 
+    test "a step may carry a table and a fenced code block, recorded in source order" do
+      feature =
+        Markdown.parse("""
+        # Feature: Both arguments
+        ## Scenario: s
+        * Given a table then code:
+          | hello |
+          ```
+          world
+          ```
+        * And code then a table:
+          ```
+          hello
+          ```
+          | world |
+          | again |
+        """)
+
+      [%{steps: [table_first, doc_first]}] = feature.scenarios
+
+      assert table_first.datatable == [["hello"]]
+      assert table_first.docstring == "world"
+      assert table_first.argument_order == [:datatable, :docstring]
+
+      assert doc_first.docstring == "hello"
+      assert doc_first.datatable == [["world"], ["again"]]
+      assert doc_first.argument_order == [:docstring, :datatable]
+    end
+
+    test "table rows on both sides of a step's fenced code block raise" do
+      assert_raise Gherkin.ParseError, ~r/single data table/s, fn ->
+        Markdown.parse("""
+        # Feature: Split table
+        ## Scenario: s
+        * Given a split table:
+          | before |
+          ```
+          doc
+          ```
+          | after |
+        """)
+      end
+    end
+
     test "an unclosed fence raises" do
       assert_raise Gherkin.ParseError, ~r/closing ``` fence/s, fn ->
         Markdown.parse("""

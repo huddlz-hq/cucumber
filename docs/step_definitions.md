@@ -271,6 +271,12 @@ step "I submit the following JSON:", context do
 end
 ```
 
+A step can receive a data table and a doc string together; see
+[Feature Files](feature_files.md#both-on-one-step). Step arguments are scoped
+to their step: `:datatable`, `:docstring`, and `:docstring_media_type` are
+removed from the context before the next step runs, so copy anything you need
+later into your own context key.
+
 ## Return Values
 
 Step definitions must return one of the following values (matching ExUnit's setup behavior):
