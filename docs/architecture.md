@@ -7,6 +7,7 @@ This document provides an overview of the Cucumber implementation architecture, 
 ```
 Cucumber
   ├── Discovery (Feature/Step/Hook Finding)
+  ├── StepRegistry (Step Definitions & Matching)
   ├── Gherkin (Parser: .feature and .feature.md)
   ├── Gherkin.Pickles (Scenario Expansion)
   ├── Expression (Parameter Matching)
@@ -26,8 +27,20 @@ Discovery.discover()
   ├── Scans for features (test/features/**/*.feature and **/*.feature.md)
   ├── Loads support files (test/features/support/**/*.exs — hooks, parameter types)
   ├── Loads step definitions (test/features/step_definitions/**/*.exs)
-  └── Returns: features, step registry, hooks, parameter types
+  └── Returns: features, step registry, hooks
 ```
+
+### Step Registry
+
+`Cucumber.StepRegistry` is the complete set of step definitions and parameter types for a run, and the one place step text is matched against them. Discovery builds it from the loaded step and parameter-type modules; building merges the parameter types, compiles every pattern once, rejects duplicate definitions and types, drops (with a warning) definitions that use undefined parameter types, and orders definitions by file and line.
+
+```elixir
+StepRegistry.new(step_modules, parameter_type_modules)
+StepRegistry.match(registry, step_text)
+  # => {:ok, definition, args} | :undefined | {:ambiguous, [{definition, args}]}
+```
+
+The runtime executes the matched definition and the Cucumber Messages emitter references the same definitions, so matching semantics live in exactly one module.
 
 ### Gherkin Parser
 
@@ -66,7 +79,7 @@ The Expression engine uses NimbleParsec to parse and match step text against ste
 - Escape sequences (`\{`, `\}`, `\(`, `\)`, `\/`, `\\`)
 - Parameter conversion (string to typed values)
 
-Step definitions can also use plain regular expressions (`step ~r/.../`), which participate in the same single matching path — so ambiguity between a regex and a cucumber expression is detected like any other ambiguity and raises `Cucumber.AmbiguousStepError`.
+Step definitions can also use plain regular expressions (`step ~r/.../`), which participate in the same single matching path in `Cucumber.StepRegistry` — so ambiguity between a regex and a cucumber expression is detected like any other ambiguity and raises `Cucumber.AmbiguousStepError`.
 
 ```elixir
 defmodule Cucumber.Expression do
@@ -106,7 +119,7 @@ Each generated test body is a single call into the runtime, which owns the whole
 Runtime.run_scenario(context, ...)
   ├── Runs before-scenario hooks (and lazily before_all, once per run)
   ├── Executes background steps, then scenario steps:
-  │   ├── Finds the matching step definition (0 → undefined, >1 → ambiguous)
+  │   ├── Matches the step against the step registry (0 → undefined, >1 → ambiguous)
   │   ├── Prepares context with args, datatables, docstrings
   │   ├── Brackets it with before_step/after_step hooks
   │   └── Processes the return value (incl. pending/skipped, retry)
@@ -140,7 +153,7 @@ end
 1. **Discovery Phase** (at compile time)
    - `Cucumber.compile_features!()` is called in test_helper.exs
    - Discovery system finds all features and step definitions
-   - Step registry is built with pattern → module mappings
+   - The step registry is built from step definition and parameter type modules
 
 2. **Compilation Phase**
    - Features are expanded into pickles (outline rows, rule flattening)
@@ -158,7 +171,7 @@ end
 ```
 Feature File → Parser → AST
                           ↓
-Step Files → Discovery → Registry
+Step Files → Discovery → StepRegistry
                           ↓
                       Compiler → Test Modules
                                       ↓

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Step matching moved into `Cucumber.StepRegistry`.** The registry is built once from step definition and parameter type modules (`StepRegistry.new/2`) and answers `StepRegistry.match/2` with `{:ok, definition, args}`, `:undefined`, or `{:ambiguous, matches}`. Every pattern now compiles once when the registry is built instead of on each match.
+- `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
+- `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
+- `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
+
+### Bug Fixes
+
+- Regex step definitions with flags (e.g. `~r/.../i`) no longer crash when a step matches them on Elixir versions where `Regex.opts/1` returns a list.
+
 ## v1.0.0 (2026-07-02)
 
 This release completes the Cucumber Compatibility Kit roadmap (#17–#29) and marks 1.0. Cucumber for Elixir is now CCK compliant: the official [CCK](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the Cucumber Messages we emit against the reference implementation's output. Full documentation for every feature below lives in the [guides](https://hexdocs.pm/cucumber).
