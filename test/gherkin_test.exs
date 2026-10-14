@@ -840,5 +840,71 @@ defmodule Gherkin.ParserTest do
 
       assert examples.table_body == [["Doritos", ""]]
     end
+
+    test "drops text after the last pipe of an unterminated row" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario: Unterminated
+        Given these notes
+          | note | stray
+      """
+
+      [scenario] = Gherkin.Parser.parse(gherkin).scenarios
+
+      assert hd(scenario.steps).datatable == [["note"]]
+    end
+  end
+
+  describe "parse/1 inconsistent table cell counts" do
+    test "a data table row with fewer cells than the first row raises at that row" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario: Ragged
+        Given these products
+          | name    | flavor | size |
+          | Doritos | Nacho  |
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert error.line == 6
+      assert Exception.message(error) =~ "a table row with 3 cells to match the first row, got 2"
+    end
+
+    test "a data table row with more cells than the first row raises" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario: Ragged
+        Given these notes
+          | note |
+          | a    | b |
+      """
+
+      assert_raise Gherkin.ParseError, ~r/1 cell to match the first row, got 2/, fn ->
+        Gherkin.Parser.parse(gherkin)
+      end
+    end
+
+    test "an Examples row that does not match the header raises" do
+      gherkin = """
+      Feature: Tables
+
+      Rule: Flavors
+        Scenario Outline: Optional flavor
+          Given a product named "<name>" with flavor "<flavor>"
+
+          Examples:
+            | name    | flavor |
+            | Doritos |
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert error.line == 9
+      assert Exception.message(error) =~ "2 cells to match the first row, got 1"
+    end
   end
 end

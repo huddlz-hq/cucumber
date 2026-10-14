@@ -81,7 +81,8 @@ defmodule Gherkin.Markdown do
 
   Raises `Gherkin.ParseError` when the Gherkin structure is invalid (a step
   outside a scenario, an Examples table outside a Scenario Outline, an
-  unclosed code fence, and similar).
+  unclosed code fence, a table row whose cell count differs from its first
+  row, and similar).
   """
   @spec parse(String.t()) :: Feature.t()
   def parse(source) do
@@ -101,6 +102,7 @@ defmodule Gherkin.Markdown do
     |> Enum.with_index()
     |> Enum.reduce(state, &handle_line/2)
     |> finish()
+    |> Gherkin.Tables.validate!()
   end
 
   # --- Line dispatch ---------------------------------------------------
@@ -357,14 +359,14 @@ defmodule Gherkin.Markdown do
     }
   end
 
-  # Cells follow the `.feature` parser's conventions: split on `|`,
-  # trimmed, empties dropped.
+  # Cells follow the `.feature` parser's conventions: the text between
+  # consecutive `|`s, trimmed. Text before the first `|` and after the last
+  # is not a cell; empty cells keep their column position.
   defp table_cells(raw) do
     raw
-    |> String.trim()
     |> String.split("|")
+    |> Enum.slice(1..-2//1)
     |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
   end
 
   # A GFM separator row: any cell of dashes with optional alignment colons
