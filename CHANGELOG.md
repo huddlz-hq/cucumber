@@ -8,6 +8,8 @@
 - `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
 - `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
 - `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
+- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 42 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
+- Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
 
 ### Deprecated
 

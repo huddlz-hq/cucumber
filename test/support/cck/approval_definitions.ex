@@ -48,6 +48,30 @@ defmodule Cucumber.CckApproval.Definitions do
     end
   end
 
+  defmodule DataTablesWithExpression do
+    @moduledoc false
+    use Cucumber.StepDefinition
+    import ExUnit.Assertions
+
+    step "a {string} with a table", %{args: [string]} = context do
+      assert string == "Cucumber"
+      assert context.datatable.raw == [["Species", "Cucumis sativus"]]
+      :ok
+    end
+  end
+
+  defmodule DocStringsWithExpression do
+    @moduledoc false
+    use Cucumber.StepDefinition
+    import ExUnit.Assertions
+
+    step "a {string} with a doc string:", %{args: [string]} = context do
+      assert string == "Cucumber"
+      assert context.docstring == "Cucumis sativus"
+      :ok
+    end
+  end
+
   defmodule Backgrounds do
     @moduledoc false
     use Cucumber.StepDefinition

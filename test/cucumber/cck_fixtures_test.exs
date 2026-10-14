@@ -8,7 +8,7 @@ defmodule Cucumber.CckFixturesTest do
       |> then(&:crypto.hash(:sha256, &1))
       |> Base.encode16(case: :lower)
 
-    assert digest == "d10bfd8332c32b22b5a8de4efcc35a8d6f6622ce4175168839fda16f1ad57e34"
+    assert digest == "f38d9465faaa2920290f6d659fd88f8aa02e3789473a97a08625aab49d285d62"
   end
 
   test "vendored fixtures match the pinned upstream Git blobs" do
