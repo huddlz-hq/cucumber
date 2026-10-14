@@ -469,19 +469,18 @@ defmodule Gherkin.NimbleParser do
   Raises `Gherkin.ParseError` on failure.
   """
   def parse(gherkin_string) do
-    # Strip leading newline that heredoc strings add
-    normalized = String.trim_leading(gherkin_string, "\n")
-
-    case parse_feature(normalized) do
+    # The source is parsed as-is (leading blank lines included) so every
+    # recorded line matches the text the feature's source points at.
+    case parse_feature(gherkin_string) do
       {:ok, [feature], "", _context, _line, _offset} ->
-        put_comments(feature, normalized)
+        put_comments(feature, gherkin_string)
 
       {:ok, [feature], rest, _context, {line, col}, _offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
         if String.trim(rest) == "" do
-          put_comments(feature, normalized)
+          put_comments(feature, gherkin_string)
         else
           raise Gherkin.ParseError,
             message: "Unexpected content; parser stopped before end of file",

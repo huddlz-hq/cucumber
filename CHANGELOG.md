@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- A `.feature` file that starts with blank lines now reports its true line numbers everywhere they surface — error `file:line` links, the `scenario_line` tag, failure stack frames, and Cucumber Messages locations. Previously the parser stripped leading newlines before parsing, shifting every line up by the number of leading blank lines and disagreeing with the `.feature.md` parser (#58).
+
 ## v1.0.0 (2026-07-02)
 
 This release completes the Cucumber Compatibility Kit roadmap (#17–#29) and marks 1.0. Cucumber for Elixir is now CCK compliant: the official [CCK](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the Cucumber Messages we emit against the reference implementation's output. Full documentation for every feature below lives in the [guides](https://hexdocs.pm/cucumber).
