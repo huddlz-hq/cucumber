@@ -392,10 +392,7 @@ defmodule Cucumber.PendingSkippedTest do
 
   describe "skipped-step bookkeeping" do
     test "unexecuted steps land in the context under :skipped_steps" do
-      registry =
-        for {pattern, metadata} <- Steps.__cucumber_steps__(), into: %{} do
-          {Cucumber.Discovery.registry_key(pattern), {Steps, metadata}}
-        end
+      registry = Cucumber.StepRegistry.new([Steps])
 
       scenario = %{
         feature_file: "skipped_steps.feature",
@@ -411,7 +408,7 @@ defmodule Cucumber.PendingSkippedTest do
         ]
       }
 
-      runtime_data = %{step_registry: registry, hooks: [], parameter_types: %{}}
+      runtime_data = %{step_registry: registry, hooks: []}
 
       {context, _notice} =
         with_io(fn -> Cucumber.Runtime.run_scenario(%{}, scenario, runtime_data) end)

@@ -35,7 +35,7 @@ defmodule Cucumber.Messages do
 
   Ids must be unique across the whole stream, so when emitting several
   features, thread `next_id` from one compilation into the next (as
-  `Cucumber.Compiler.compile_features!/1` does):
+  `Cucumber.compile_features!/1` does):
 
       {lines, _next_id} =
         Enum.flat_map_reduce(features, 0, fn feature, start_id ->
@@ -155,19 +155,25 @@ defmodule Cucumber.Messages do
   end
 
   @doc """
-  Builds a `stepDefinition` envelope from a step-registry entry.
+  Builds a `stepDefinition` envelope from a `Cucumber.StepRegistry.Definition`.
 
-  `key` is a `Cucumber.Discovery` registry key; `source_reference` is a
-  `%{uri: ..., location: %{line: ...}}` map.
+  The source reference points at the definition's file (relative to the
+  working directory) and line.
   """
-  @spec step_definition(String.t(), Cucumber.Discovery.DiscoveryResult.registry_key(), map()) ::
-          envelope()
-  def step_definition(id, {:expression, source}, source_reference) do
-    step_definition_envelope(id, source, "CUCUMBER_EXPRESSION", source_reference)
-  end
+  @spec step_definition(String.t(), Cucumber.StepRegistry.Definition.t()) :: envelope()
+  def step_definition(id, %Cucumber.StepRegistry.Definition{} = definition) do
+    type =
+      case definition.kind do
+        :expression -> "CUCUMBER_EXPRESSION"
+        :regex -> "REGULAR_EXPRESSION"
+      end
 
-  def step_definition(id, {:regex, {source, _opts}}, source_reference) do
-    step_definition_envelope(id, source, "REGULAR_EXPRESSION", source_reference)
+    source_reference = %{
+      uri: Path.relative_to_cwd(definition.file),
+      location: %{line: definition.line}
+    }
+
+    step_definition_envelope(id, definition.source, type, source_reference)
   end
 
   defp step_definition_envelope(id, source, type, source_reference) do
