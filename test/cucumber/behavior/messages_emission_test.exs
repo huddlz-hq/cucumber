@@ -107,6 +107,38 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     end
   end
 
+  defmodule AttachingRunHooks do
+    use Cucumber.Hooks
+
+    before_all context do
+      Cucumber.attach(context, "before_all evidence", "text/plain")
+      {:ok, Map.put(context, :provisioned, true)}
+    end
+
+    after_all context do
+      Cucumber.log(context, "after_all evidence")
+      :ok
+    end
+  end
+
+  defmodule AttachingRaisingBeforeAll do
+    use Cucumber.Hooks
+
+    before_all context do
+      Cucumber.attach(context, "before_all evidence", "text/plain")
+      raise "provisioning exploded"
+    end
+  end
+
+  defmodule AttachingFailingAfterAll do
+    use Cucumber.Hooks
+
+    after_all context do
+      Cucumber.log(context, "after_all evidence")
+      {:error, :cleanup_failed}
+    end
+  end
+
   defmodule SkippingAfterHook do
     use Cucumber.Hooks
 
@@ -170,6 +202,15 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
 
   defp payloads(messages, type) do
     for %{^type => payload} <- messages, do: payload
+  end
+
+  # The run-hook envelopes and attachments in emission order, each as
+  # {type, the testRunHookStarted id it belongs to}.
+  defp run_hook_window(messages) do
+    for envelope <- messages,
+        type = envelope |> Map.keys() |> hd(),
+        type in ["testRunHookStarted", "attachment", "testRunHookFinished"],
+        do: {type, envelope[type]["id"] || envelope[type]["testRunHookStartedId"]}
   end
 
   # Every testStepFinished as {label, status} in emission order, where label
@@ -851,6 +892,122 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     assert first_hook_start < Enum.find_index(types, &(&1 == "testCase"))
     assert last_hook_start > Enum.find_index(types, &(&1 == "testCaseFinished"))
     assert last_hook_start < Enum.find_index(types, &(&1 == "testRunFinished"))
+  end
+
+  test "run-hook attachments reference their testRunHookStarted and land inside its events" do
+    run =
+      run_messages(
+        """
+        Feature: run hook evidence
+          Scenario: plain
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [AttachingRunHooks]
+      )
+
+    assert run.passed == 1
+
+    [before_started, after_started] = payloads(run.messages, "testRunHookStarted")
+    [before_attachment, after_attachment] = payloads(run.messages, "attachment")
+
+    assert before_attachment["body"] == "before_all evidence"
+    assert before_attachment["testRunHookStartedId"] == before_started["id"]
+    assert after_attachment["body"] == "after_all evidence"
+    assert after_attachment["mediaType"] == "text/x.cucumber.log+plain"
+    assert after_attachment["testRunHookStartedId"] == after_started["id"]
+
+    for attachment <- [before_attachment, after_attachment] do
+      refute Map.has_key?(attachment, "testCaseStartedId")
+      refute Map.has_key?(attachment, "testStepId")
+    end
+
+    # Each attachment sits between its own hook's started/finished pair:
+    # [hookStarted, attachment, hookFinished] twice over
+    assert run_hook_window(run.messages) == [
+             {"testRunHookStarted", before_started["id"]},
+             {"attachment", before_started["id"]},
+             {"testRunHookFinished", before_started["id"]},
+             {"testRunHookStarted", after_started["id"]},
+             {"attachment", after_started["id"]},
+             {"testRunHookFinished", after_started["id"]}
+           ]
+  end
+
+  test "a before_all hook that attaches then raises keeps the attachment inside its FAILED window" do
+    run =
+      run_messages(
+        """
+        Feature: provisioning fails
+          Scenario: never runs
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [AttachingRaisingBeforeAll]
+      )
+
+    assert %{total: 1, failures: 1, passed: 0} = run
+
+    [hook_started] = payloads(run.messages, "testRunHookStarted")
+    [hook_finished] = payloads(run.messages, "testRunHookFinished")
+    [attachment] = payloads(run.messages, "attachment")
+
+    assert attachment["body"] == "before_all evidence"
+    assert attachment["testRunHookStartedId"] == hook_started["id"]
+    assert hook_finished["testRunHookStartedId"] == hook_started["id"]
+    assert hook_finished["result"]["status"] == "FAILED"
+
+    assert run_hook_window(run.messages) == [
+             {"testRunHookStarted", hook_started["id"]},
+             {"attachment", hook_started["id"]},
+             {"testRunHookFinished", hook_started["id"]}
+           ]
+  end
+
+  @tag :tmp_dir
+  test "an after_all hook that attaches then fails keeps the attachment inside its FAILED window",
+       %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "messages.ndjson")
+
+    # The after_all error surfaces as a raise when the nested run
+    # finishes; the stream is flushed first.
+    assert_raise RuntimeError, "AfterAll hook failed: :cleanup_failed", fn ->
+      run_features(
+        [
+          """
+          Feature: cleanup fails
+            Scenario: passes
+              Given a passing step
+          """
+        ],
+        steps: [Steps],
+        hooks: [AttachingFailingAfterAll],
+        messages: path
+      )
+    end
+
+    messages =
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+
+    Cucumber.CckStream.assert_valid(messages)
+
+    [hook_started] = payloads(messages, "testRunHookStarted")
+    [hook_finished] = payloads(messages, "testRunHookFinished")
+    [attachment] = payloads(messages, "attachment")
+
+    assert attachment["body"] == "after_all evidence"
+    assert attachment["testRunHookStartedId"] == hook_started["id"]
+    assert hook_finished["testRunHookStartedId"] == hook_started["id"]
+    assert hook_finished["result"]["status"] == "FAILED"
+
+    assert run_hook_window(messages) == [
+             {"testRunHookStarted", hook_started["id"]},
+             {"attachment", hook_started["id"]},
+             {"testRunHookFinished", hook_started["id"]}
+           ]
   end
 
   test "attachments reference their step and land between its events" do

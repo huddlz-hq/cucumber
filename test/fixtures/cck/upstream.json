@@ -90,6 +90,8 @@
     "failedish-combinations/failedish-combinations.ndjson": "6de682939f578354ad99ea85d430537d7df49afb",
     "global-hooks-afterall-error/global-hooks-afterall-error.feature": "0ef1bfed33e3b0a46d6e2aec821ca5d51d93e258",
     "global-hooks-afterall-error/global-hooks-afterall-error.ndjson": "d01effda2d238443e7bfc1ef330a5f92ac63fd49",
+    "global-hooks-attachments/global-hooks-attachments.feature": "d96ccf2bf9258bd191fe2546c3c50aaeadc150cf",
+    "global-hooks-attachments/global-hooks-attachments.ndjson": "aa901c6b910abb2cdb0f83d46e0ebebb0af149ee",
     "global-hooks-beforeall-error/global-hooks-beforeall-error.feature": "2b42678e3aad7b0fc2637bd1d11e525e1a59c623",
     "global-hooks-beforeall-error/global-hooks-beforeall-error.ndjson": "23c9c6c315d8cd58964d0847ea8166dc6f1e0a3a",
     "global-hooks/global-hooks.feature": "715a76f340428240699e3cdd79f3f7e45809caae",

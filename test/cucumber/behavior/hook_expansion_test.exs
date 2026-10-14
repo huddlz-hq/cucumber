@@ -12,6 +12,79 @@ defmodule Cucumber.HookExpansionTest do
   use Cucumber.BehaviorCase
 
   alias Cucumber.BehaviorCase.Collector
+  alias Cucumber.RunCoordinator
+
+  # One single-scenario `@async` feature per name, each scenario running
+  # `step`, so several feature modules reach the run hooks concurrently.
+  defp async_features(names, step) do
+    for name <- names do
+      """
+      @async
+      Feature: #{name}
+        Scenario: #{name} scenario
+          Given #{step}
+      """
+    end
+  end
+
+  defmodule BeforeAllWaiters do
+    @moduledoc false
+
+    # The once-guard's {module, name, arity}, taken from a capture and
+    # checked when this file compiles, so renaming the function fails
+    # loudly instead of silently matching no stack frames.
+    guard = Function.info(&RunCoordinator.before_all_context/1)
+    Code.ensure_loaded!(guard[:module])
+
+    unless function_exported?(guard[:module], guard[:name], guard[:arity]),
+      do: raise("RunCoordinator.before_all_context/1 no longer exists")
+
+    @before_all_context {guard[:module], guard[:name], guard[:arity]}
+
+    # Called from a BeforeAll hook: blocks until `others` other processes
+    # are observably waiting on the run's BeforeAll once-guard — each one is
+    # inside a call to the run coordinator (so it monitors the coordinator)
+    # made from `RunCoordinator.before_all_context/1`. Deterministic, unlike
+    # sleeping and hoping they arrive. When `max_cases` caps how many async
+    # modules run at once, only those that can run concurrently are awaited.
+    def await(others) do
+      expected = min(others, ExUnit.configuration()[:max_cases] - 1)
+      poll(expected, System.monotonic_time(:millisecond) + 5_000)
+    end
+
+    defp poll(expected, deadline) do
+      waiting = length(waiters())
+
+      cond do
+        waiting >= expected ->
+          :ok
+
+        System.monotonic_time(:millisecond) > deadline ->
+          raise "expected #{expected} BeforeAll waiters, saw #{waiting}"
+
+        true ->
+          Process.sleep(1)
+          poll(expected, deadline)
+      end
+    end
+
+    defp waiters do
+      {:monitored_by, monitors} = Process.info(Process.whereis(RunCoordinator), :monitored_by)
+      Enum.filter(monitors, &(is_pid(&1) and in_before_all_context?(&1)))
+    end
+
+    defp in_before_all_context?(pid) do
+      case Process.info(pid, :current_stacktrace) do
+        {:current_stacktrace, frames} ->
+          Enum.any?(frames, fn {module, name, arity, _location} ->
+            {module, name, arity} == @before_all_context
+          end)
+
+        nil ->
+          false
+      end
+    end
+  end
 
   defmodule Steps do
     use Cucumber.StepDefinition
@@ -120,9 +193,66 @@ defmodule Cucumber.HookExpansionTest do
       assert count(run.events, :before_all_one) == 1
       assert count(run.events, {:saw_before_all, true}) == 3
     end
+
+    defmodule BlockingBeforeAllHooks do
+      use Cucumber.Hooks
+
+      # Holds the run's BeforeAll until the other async modules are waiting
+      # on it, so they reach it while it is running
+      before_all context do
+        Collector.record(:blocking_before_all)
+        BeforeAllWaiters.await(3)
+        {:ok, Map.put(context, :provisioned, true)}
+      end
+    end
+
+    test "BeforeAll runs exactly once when several async modules reach it concurrently" do
+      run =
+        run_features(
+          async_features(~w(alpha beta gamma delta), "the before-all context is visible"),
+          steps: [Steps],
+          hooks: [BlockingBeforeAllHooks]
+        )
+
+      assert %{total: 4, failures: 0, passed: 4} = run
+      assert count(run.events, :blocking_before_all) == 1
+      # Every module waited for the first caller's context
+      assert count(run.events, {:saw_before_all, true}) == 4
+    end
   end
 
   describe "BeforeAll errors (CCK global-hooks-beforeall-error)" do
+    defmodule DyingBeforeAllHooks do
+      use Cucumber.Hooks
+
+      # The process running the hooks dies mid-hook (an uncatchable kill,
+      # not a raise the hook runner could rescue) while the other async
+      # modules are waiting on it
+      before_all _context do
+        Collector.record(:dying_before_all)
+        BeforeAllWaiters.await(2)
+        Process.exit(self(), :kill)
+      end
+    end
+
+    test "modules waiting on a BeforeAll whose process dies fail instead of hanging" do
+      run =
+        run_features(
+          async_features(~w(alpha beta gamma), "a step passes"),
+          steps: [Steps],
+          hooks: [DyingBeforeAllHooks]
+        )
+
+      assert %{total: 3, failures: 3, passed: 0} = run
+      refute :step_passed in run.events
+      assert count(run.events, :dying_before_all) == 1
+
+      # The killed module fails with its own exit; the others are released
+      # with an error naming the dead hook process
+      failures = Regex.scan(~r/BeforeAll hook process exited: killed/, run.output)
+      assert length(failures) == 2
+    end
+
     defmodule BeforeAllErrorHooks do
       use Cucumber.Hooks
 
@@ -172,6 +302,25 @@ defmodule Cucumber.HookExpansionTest do
       assert :before_all_third in run.events
       assert :after_all_cleanup_one in run.events
       assert :after_all_cleanup_two in run.events
+    end
+
+    test "concurrent async modules all fail with the first BeforeAll error" do
+      run =
+        run_features(
+          async_features(~w(alpha beta gamma), "a step passes"),
+          steps: [Steps],
+          hooks: [BeforeAllErrorHooks]
+        )
+
+      assert %{total: 3, failures: 3, passed: 0} = run
+      refute :step_passed in run.events
+
+      # The hooks ran once — the waiting modules received the cached error
+      assert count(run.events, :before_all_exploding) == 1
+      assert count(run.events, :before_all_third) == 1
+
+      failures = Regex.scan(~r/BeforeAll hook "exploding"/, run.output)
+      assert length(failures) == 3
     end
   end
 

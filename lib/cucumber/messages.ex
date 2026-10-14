@@ -398,7 +398,27 @@ defmodule Cucumber.Messages do
   Builds an `attachment` envelope from a `Cucumber.Attachment`.
 
   `ref` carries `:test_case_started_id`/`:test_step_id` when the attachment
-  was recorded during a step (both optional in the schema).
+  was recorded during a scenario (both optional in the schema), or
+  `:test_run_hook_started_id` when it was recorded by a `before_all` or
+  `after_all` hook.
+
+  ## Examples
+
+      attachment = %Cucumber.Attachment{
+        body: "provisioned",
+        media_type: "text/plain",
+        encoding: :identity
+      }
+
+      Cucumber.Messages.attachment(attachment, %{test_run_hook_started_id: "7"})
+      # => %{
+      #      attachment: %{
+      #        body: "provisioned",
+      #        mediaType: "text/plain",
+      #        contentEncoding: "IDENTITY",
+      #        testRunHookStartedId: "7"
+      #      }
+      #    }
   """
   @spec attachment(Cucumber.Attachment.t(), map() | nil) :: envelope()
   def attachment(%Cucumber.Attachment{} = attachment, ref) do
@@ -413,6 +433,7 @@ defmodule Cucumber.Messages do
       |> put_present(:fileName, attachment.filename)
       |> put_present(:testCaseStartedId, ref[:test_case_started_id])
       |> put_present(:testStepId, ref[:test_step_id])
+      |> put_present(:testRunHookStartedId, ref[:test_run_hook_started_id])
 
     %{attachment: payload}
   end

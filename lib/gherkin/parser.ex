@@ -462,6 +462,8 @@ defmodule Gherkin.NimbleParser do
   Raises `Gherkin.ParseError` on failure.
   """
   def parse(gherkin_string) do
+    # The source is parsed as-is (leading blank lines included) so every
+    # recorded line matches the text the feature's source points at.
     case parse_feature(gherkin_string) do
       {:ok, [feature], rest, _context, {line, line_offset}, offset} ->
         # Trailing whitespace is benign; non-whitespace content means the

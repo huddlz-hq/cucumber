@@ -120,6 +120,52 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
     end
   end
 
+  describe "feature files that start with blank lines (#58)" do
+    @describetag :tmp_dir
+
+    test "a failing step links to its true file:line and message locations", %{tmp_dir: tmp_dir} do
+      messages_path = Path.join(tmp_dir, "messages.ndjson")
+
+      run =
+        run_feature(
+          """
+
+
+          Feature: leading blank lines
+            Scenario: failing
+              Given a passing step
+              And a step that raises
+          """,
+          steps: [FailingSteps],
+          file: "test/fixtures/generated/leading_blank_lines.feature",
+          messages: messages_path
+        )
+
+      assert run.failures == 1
+
+      # The step error's scenario link and the first stack frame both point
+      # at the true source lines (1-based), not lines shifted by the blanks.
+      assert run.output =~
+               ~s{in scenario "failing" (test/fixtures/generated/leading_blank_lines.feature:4)}
+
+      # The generated test is tagged with the scenario's true line too
+      [test] = run.module.__ex_unit__().tests
+      assert test.tags.scenario_line == 4
+
+      stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
+      [first_frame | _] = stacktrace_section |> String.split("\n", trim: true)
+      assert first_frame =~ "test/fixtures/generated/leading_blank_lines.feature:6"
+
+      [%{"gherkinDocument" => %{"feature" => feature}}] =
+        Enum.filter(run.messages, &Map.has_key?(&1, "gherkinDocument"))
+
+      assert feature["location"]["line"] == 3
+      [%{"scenario" => scenario}] = feature["children"]
+      assert scenario["location"]["line"] == 4
+      assert Enum.map(scenario["steps"], & &1["location"]["line"]) == [5, 6]
+    end
+  end
+
   describe "stack traces point at the feature file (#22)" do
     test "a failing step's first stack frame is the feature file at the step's line" do
       run =
@@ -145,22 +191,6 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       assert second_frame =~ "ambiguity_and_stacktrace_test.exs"
       # Internal runtime frames are filtered out
       refute run.output =~ "lib/cucumber/runtime.ex"
-    end
-
-    test "the feature file frame counts blank lines at the top of the file" do
-      run =
-        run_feature(
-          "\n\nFeature: spaced frames\n  Scenario: failing\n    Given a step that raises\n",
-          steps: [FailingSteps],
-          file: "test/fixtures/generated/spaced_frames.feature"
-        )
-
-      assert run.failures == 1
-
-      stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
-      [first_frame | _] = stacktrace_section |> String.split("\n", trim: true)
-
-      assert first_frame =~ "test/fixtures/generated/spaced_frames.feature:5"
     end
 
     test "a missing step's stack trace also leads with the feature file" do
