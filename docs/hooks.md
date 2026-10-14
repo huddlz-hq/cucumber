@@ -82,16 +82,21 @@ end
 ### Run-Level Hooks (BeforeAll/AfterAll)
 
 `before_all` hooks run lazily, exactly once per test run, before the first
-scenario that executes — serialized through a run coordinator, so they are
-safe with `@async` features. Their accumulated context map is merged into
-every scenario's context. If a `before_all` hook fails, the remaining
-`before_all` hooks still run (to set up as much as possible for cleanup),
-but every scenario in the run fails with the original error.
+scenario that executes. They run in that scenario's test process; a run
+coordinator guarantees they run only once, and any `@async` features that
+reach them concurrently wait for the result. Because they run in a test
+process, they can attach (`Cucumber.attach/4`, `Cucumber.log/2`,
+`Cucumber.link/2`) like any other hook. Their accumulated context map is
+merged into every scenario's context. If a `before_all` hook fails, the
+remaining `before_all` hooks still run (to set up as much as possible for
+cleanup), but every scenario in the run fails with the original error.
 
 `after_all` hooks run once after the whole suite, in reverse definition
 order, receiving the `before_all` context with the ExUnit suite summary
 merged under `:suite_result`. A failing `after_all` hook fails the run; the
-remaining `after_all` hooks still run.
+remaining `after_all` hooks still run. `after_all` hooks can attach too; with
+Cucumber Messages output enabled, attachments from either run-level hook are
+emitted against that hook's `testRunHookStarted`.
 
 Run-level hooks cannot be tagged (they don't belong to any scenario):
 

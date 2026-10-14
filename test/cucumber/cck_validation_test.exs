@@ -18,6 +18,10 @@ defmodule Cucumber.CckValidationTest do
     end)
   end
 
+  defp index_of(stream, type, key, value) do
+    Enum.find_index(stream, &match?(%{^type => %{^key => ^value}}, &1))
+  end
+
   test "schema rejects missing, unknown, mistyped and out-of-range fields before scrubbing" do
     stream = minimal()
 
@@ -183,6 +187,45 @@ defmodule Cucumber.CckValidationTest do
     for index <- [8, 10, 11, 12] do
       assert_raise ExUnit.AssertionError, fn ->
         stream |> List.insert_at(index, attachment) |> CckStream.assert_valid()
+      end
+    end
+  end
+
+  test "run-hook attachments are rejected outside their run hook's window" do
+    stream =
+      "test/fixtures/cck/global-hooks-attachments/global-hooks-attachments.ndjson"
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+
+    assert :ok = CckStream.assert_valid(stream)
+
+    # The BeforeAll attachment sits between its run hook's
+    # testRunHookStarted and testRunHookFinished
+    attachment_index = Enum.find_index(stream, &match?(%{"attachment" => _}, &1))
+    attachment = Enum.at(stream, attachment_index)
+    %{"attachment" => %{"testRunHookStartedId" => hook_started_id}} = attachment
+    stream_without_attachment = List.delete_at(stream, attachment_index)
+
+    hook_started =
+      index_of(stream_without_attachment, "testRunHookStarted", "id", hook_started_id)
+
+    hook_finished =
+      index_of(
+        stream_without_attachment,
+        "testRunHookFinished",
+        "testRunHookStartedId",
+        hook_started_id
+      )
+
+    case_started =
+      Enum.find_index(stream_without_attachment, &match?(%{"testCaseStarted" => _}, &1))
+
+    # Before its hook started, right after it finished, and later inside a
+    # test case
+    for index <- [hook_started, hook_finished + 1, case_started + 1] do
+      assert_raise ExUnit.AssertionError, fn ->
+        stream_without_attachment |> List.insert_at(index, attachment) |> CckStream.assert_valid()
       end
     end
   end

@@ -784,6 +784,131 @@ defmodule Gherkin.ParserTest do
     end
   end
 
+  describe "line numbers in a source with leading blank lines" do
+    @leading_blanks_source """
+
+
+    @feature-tag
+    Feature: Leading blanks
+
+      @scenario-tag
+      Scenario: s
+        Given a table:
+          | a | b |
+          | 1 | 2 |
+    """
+
+    test "feature, scenario, step, tag, and datatable lines match the source text" do
+      feature = Gherkin.Parser.parse(@leading_blanks_source)
+
+      assert feature.line == 3
+      assert feature.tag_lines == [2]
+
+      [scenario] = feature.scenarios
+      assert scenario.line == 6
+      assert scenario.tag_lines == [5]
+
+      [step] = scenario.steps
+      assert step.line == 7
+      assert step.datatable_lines == [8, 9]
+    end
+
+    test "CRLF line endings report the same lines as LF" do
+      lf = @leading_blanks_source
+      crlf = String.replace(lf, "\n", "\r\n")
+
+      assert source_lines(Gherkin.Parser.parse(crlf)) == source_lines(Gherkin.Parser.parse(lf))
+      assert %{feature: 3, scenario: 6, steps: [7]} = source_lines(Gherkin.Parser.parse(crlf))
+    end
+
+    test "equivalent .feature and .feature.md sources report the same lines" do
+      gherkin = """
+
+
+      Feature: Parity
+
+      @t
+      Scenario: s
+        Given a table:
+          | a | b |
+          | 1 | 2 |
+        When another step
+      """
+
+      markdown = """
+
+
+      # Feature: Parity
+
+      `@t`
+      ## Scenario: s
+      * Given a table:
+        | a | b |
+        | 1 | 2 |
+      * When another step
+      """
+
+      from_gherkin = gherkin |> Gherkin.Parser.parse("parity.feature") |> source_lines()
+      from_markdown = markdown |> Gherkin.Parser.parse("parity.feature.md") |> source_lines()
+
+      # The feature line itself is format-specific: in Markdown with Gherkin
+      # a blank first line is the (unnamed) feature line, as in the reference.
+      assert Map.delete(from_gherkin, :feature) == Map.delete(from_markdown, :feature)
+
+      assert %{scenario: 5, scenario_tags: [4], steps: [6, 9], datatables: [[7, 8], nil]} =
+               from_gherkin
+    end
+
+    test "an unexpected-content parse error reports its true line" do
+      gherkin = """
+
+
+      Feature: Leading blanks
+
+        Scenario: s
+          Given a step
+
+        this is not valid gherkin
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert Exception.message(error) =~ "Unexpected content"
+      assert error.line == 8
+    end
+
+    test "a ragged table row parse error reports its true line" do
+      gherkin = """
+
+
+      Feature: Leading blanks
+
+        Scenario: s
+          Given a table:
+            | a | b |
+            | 1 |
+      """
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert Exception.message(error) =~ "2 cells to match the first row, got 1"
+      assert error.line == 8
+    end
+  end
+
+  defp source_lines(feature) do
+    [scenario] = feature.scenarios
+
+    %{
+      feature: feature.line,
+      feature_tags: feature.tag_lines,
+      scenario: scenario.line,
+      scenario_tags: scenario.tag_lines,
+      steps: Enum.map(scenario.steps, & &1.line),
+      datatables: Enum.map(scenario.steps, & &1.datatable_lines)
+    }
+  end
+
   describe "parse/1 empty data table cells" do
     test "keeps an empty cell in its column" do
       gherkin = """

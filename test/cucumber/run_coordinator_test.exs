@@ -25,6 +25,15 @@ defmodule Cucumber.RunCoordinatorTest do
       count = Agent.get_and_update(__MODULE__.Counter, &{&1 + 1, &1 + 1})
       {:ok, Map.put(context, :count, count)}
     end
+
+    # The first time it runs, the run is reset (a new `compile_features!`,
+    # e.g. under `mix test.watch`) while the hook is still executing, so
+    # its result reaches the coordinator after the reset
+    def reset_run_mid_hook(context) do
+      {:ok, context} = increment(context)
+      if context.count == 1, do: Cucumber.RunCoordinator.ensure_started()
+      {:ok, context}
+    end
   end
 
   describe "before_all_context/1" do
@@ -42,6 +51,22 @@ defmodule Cucumber.RunCoordinatorTest do
 
       # A reset clears the cache: the hook runs again for the new run
       RunCoordinator.ensure_started()
+      assert {:ok, %{count: 2}} = RunCoordinator.before_all_context(hooks)
+    end
+
+    test "a result that arrives after the run was reset does not settle the new run" do
+      {:ok, _} = Agent.start(fn -> 0 end, name: BeforeAllProbe.Counter)
+      on_exit(fn -> Agent.stop(BeforeAllProbe.Counter) end)
+
+      RunCoordinator.ensure_started()
+      hooks = [{:before_all, nil, nil, {BeforeAllProbe, :reset_run_mid_hook}}]
+
+      # The caller from the old run still gets its own hooks' result
+      assert {:ok, %{count: 1}} = RunCoordinator.before_all_context(hooks)
+
+      # The new run has not run its hooks: the stale result was ignored, so
+      # its first caller runs them afresh
+      assert {:ok, %{count: 2}} = RunCoordinator.before_all_context(hooks)
       assert {:ok, %{count: 2}} = RunCoordinator.before_all_context(hooks)
     end
 

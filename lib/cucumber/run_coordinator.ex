@@ -11,9 +11,12 @@ defmodule Cucumber.RunCoordinator do
   Current run-scoped concerns:
 
     * **BeforeAll once-guard** — `before_all_context/1` runs the run's
-      `before_all` hooks exactly once (serialized through the GenServer, so
-      concurrent `@async` scenarios are safe) and caches the merged context
-      (or the first error) for every subsequent scenario.
+      `before_all` hooks exactly once and caches the merged context (or the
+      first error) for every subsequent scenario. The hooks execute in the
+      first caller's process — never inside the coordinator, so a hook may
+      call back into it (e.g. `Cucumber.attach/4`). The coordinator only
+      grants that caller the run; concurrent callers (`@async` feature
+      modules) wait for its result.
     * **AfterAll hand-off** — `register_after_all/1` stores the run's
       `after_all` hooks; the `ExUnit.after_suite/1` callback registered by
       the compiler claims them exactly once via `run_after_all/1`.
@@ -78,7 +81,16 @@ defmodule Cucumber.RunCoordinator do
 
       before_all_hooks ->
         ensure_process()
-        GenServer.call(__MODULE__, {:before_all, before_all_hooks}, :infinity)
+
+        case GenServer.call(__MODULE__, :claim_before_all, :infinity) do
+          :run ->
+            result = execute_before_all(before_all_hooks)
+            GenServer.call(__MODULE__, {:finish_before_all, result}, :infinity)
+            result
+
+          {:done, result} ->
+            result
+        end
     end
   end
 
@@ -231,42 +243,72 @@ defmodule Cucumber.RunCoordinator do
       {after_all_hooks, before_all_context} ->
         context = Map.put(before_all_context, :suite_result, suite_result)
 
-        errors =
-          after_all_hooks
-          |> Enum.reverse()
-          |> Enum.flat_map(fn hook -> run_after_all_hook(hook, context) end)
+        results =
+          for hook <- Enum.reverse(after_all_hooks),
+              do: bracket_run_hook(hook, context, &run_after_all_hook/2)
 
-        case errors do
-          [] -> :ok
-          [{kind, reason, stacktrace} | _rest] -> :erlang.raise(kind, reason, stacktrace)
+        case Enum.find(results, &match?({:error, _}, &1)) do
+          nil ->
+            :ok
+
+          {:error, %{kind: kind, reason: reason, stacktrace: stacktrace}} ->
+            :erlang.raise(kind, reason, stacktrace)
         end
     end
   end
 
-  defp run_after_all_hook({name, ref}, context) do
-    started_id = run_hook_started_call(ref)
-    started_at = System.monotonic_time(:nanosecond)
-    errors = apply_after_all_hook(name, ref, context)
-    status = if errors == [], do: :passed, else: :failed
-    run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
-    errors
-  end
-
-  defp apply_after_all_hook(name, {module, func_name}, context) do
+  # An after_all hook's context is not handed on, so it passes with the
+  # context it was given. Its error is the raise to replay once every
+  # after_all hook has run.
+  defp run_after_all_hook({name, {module, func_name}}, context) do
     case apply(module, func_name, [context]) do
       {:error, reason} ->
-        [{:error, after_all_error(name, reason), []}]
+        {:error, %{kind: :error, reason: after_all_error(name, reason), stacktrace: []}}
 
       _other ->
-        []
+        {:ok, context}
     end
   catch
     kind, reason ->
-      [{kind, reason, __STACKTRACE__}]
+      {:error, %{kind: kind, reason: reason, stacktrace: __STACKTRACE__}}
   end
 
-  # after_all hooks run in the after_suite caller's process, so their
-  # testRunHook envelopes go through the same GenServer calls the runner uses.
+  # The result of running one run-level hook: it passed with the context it
+  # hands on, or failed with an error whose shape the hook kind defines.
+  @typep run_hook_result :: {:ok, map()} | {:error, term()}
+
+  # Runs one run-level hook via `run_hook.(hook, context)`, bracketed with
+  # testRunHookStarted/Finished envelopes through the coordinator.
+  #
+  # The hook's own context carries its testRunHookStarted id as the message
+  # ref, so attachments it records (Cucumber.attach/4) land on the hook in
+  # the message stream. The ref is stripped from the context the hook hands
+  # on, so it never leaks into the next hook or a scenario.
+  @spec bracket_run_hook(
+          {term(), {module(), atom()}},
+          map(),
+          ({term(), {module(), atom()}}, map() -> run_hook_result())
+        ) :: run_hook_result()
+  defp bracket_run_hook({_name, ref} = hook, context, run_hook) do
+    started_id = run_hook_started_call(ref)
+    started_at = System.monotonic_time(:nanosecond)
+    hook_context = if started_id, do: put_run_hook_ref(context, started_id), else: context
+
+    {status, result} =
+      case run_hook.(hook, hook_context) do
+        {:ok, context} -> {:passed, {:ok, Map.delete(context, :cucumber_message_ref)}}
+        {:error, _error} = error -> {:failed, error}
+      end
+
+    run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
+    result
+  end
+
+  defp put_run_hook_ref(context, started_id),
+    do: Map.put(context, :cucumber_message_ref, %{test_run_hook_started_id: started_id})
+
+  # Run-level hooks run in a caller's process (never inside the coordinator),
+  # so their testRunHook envelopes go through GenServer calls.
   defp run_hook_started_call(ref) do
     if Process.whereis(__MODULE__) do
       GenServer.call(__MODULE__, {:run_hook_started, ref})
@@ -318,13 +360,35 @@ defmodule Cucumber.RunCoordinator do
     {:reply, state.run_id, state}
   end
 
-  def handle_call({:before_all, hooks}, _from, %{before_all: :not_run} = state) do
-    {result, state} = execute_before_all(hooks, state)
-    {:reply, result, %{state | before_all: result}}
+  # The first claimant runs the before_all hooks in its own process; later
+  # claimants wait (no reply) until it finishes. The runner is monitored so
+  # waiters are released with an error if it dies mid-hook.
+  def handle_call(:claim_before_all, {pid, _tag}, %{before_all: :not_run} = state) do
+    running = %{pid: pid, monitor: Process.monitor(pid), waiters: []}
+    {:reply, :run, %{state | before_all: {:running, running}}}
   end
 
-  def handle_call({:before_all, _hooks}, _from, state) do
-    {:reply, state.before_all, state}
+  def handle_call(:claim_before_all, from, %{before_all: {:running, running}} = state) do
+    running = %{running | waiters: [from | running.waiters]}
+    {:noreply, %{state | before_all: {:running, running}}}
+  end
+
+  def handle_call(:claim_before_all, _from, state) do
+    {:reply, {:done, state.before_all}, state}
+  end
+
+  def handle_call(
+        {:finish_before_all, result},
+        {pid, _tag},
+        %{before_all: {:running, %{pid: pid} = running}} = state
+      ) do
+    Process.demonitor(running.monitor, [:flush])
+    {:reply, :ok, complete_before_all(state, running, result)}
+  end
+
+  # A stale finish (the run was reset while the hooks ran) is ignored.
+  def handle_call({:finish_before_all, _result}, _from, state) do
+    {:reply, :ok, state}
   end
 
   def handle_call({:register_after_all, hooks}, _from, state) do
@@ -457,34 +521,36 @@ defmodule Cucumber.RunCoordinator do
     {:reply, {state.after_all, before_all_context}, %{state | after_all: []}}
   end
 
+  @impl true
+  def handle_info(
+        {:DOWN, monitor, :process, _pid, reason},
+        %{before_all: {:running, %{monitor: monitor} = running}} = state
+      ) do
+    error = before_all_error(nil, "process exited: #{Exception.format_exit(reason)}")
+    {:noreply, complete_before_all(state, running, {:error, error})}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  defp complete_before_all(state, running, result) do
+    Enum.each(running.waiters, &GenServer.reply(&1, {:done, result}))
+    %{state | before_all: result}
+  end
+
   # Runs every before_all hook in definition order — even after one fails —
-  # accumulating the merged context. The first error wins. Threads the sink
-  # state to bracket each hook with testRunHookStarted/Finished envelopes.
-  defp execute_before_all(hooks, state) do
-    {{context, first_error}, state} =
-      Enum.reduce(hooks, {{%{}, nil}, state}, fn {_name, ref} = hook,
-                                                 {{context, first_error}, state} ->
-        {started_id, state} = run_hook_started(state, ref)
-        started_at = System.monotonic_time(:nanosecond)
-        result = run_before_all_hook(hook, context)
-
-        status =
-          case result do
-            {:ok, _context} -> :passed
-            {:error, _error} -> :failed
-          end
-
-        duration = System.monotonic_time(:nanosecond) - started_at
-        state = run_hook_finished(state, started_id, status, duration)
-
-        case result do
-          {:ok, context} -> {{context, first_error}, state}
-          {:error, error} -> {{context, first_error || error}, state}
+  # accumulating the merged context. The first error wins. Runs in the
+  # claiming caller's process; each hook is bracketed with
+  # testRunHookStarted/Finished envelopes through the coordinator.
+  defp execute_before_all(hooks) do
+    {context, first_error} =
+      Enum.reduce(hooks, {%{}, nil}, fn hook, {context, first_error} ->
+        case bracket_run_hook(hook, context, &run_before_all_hook/2) do
+          {:ok, context} -> {context, first_error}
+          {:error, error} -> {context, first_error || error}
         end
       end)
 
-    result = if first_error, do: {:error, first_error}, else: {:ok, context}
-    {result, state}
+    if first_error, do: {:error, first_error}, else: {:ok, context}
   end
 
   defp run_before_all_hook({name, {module, func_name}}, context) do
