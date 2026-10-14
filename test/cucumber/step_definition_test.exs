@@ -4,10 +4,7 @@ defmodule Cucumber.StepDefinitionTest do
   # Runs a single step text against a module's definitions through the real
   # runtime dispatch (the same path generated feature tests use).
   defp run_step(module, text, context \\ %{}) do
-    registry =
-      for {pattern, metadata} <- module.__cucumber_steps__(), into: %{} do
-        {Cucumber.Discovery.registry_key(pattern), {module, metadata}}
-      end
+    registry = Cucumber.StepRegistry.new([module])
 
     step = %Gherkin.Step{keyword: "Given", text: text, line: 1}
     Cucumber.Runtime.execute_step(context, step, registry)

@@ -1,31 +1,32 @@
 defmodule Cucumber.Runtime do
-  @moduledoc """
-  Runtime execution of cucumber steps.
+  @moduledoc false
 
-  This module handles the step execution lifecycle within a running test:
+  # Runtime execution of cucumber steps.
+  #
+  # This module handles the step execution lifecycle within a running test:
+  #
+  # 1. Each step's text is matched against the step registry to find a definition
+  # 2. Cucumber Expressions are used to extract typed parameters from step text
+  # 3. The step function is invoked with context containing extracted `args`,
+  #    optional `datatable`, and optional `docstring`
+  # 4. Step return values are processed to update the shared context:
+  #    - `:ok` keeps context unchanged
+  #    - A map is merged into context
+  #    - A keyword list is converted to a map and merged
+  #    - `{:ok, data}` unwraps and merges
+  #    - `{:error, reason}` fails the step
+  #    - `:pending` / `{:pending, message}` marks the step pending: remaining
+  #      steps are skipped, after hooks run, and the scenario fails with
+  #      `Cucumber.PendingStepError`
+  #    - `:skipped` / `{:skipped, reason}` skips the rest of the scenario:
+  #      remaining steps don't run, after hooks run, and the scenario does
+  #      **not** fail (a one-line notice is printed instead)
+  # 5. On failure, enhanced error messages are generated with step history,
+  #    file locations, and formatted assertion details
 
-  1. Each step's text is matched against the step registry to find a definition
-  2. Cucumber Expressions are used to extract typed parameters from step text
-  3. The step function is invoked with context containing extracted `args`,
-     optional `datatable`, and optional `docstring`
-  4. Step return values are processed to update the shared context:
-     - `:ok` keeps context unchanged
-     - A map is merged into context
-     - A keyword list is converted to a map and merged
-     - `{:ok, data}` unwraps and merges
-     - `{:error, reason}` fails the step
-     - `:pending` / `{:pending, message}` marks the step pending: remaining
-       steps are skipped, after hooks run, and the scenario fails with
-       `Cucumber.PendingStepError`
-     - `:skipped` / `{:skipped, reason}` skips the rest of the scenario:
-       remaining steps don't run, after hooks run, and the scenario does
-       **not** fail (a one-line notice is printed instead)
-  5. On failure, enhanced error messages are generated with step history,
-     file locations, and formatted assertion details
-  """
-
-  alias Cucumber.Expression
   alias Cucumber.Messages.Emitter
+  alias Cucumber.StepRegistry
+  alias Cucumber.StepRegistry.Definition
 
   # Standard ExUnit context keys — everything else in the test context is a
   # scenario tag (ExUnit puts @tag values directly in the context as keys).
@@ -80,7 +81,6 @@ defmodule Cucumber.Runtime do
   @spec run_scenario(map(), map(), map()) :: map()
   def run_scenario(exunit_context, scenario, runtime_data) do
     %{step_registry: step_registry, hooks: hooks} = runtime_data
-    parameter_types = Map.get(runtime_data, :parameter_types, %{})
 
     scenario_tags =
       exunit_context
@@ -94,7 +94,6 @@ defmodule Cucumber.Runtime do
 
     exec = %{
       step_registry: step_registry,
-      parameter_types: parameter_types,
       hooks: hooks,
       tags: all_tags,
       scenario_tags: scenario_tags
@@ -372,9 +371,6 @@ defmodule Cucumber.Runtime do
   @doc """
   Executes a step with the given context and step registry.
 
-  `parameter_types` carries custom parameter type definitions (see
-  `Cucumber.ParameterTypes`) used when matching cucumber expressions.
-
   Returns the updated context, or `{:halted, status, reason, context}` when
   the step signaled `:pending` or `:skipped` — the caller owns what happens
   to the rest of the scenario.
@@ -382,15 +378,14 @@ defmodule Cucumber.Runtime do
   Step hooks do not run through this entry point; they require the scenario
   runner's hook list (see `run_scenario/3`).
   """
-  @spec execute_step(map(), Gherkin.Step.t(), map(), Expression.custom_types()) ::
+  @spec execute_step(map(), Gherkin.Step.t(), StepRegistry.t()) ::
           map() | {:halted, :pending | :skipped, String.t() | nil, map()}
-  def execute_step(context, step, step_registry, parameter_types \\ %{}) do
+  def execute_step(context, step, step_registry) do
     do_execute_step(
       context,
       step,
       %{
         step_registry: step_registry,
-        parameter_types: parameter_types,
         hooks: [],
         tags: [],
         msg: nil
@@ -411,8 +406,8 @@ defmodule Cucumber.Runtime do
     context = put_step_message_ref(context, msg)
 
     # Find matching step definition
-    case find_step_definition(step.text, exec.step_registry, exec.parameter_types) do
-      {:ok, {module, metadata}, args, pattern_text} ->
+    case StepRegistry.match(exec.step_registry, step.text) do
+      {:ok, definition, args} ->
         # Prepare context with step arguments; :step is visible to step
         # hooks and the step body alike
         context =
@@ -420,7 +415,7 @@ defmodule Cucumber.Runtime do
           |> prepare_context(args, step)
           |> Map.put(:step, step)
 
-        outcome = run_matched_step(context, step, {module, metadata}, pattern_text, exec, msg)
+        outcome = run_matched_step(context, step, definition, exec, msg)
 
         case outcome do
           {:halted, status, reason, _ctx} ->
@@ -437,14 +432,16 @@ defmodule Cucumber.Runtime do
         scenario_name = Map.get(context, :scenario_name, "unknown scenario")
 
         listed =
-          for {pattern_text, {module, metadata}, _args} <- matches,
-              do: {pattern_text, module, metadata}
+          for {definition, _args} <- matches do
+            {Definition.display_pattern(definition), definition.module,
+             %{function: definition.function, file: definition.file, line: definition.line}}
+          end
 
         error = Cucumber.AmbiguousStepError.new(step, listed, feature_file, scenario_name)
         Emitter.step_finished(msg, :ambiguous, Exception.message(error))
         :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
 
-      :error ->
+      :undefined ->
         # Extract context info for better error
         feature_file = Map.get(context, :feature_file, "unknown")
         scenario_name = Map.get(context, :scenario_name, "unknown scenario")
@@ -479,7 +476,7 @@ defmodule Cucumber.Runtime do
   # A {:error, reason} from a before_step hook fails the scenario without
   # running the step body; a :pending/:skipped signal halts the scenario
   # like the step itself returning it.
-  defp run_matched_step(context, step, definition, pattern_text, exec, msg) do
+  defp run_matched_step(context, step, definition, exec, msg) do
     hook_result =
       reporting_step_failure(msg, fn ->
         Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags)
@@ -495,14 +492,14 @@ defmodule Cucumber.Runtime do
         {:halted, status, reason, context}
 
       {:ok, context} ->
-        invoke_step(context, step, definition, pattern_text, exec, msg)
+        invoke_step(context, step, definition, exec, msg)
     end
   end
 
-  defp invoke_step(context, step, {module, metadata}, pattern_text, exec, msg) do
+  defp invoke_step(context, step, definition, exec, msg) do
     outcome =
       try do
-        result = apply(module, metadata.function, [context])
+        result = apply(definition.module, definition.function, [context])
         process_step_result(result, context)
       catch
         # `catch` (not `rescue`) so exits and throws get the same step-level
@@ -530,7 +527,7 @@ defmodule Cucumber.Runtime do
           enhanced_error =
             Cucumber.StepError.failed_step(
               step,
-              pattern_text,
+              Definition.display_pattern(definition),
               failure_description,
               feature_file,
               scenario_name,
@@ -624,94 +621,6 @@ defmodule Cucumber.Runtime do
   # case only (no step id); steps override this with put_step_message_ref/2.
   defp message_ref(nil), do: nil
   defp message_ref(session), do: %{test_case_started_id: session.case_started_id}
-
-  @doc false
-  # Registry keys of every definition matching `step_text` — used by the
-  # message emitter to fill testCase.testSteps.stepDefinitionIds without
-  # re-running full dispatch.
-  @spec matching_definition_keys(String.t(), map(), Expression.custom_types()) :: [tuple()]
-  def matching_definition_keys(step_text, step_registry, parameter_types) do
-    for {key, _definition} <- step_registry,
-        match_pattern(key, step_text, parameter_types) != :no_match,
-        do: key
-  end
-
-  defp find_step_definition(step_text, step_registry, parameter_types) do
-    matches =
-      Enum.flat_map(step_registry, fn {key, definition} ->
-        case match_pattern(key, step_text, parameter_types) do
-          {:match, args} -> [{display_pattern(key), definition, args}]
-          :no_match -> []
-        end
-      end)
-
-    case matches do
-      [] ->
-        :error
-
-      [{pattern_text, definition, args}] ->
-        {:ok, definition, args, pattern_text}
-
-      multiple ->
-        # Stable listing order regardless of map iteration order
-        {:ambiguous, Enum.sort_by(multiple, fn {pattern_text, _, _} -> pattern_text end)}
-    end
-  end
-
-  defp match_pattern({:expression, pattern_text}, step_text, parameter_types) do
-    # Compile pattern on the fly (cached via :persistent_term)
-    Expression.match(step_text, Expression.compile(pattern_text, parameter_types))
-  end
-
-  defp match_pattern({:regex, {source, opts}}, step_text, _parameter_types) do
-    # Cucumber regexes must match the entire step text. Captures become args
-    # as strings (no type conversion — that's a cucumber-expressions feature);
-    # unmatched optional groups become nil. The capture list is explicit
-    # because PCRE silently drops *trailing* unmatched groups otherwise.
-    {anchored, group_count} = anchored_regex(source, opts)
-    capture_spec = if group_count == 0, do: [0], else: Enum.to_list(1..group_count)
-
-    case :re.run(step_text, anchored.re_pattern, [{:capture, capture_spec, :index}]) do
-      :nomatch ->
-        :no_match
-
-      {:match, _indexes} when group_count == 0 ->
-        {:match, []}
-
-      {:match, indexes} ->
-        {:match, extract_group_values(indexes, step_text)}
-    end
-  end
-
-  defp display_pattern({:expression, pattern_text}), do: pattern_text
-  defp display_pattern({:regex, {source, opts}}), do: "~r/#{source}/#{opts}"
-
-  # Wraps a regex so it must match the whole step text, mirroring how
-  # Cucumber implementations treat regex step definitions. Author-supplied
-  # ^/$ anchors still work inside the non-capturing group. The anchored
-  # variant and its capture-group count are cached since steps are matched
-  # on every execution.
-  defp anchored_regex(source, opts) do
-    cache_key = {__MODULE__, :anchored, source, opts}
-
-    case :persistent_term.get(cache_key, :not_found) do
-      :not_found ->
-        anchored = Regex.compile!("\\A(?:#{source})\\z", opts)
-        entry = {anchored, Expression.count_capture_groups(source)}
-        :persistent_term.put(cache_key, entry)
-        entry
-
-      entry ->
-        entry
-    end
-  end
-
-  defp extract_group_values(indexes, step_text) do
-    Enum.map(indexes, fn
-      {-1, 0} -> nil
-      {start, length} -> binary_part(step_text, start, length)
-    end)
-  end
 
   # Builds the stacktrace reported for a step failure: the first frame points
   # at the failing step's line in the feature file, followed by the original

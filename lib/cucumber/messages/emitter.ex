@@ -5,11 +5,11 @@ defmodule Cucumber.Messages.Emitter do
 
   Two roles:
 
-    * **Configuration** — `configure/6` builds the run's static envelopes
+    * **Configuration** — `configure/6` (deprecated) builds the run's static envelopes
       (meta, sources, gherkin documents, pickles, step definitions, hooks,
       parameter types) plus the id maps run-time messages reference, and
       hands them to the coordinator. Called by
-      `Cucumber.Compiler.compile_features!/1` when
+      `Cucumber.compile_features!/1` when
       `config :cucumber, messages: path` is set.
     * **Run-time sessions** — the scenario runner opens a session per
       scenario (`open_test_case/2` emits the `testCase` envelope),
@@ -20,10 +20,17 @@ defmodule Cucumber.Messages.Emitter do
 
   Every session function is nil-safe: when the sink is disabled the session
   is nil and all of this is a no-op, so the runner carries no conditionals.
+
+  > #### Deprecated {: .warning}
+  >
+  > This module is driven by the compiler and will become internal in 2.0.
+  > Enable Cucumber Messages with `config :cucumber, messages: path`
+  > instead of calling it directly.
   """
 
   alias Cucumber.Messages
   alias Cucumber.RunCoordinator
+  alias Cucumber.StepRegistry
 
   @doc """
   Builds the run's static envelopes and id maps and configures the
@@ -32,17 +39,34 @@ defmodule Cucumber.Messages.Emitter do
   `features_with_compilations` pairs each discovered feature with its
   `Gherkin.Pickles.Compilation`; `next_id` continues the compilation id
   sequence so every id in the stream is run-unique.
+
+  `step_registry` is the `Cucumber.StepRegistry` discovery builds; it
+  carries the run's parameter types, so `parameter_types` is ignored.
   """
+  @deprecated "Configure messages with `config :cucumber, messages: path`; removed in 2.0"
   @spec configure(
           String.t(),
           [{map(), Gherkin.Pickles.Compilation.t()}],
-          map(),
+          StepRegistry.t(),
           [tuple()],
           map(),
           non_neg_integer()
+        ) :: :ok
+  def configure(path, features_with_compilations, step_registry, hooks, _parameter_types, next_id) do
+    configure(path, features_with_compilations, step_registry, hooks, next_id)
+  end
+
+  @doc false
+  # Called by Cucumber.Compiler. The registry carries the parameter types.
+  @spec configure(
+          String.t(),
+          [{map(), Gherkin.Pickles.Compilation.t()}],
+          StepRegistry.t(),
+          [tuple()],
+          non_neg_integer()
         ) ::
           :ok
-  def configure(path, features_with_compilations, step_registry, hooks, parameter_types, next_id) do
+  def configure(path, features_with_compilations, step_registry, hooks, next_id) do
     feature_envelopes =
       Enum.flat_map(features_with_compilations, fn {feature, compilation} ->
         [
@@ -56,7 +80,11 @@ defmodule Cucumber.Messages.Emitter do
       step_definition_envelopes(step_registry, next_id)
 
     {hook_envelopes, hook_ids, next_id} = hook_envelopes(hooks, next_id)
-    {parameter_type_envelopes, next_id} = parameter_type_envelopes(parameter_types, next_id)
+
+    {parameter_type_envelopes, next_id} =
+      step_registry
+      |> StepRegistry.parameter_types()
+      |> parameter_type_envelopes(next_id)
 
     envelopes =
       [Messages.meta() | feature_envelopes] ++
@@ -71,21 +99,17 @@ defmodule Cucumber.Messages.Emitter do
     })
   end
 
-  # Registry maps have no stable order; sorting by definition site keeps
-  # step definition ids deterministic across runs.
+  # Definitions arrive in a stable (file, line) order, so their ids are
+  # deterministic across runs. Ids are keyed by the definition's position.
   defp step_definition_envelopes(step_registry, next_id) do
-    step_registry
-    |> Enum.sort_by(fn {_key, {_module, metadata}} -> {metadata.file, metadata.line} end)
-    |> Enum.reduce({[], %{}, next_id}, fn {key, {_module, metadata}}, {envelopes, ids, id} ->
-      source_reference = %{
-        uri: Path.relative_to_cwd(metadata.file),
-        location: %{line: metadata.line}
-      }
+    definitions = StepRegistry.definitions(step_registry)
+    count = length(definitions)
+    ids = Enum.map(next_id..(next_id + count - 1)//1, &Integer.to_string/1)
 
-      envelope = Messages.step_definition(Integer.to_string(id), key, source_reference)
-      {[envelope | envelopes], Map.put(ids, key, Integer.to_string(id)), id + 1}
-    end)
-    |> then(fn {envelopes, ids, id} -> {Enum.reverse(envelopes), ids, id} end)
+    envelopes = Enum.zip_with(ids, definitions, &Messages.step_definition/2)
+    ids_by_position = Map.new(Enum.zip(Enum.map(definitions, & &1.position), ids))
+
+    {envelopes, ids_by_position, next_id + count}
   end
 
   defp hook_envelopes(hooks, next_id) do
@@ -176,14 +200,22 @@ defmodule Cucumber.Messages.Emitter do
     [ids, steps, pickle_step_ids]
     |> Enum.zip_with(fn [id, step, pickle_step_id] ->
       definition_ids =
-        step.text
-        |> Cucumber.Runtime.matching_definition_keys(exec.step_registry, exec.parameter_types)
-        |> Enum.map(&Map.get(context.step_definition_ids, &1))
-        |> Enum.reject(&is_nil/1)
-        |> Enum.sort_by(&String.to_integer/1)
+        exec.step_registry
+        |> matching_definitions(step.text)
+        |> Enum.map(&Map.fetch!(context.step_definition_ids, &1.position))
 
       %{id: id, pickleStepId: pickle_step_id, stepDefinitionIds: definition_ids}
     end)
+  end
+
+  # Every definition the step text matches — one, none, or all of an
+  # ambiguous set (in definition order, so ids ascend)
+  defp matching_definitions(step_registry, step_text) do
+    case StepRegistry.match(step_registry, step_text) do
+      {:ok, definition, _args} -> [definition]
+      :undefined -> []
+      {:ambiguous, matches} -> Enum.map(matches, fn {definition, _args} -> definition end)
+    end
   end
 
   @doc false

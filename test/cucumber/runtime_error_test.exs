@@ -14,10 +14,7 @@ defmodule Cucumber.RuntimeErrorTest do
 
   describe "error formatting in execute_step/3" do
     setup do
-      step_registry =
-        for {pattern, metadata} <- FailingSteps.__cucumber_steps__(), into: %{} do
-          {{:expression, pattern}, {FailingSteps, metadata}}
-        end
+      step_registry = Cucumber.StepRegistry.new([FailingSteps])
 
       {:ok, step_registry: step_registry}
     end
@@ -91,10 +88,7 @@ defmodule Cucumber.RuntimeErrorTest do
     end
 
     test "formats HTML elements with proper indentation" do
-      step_registry =
-        for {pattern, metadata} <- MockPhoenixTestSteps.__cucumber_steps__(), into: %{} do
-          {{:expression, pattern}, {MockPhoenixTestSteps, metadata}}
-        end
+      step_registry = Cucumber.StepRegistry.new([MockPhoenixTestSteps])
 
       step = %Step{
         keyword: "When",

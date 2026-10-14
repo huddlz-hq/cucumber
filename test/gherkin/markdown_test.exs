@@ -293,6 +293,50 @@ defmodule Gherkin.MarkdownTest do
       assert step.datatable_lines == [3, 5]
     end
 
+    test "empty cells keep their column, in data tables and Examples" do
+      feature =
+        Markdown.parse("""
+        # Feature: Empty cells
+        ## Scenario Outline: s
+        * Given these products:
+          | name    | flavor | size |
+          | ------- | ------ | ---- |
+          | Doritos |        | 9 oz |
+          |         | Nacho  |      |
+        * Then the flavor is "<flavor>"
+        ### Examples:
+          | name    | flavor |
+          | ------- | ------ |
+          | Doritos |        |
+        """)
+
+      [%{steps: [step, _], examples: [examples]}] = feature.scenarios
+
+      assert step.datatable == [
+               ["name", "flavor", "size"],
+               ["Doritos", "", "9 oz"],
+               ["", "Nacho", ""]
+             ]
+
+      assert examples.table_body == [["Doritos", ""]]
+    end
+
+    test "a row whose cell count differs from the first row raises at that row" do
+      error =
+        assert_raise Gherkin.ParseError, fn ->
+          Markdown.parse("""
+          # Feature: Ragged
+          ## Scenario: s
+          * Given these products:
+            | name    | flavor | size |
+            | Doritos | Nacho  |
+          """)
+        end
+
+      assert error.line == 5
+      assert Exception.message(error) =~ "3 cells to match the first row, got 2"
+    end
+
     test "an indented table row with nothing to attach to raises" do
       assert_raise Gherkin.ParseError, ~r/before a table row/s, fn ->
         Markdown.parse("""

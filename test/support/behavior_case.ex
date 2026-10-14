@@ -149,9 +149,9 @@ defmodule Cucumber.BehaviorCase do
   def run_features(sources, opts \\ []) when is_list(sources) do
     step_modules = opts |> Keyword.get(:steps, []) |> List.wrap()
     hook_modules = opts |> Keyword.get(:hooks, []) |> List.wrap()
-    parameter_types = opts |> Keyword.get(:parameter_types, []) |> List.wrap() |> merge_types()
+    parameter_type_modules = opts |> Keyword.get(:parameter_types, []) |> List.wrap()
 
-    registry = build_registry(step_modules, parameter_types)
+    registry = Cucumber.StepRegistry.new(step_modules, parameter_type_modules)
 
     # Each run_feature call is its own isolated cucumber run: reset the
     # coordinator so run-level state (before_all/after_all) from a previous
@@ -181,7 +181,6 @@ defmodule Cucumber.BehaviorCase do
         features,
         registry,
         hook_modules,
-        parameter_types,
         opts[:messages]
       )
 
@@ -251,23 +250,6 @@ defmodule Cucumber.BehaviorCase do
         seed: config[:seed],
         colors: config[:colors]
       )
-    end
-  end
-
-  defp build_registry(step_modules, parameter_types) do
-    for module <- step_modules,
-        {pattern, metadata} <- module.__cucumber_steps__(),
-        Cucumber.Discovery.compilable_pattern?(pattern, metadata, parameter_types),
-        into: %{} do
-      {Cucumber.Discovery.registry_key(pattern), {module, metadata}}
-    end
-  end
-
-  defp merge_types(parameter_type_modules) do
-    for module <- parameter_type_modules,
-        {name, definition} <- module.__cucumber_parameter_types__(),
-        into: %{} do
-      {name, definition}
     end
   end
 

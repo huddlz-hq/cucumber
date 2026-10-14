@@ -465,7 +465,7 @@ defmodule Cucumber.ExpressionTest do
       assert :no_match = Expression.match("infrared paint", compiled)
     end
 
-    test "the compile cache distinguishes different type definitions for one pattern" do
+    test "one pattern compiles differently against different type definitions" do
       pattern = "a {hue} wall"
 
       warm = %{"hue" => %{regexp: ~r/red/, transform: nil}}

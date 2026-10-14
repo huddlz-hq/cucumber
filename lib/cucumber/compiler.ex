@@ -1,19 +1,19 @@
 defmodule Cucumber.Compiler do
-  @moduledoc """
-  Compiles discovered features and steps into ExUnit test modules.
+  @moduledoc false
 
-  The compilation pipeline works as follows:
-
-  1. Discovery finds all feature files and step definitions via `Cucumber.Discovery`
-  2. For each feature file, a unique ExUnit test module is generated
-  3. Module names are derived from the feature file path
-     (e.g., `test/features/auth.feature` becomes `Test.Features.AuthTest`)
-  4. The feature is compiled into pickles by `Gherkin.Pickles` (expanding
-     scenario outlines and rules); each pickle becomes one ExUnit `test`
-     block carrying its pickle id
-  5. Tags from features and scenarios are mapped to ExUnit tags for filtering
-  6. Hooks are wired in via `Cucumber.Hooks`
-  """
+  # Compiles discovered features and steps into ExUnit test modules.
+  #
+  # The compilation pipeline works as follows:
+  #
+  # 1. Discovery finds all feature files and step definitions via `Cucumber.Discovery`
+  # 2. For each feature file, a unique ExUnit test module is generated
+  # 3. Module names are derived from the feature file path
+  #    (e.g., `test/features/auth.feature` becomes `Test.Features.AuthTest`)
+  # 4. The feature is compiled into pickles by `Gherkin.Pickles` (expanding
+  #    scenario outlines and rules); each pickle becomes one ExUnit `test`
+  #    block carrying its pickle id
+  # 5. Tags from features and scenarios are mapped to ExUnit tags for filtering
+  # 6. Hooks are wired in via `Cucumber.Hooks`
 
   alias Cucumber.Discovery
   alias Cucumber.Messages.Emitter
@@ -27,8 +27,7 @@ defmodule Cucumber.Compiler do
     %Discovery.DiscoveryResult{
       features: features,
       step_registry: step_registry,
-      hook_modules: hook_modules,
-      parameter_types: parameter_types
+      hook_modules: hook_modules
     } = Discovery.discover(opts)
 
     # Start (or reset) the run-wide coordinator before any test executes
@@ -38,7 +37,6 @@ defmodule Cucumber.Compiler do
       features,
       step_registry,
       hook_modules,
-      parameter_types,
       Application.get_env(:cucumber, :messages)
     )
   end
@@ -51,8 +49,9 @@ defmodule Cucumber.Compiler do
   # envelopes and enables the coordinator's message sink; the runner and the
   # after_suite flush do the rest. Shared by compile_features!/1 and
   # Cucumber.BehaviorCase.
-  @spec compile_all!([map()], map(), [module()], map(), String.t() | nil) :: [module()]
-  def compile_all!(features, step_registry, hook_modules, parameter_types, messages_path) do
+  @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
+          [module()]
+  def compile_all!(features, step_registry, hook_modules, messages_path) do
     reject_module_name_collisions!(features)
 
     {compiled, next_id} =
@@ -60,10 +59,7 @@ defmodule Cucumber.Compiler do
         compilation = Gherkin.Pickles.compile(feature, start_id)
 
         module =
-          compile_feature!(feature, step_registry, hook_modules,
-            parameter_types: parameter_types,
-            compilation: compilation
-          )
+          compile_feature!(feature, step_registry, hook_modules, compilation: compilation)
 
         {{module, feature, compilation}, compilation.next_id}
       end)
@@ -74,7 +70,6 @@ defmodule Cucumber.Compiler do
         Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
         step_registry,
         Cucumber.Hooks.collect_hooks(hook_modules),
-        parameter_types,
         next_id
       )
     end
@@ -88,11 +83,9 @@ defmodule Cucumber.Compiler do
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
   # `:compilation` accepts a precomputed `Gherkin.Pickles.Compilation` (used
   # by compile_features!/1 to thread run-unique pickle ids across features).
-  @spec compile_feature!(map(), map(), [module()], keyword()) :: module()
+  @spec compile_feature!(map(), Cucumber.StepRegistry.t(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
     warn_on_empty_feature(feature)
-
-    parameter_types = Keyword.get(opts, :parameter_types, %{})
 
     compilation =
       Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
@@ -121,8 +114,7 @@ defmodule Cucumber.Compiler do
 
     :persistent_term.put(runtime_key, %{
       step_registry: step_registry,
-      hooks: all_hooks,
-      parameter_types: parameter_types
+      hooks: all_hooks
     })
 
     # Generate test module AST
@@ -143,18 +135,9 @@ defmodule Cucumber.Compiler do
           )
 
           # Runtime data accessors (registry and hooks live in :persistent_term)
-          def __step_registry__ do
-            :persistent_term.get(unquote(Macro.escape(runtime_key))).step_registry
-          end
-
           @doc false
           def __cucumber_feature_hooks__ do
             :persistent_term.get(unquote(Macro.escape(runtime_key))).hooks
-          end
-
-          @doc false
-          def __cucumber_parameter_types__ do
-            :persistent_term.get(unquote(Macro.escape(runtime_key))).parameter_types
           end
 
           @doc false

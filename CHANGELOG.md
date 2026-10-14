@@ -4,11 +4,26 @@
 
 ### Changed
 
+- **Step matching moved into `Cucumber.StepRegistry`.** The registry is built once from step definition and parameter type modules (`StepRegistry.new/2`) and answers `StepRegistry.match/2` with `{:ok, definition, args}`, `:undefined`, or `{:ambiguous, matches}`. Every pattern now compiles once when the registry is built instead of on each match.
+- `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
+- `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
+- `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
 - Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
 - Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
+- **Behavior change:** empty data table and Examples cells now keep their column as `""`, in both `.feature` and `.feature.md` files (#54). Previously they were dropped, which shifted later cells left; a row like `| Doritos |  | 9 oz |` now parses as `["Doritos", "", "9 oz"]` instead of `["Doritos", "9 oz"]`, so step code that matched on row length may need updating.
+- A table row whose cell count differs from its table's first row now raises `Gherkin.ParseError` at that row, as the reference Gherkin parser does. Previously the row's values were silently lost or misplaced when zipped against the header.
+- Text after the last `|` of an unterminated table row (`| a | b`) is no longer read as a cell, matching the reference parser.
+
+### Deprecated
+
+These keep working in 1.x and will be removed in 2.0:
+
+- `Cucumber.Messages.step_definition/3` (registry key + source reference). Use `step_definition/2`, which takes a `Cucumber.StepRegistry.Definition`.
+- `Cucumber.Messages.Emitter.configure/6`. Its `parameter_types` argument is now ignored, because the step registry carries the parameter types. Enable messages with `config :cucumber, messages: path`. `Cucumber.Messages.Emitter` will become internal in 2.0.
 
 ### Bug Fixes
 
+- Regex step definitions with flags (e.g. `~r/.../i`) no longer crash when a step matches them on Elixir versions where `Regex.opts/1` returns a list.
 - Attaching from a `before_all` hook (`Cucumber.attach/4`, `Cucumber.log/2`, `Cucumber.link/2`) no longer deadlocks the run coordinator and fails every scenario (#57). `before_all` hooks now run in the calling test process; the coordinator still guarantees they run exactly once per run, and concurrent `@async` features wait for the first caller's result. The attachment is recorded with no phase.
 - A `.feature` file that starts with blank lines now reports its true line numbers everywhere they surface — error `file:line` links, the `scenario_line` tag, failure stack frames, and Cucumber Messages locations. Previously the parser stripped leading newlines before parsing, shifting every line up by the number of leading blank lines and disagreeing with the `.feature.md` parser (#58).
 - Attachments from `before_all` and `after_all` hooks now appear in the Cucumber Messages stream as `attachment` envelopes carrying the hook's `testRunHookStartedId`, between its `testRunHookStarted` and `testRunHookFinished` envelopes (#59). Previously they were emitted with no reference at all. The CCK `global-hooks-attachments` sample is now approved.

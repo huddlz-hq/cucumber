@@ -142,7 +142,8 @@ defmodule Gherkin.NimbleParser do
   # --- Data Tables ---
   # Table cell: | followed by content (not including the next |)
   # A row like "| a | b |" has cells at each | delimiter
-  # The last | before newline creates an empty cell which we filter out
+  # The segment after the last | is not a cell, and filter_table_cells/1
+  # drops it
   table_cell =
     ignore(string("|"))
     |> ignore(optional(horizontal_ws))
@@ -150,7 +151,8 @@ defmodule Gherkin.NimbleParser do
     |> map({String, :trim, []})
 
   # Table row: | cell1 | cell2 | cell3 |
-  # Note: times(table_cell, min: 1) will consume the trailing | as an empty cell.
+  # Note: times(table_cell, min: 1) also consumes the segment after the final
+  # | (empty for a well-formed row) as a cell.
   # Each row carries its source line (for Cucumber Messages locations).
   table_row =
     optional_ws
@@ -473,14 +475,14 @@ defmodule Gherkin.NimbleParser do
     # recorded line matches the text the feature's source points at.
     case parse_feature(gherkin_string) do
       {:ok, [feature], "", _context, _line, _offset} ->
-        put_comments(feature, gherkin_string)
+        feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!()
 
       {:ok, [feature], rest, _context, {line, col}, _offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
         if String.trim(rest) == "" do
-          put_comments(feature, gherkin_string)
+          feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!()
         else
           raise Gherkin.ParseError,
             message: "Unexpected content; parser stopped before end of file",
@@ -622,12 +624,11 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def filter_table_cells(cells) do
-    # Remove only the trailing empty cell created by the final |. Empty cells
-    # inside the row are real values and keep their column position.
-    case List.last(cells) do
-      "" -> Enum.drop(cells, -1)
-      _cell -> cells
-    end
+    # The last segment follows the final | and is not a cell: empty for a
+    # well-formed row, stray text for an unterminated one (`| a | b`), which
+    # the reference parser also discards. Empty cells inside the row are real
+    # values and keep their column position.
+    Enum.drop(cells, -1)
   end
 
   @doc false
