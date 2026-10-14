@@ -880,18 +880,22 @@ defmodule Gherkin.ParseError do
   Exception raised when parsing a Gherkin file fails.
 
   Contains detailed information about the parse error including
-  line number, column, and context.
+  line number, column, and context. `file` is the feature file's path when
+  the source was parsed with `Gherkin.Parser.parse/2`, and `nil` otherwise.
   """
 
-  defexception [:message, :line, :column, :rest]
+  defexception [:message, :line, :column, :rest, :file]
 
   @impl true
-  def message(%{message: msg, line: line, column: col, rest: rest}) do
+  def message(%{message: msg, rest: rest} = error) do
     snippet = if rest && rest != "", do: ~s(\nNear: "#{rest}..."), else: ""
 
     """
-    Gherkin parse error at line #{line}, column #{col}:
+    Gherkin parse error at #{location(error)}:
       Expected #{msg}#{snippet}
     """
   end
+
+  defp location(%{file: nil, line: line, column: col}), do: "line #{line}, column #{col}"
+  defp location(%{file: file, line: line, column: col}), do: "#{file}:#{line}:#{col}"
 end

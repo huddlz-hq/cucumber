@@ -121,7 +121,7 @@ Step execution history:
 If there are syntax errors in your feature files, you'll get an error when the parser tries to process the file:
 
 ```
-** (Gherkin.ParseError) Gherkin parse error at line 6, column 7:
+** (Gherkin.ParseError) Gherkin parse error at test/features/checkout.feature:6:7:
   Expected a table row with 3 cells to match the first row, got 2
 Near: "| Smartphone   | 1        |..."
 ```

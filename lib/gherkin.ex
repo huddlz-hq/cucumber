@@ -260,7 +260,8 @@ defmodule Gherkin.Parser do
 
   `.feature.md` files parse as Markdown with Gherkin (see
   `Gherkin.Markdown`); everything else parses as plain Gherkin, exactly
-  like `parse/1`.
+  like `parse/1`. A `Gherkin.ParseError` raised from either parser carries
+  `path` in its `file` field, and its message leads with `path:line:column`.
 
   ## Examples
 
@@ -274,5 +275,7 @@ defmodule Gherkin.Parser do
     else
       Gherkin.NimbleParser.parse(content)
     end
+  rescue
+    error in Gherkin.ParseError -> reraise %{error | file: path}, __STACKTRACE__
   end
 end

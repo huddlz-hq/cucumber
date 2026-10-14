@@ -964,6 +964,20 @@ defmodule Gherkin.ParserTest do
       assert {error.line, error.column} == {5, 3}
     end
 
+    test "parse/2 names the file, as path:line:column" do
+      gherkin = "Feature: Broken\n\nScenario: s\n  Given a step\n  Invalid line here\n"
+
+      error =
+        assert_raise Gherkin.ParseError, fn ->
+          Gherkin.Parser.parse(gherkin, "test/features/broken.feature")
+        end
+
+      assert error.file == "test/features/broken.feature"
+
+      assert Exception.message(error) =~
+               "Gherkin parse error at test/features/broken.feature:5:3:"
+    end
+
     test "the snippet is the unreadable line alone" do
       gherkin =
         "Feature: Broken\n\nScenario: s\n  Given a step\n  Invalid line here\n  Given more\n"

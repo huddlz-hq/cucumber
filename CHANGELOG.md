@@ -16,6 +16,7 @@
 - Table cells support the reference Gherkin escapes in both `.feature` and `.feature.md` files: `\|` is a literal pipe, `\\` a backslash and `\n` a newline. Previously `\|` split the cell in two, so a row containing one now has the cell count its header expects instead of failing the row-width check. Any other backslash is kept as written.
 - Line numbers in a `.feature` file that starts with blank lines now count from the top of the file. The parser trimmed leading newlines before parsing, so stack frames, Cucumber Messages locations and parse errors pointed that many lines too early.
 - `.feature` parse errors read naturally and point at the right place. A line the parser cannot read now says `Expected a step, table row, doc string, tag, comment or keyword line` instead of `Expected Unexpected content; parser stopped before end of file`, and a file with no feature says `Expected feature` instead of `Expected expected feature`. The column is now 1-based at the start of the line's content rather than a byte offset, and `Near:` quotes only that line.
+- `Gherkin.ParseError` names the feature file it came from. Errors raised while discovering or compiling features (anything parsed with `Gherkin.Parser.parse/2`) set the new `file` field and lead with `path:line:column`, e.g. `Gherkin parse error at test/features/checkout.feature:6:7:`, for `.feature` and `.feature.md` files alike. `Gherkin.Parser.parse/1` has no path and keeps the `line N, column N` form.
 
 ### Deprecated
 
