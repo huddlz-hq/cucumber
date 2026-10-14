@@ -258,7 +258,7 @@ defmodule Cucumber.RunCoordinator do
   defp run_after_all_hook({name, ref}, context) do
     started_id = run_hook_started_call(ref)
     started_at = System.monotonic_time(:nanosecond)
-    errors = apply_after_all_hook(name, ref, context)
+    errors = apply_after_all_hook(name, ref, put_run_hook_ref(context, started_id))
     status = if errors == [], do: :passed, else: :failed
     run_hook_finished_call(started_id, status, System.monotonic_time(:nanosecond) - started_at)
     errors
@@ -276,6 +276,14 @@ defmodule Cucumber.RunCoordinator do
     kind, reason ->
       [{kind, reason, __STACKTRACE__}]
   end
+
+  # The hook's own context carries its testRunHookStarted id as the message
+  # ref, so attachments it records (Cucumber.attach/4) land on the hook in
+  # the message stream. The ref is never part of the context a hook hands on.
+  defp put_run_hook_ref(context, nil), do: context
+
+  defp put_run_hook_ref(context, started_id),
+    do: Map.put(context, :cucumber_message_ref, %{test_run_hook_started_id: started_id})
 
   # Run-level hooks run in a caller's process (never inside the coordinator),
   # so their testRunHook envelopes go through GenServer calls.
@@ -516,7 +524,7 @@ defmodule Cucumber.RunCoordinator do
       Enum.reduce(hooks, {%{}, nil}, fn {_name, ref} = hook, {context, first_error} ->
         started_id = run_hook_started_call(ref)
         started_at = System.monotonic_time(:nanosecond)
-        result = run_before_all_hook(hook, context)
+        result = run_before_all_hook(hook, put_run_hook_ref(context, started_id))
 
         status =
           case result do
@@ -528,7 +536,7 @@ defmodule Cucumber.RunCoordinator do
         run_hook_finished_call(started_id, status, duration)
 
         case result do
-          {:ok, context} -> {context, first_error}
+          {:ok, context} -> {Map.delete(context, :cucumber_message_ref), first_error}
           {:error, error} -> {context, first_error || error}
         end
       end)

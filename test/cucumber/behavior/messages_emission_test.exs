@@ -107,6 +107,20 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     end
   end
 
+  defmodule AttachingRunHooks do
+    use Cucumber.Hooks
+
+    before_all context do
+      Cucumber.attach(context, "before_all evidence", "text/plain")
+      {:ok, Map.put(context, :provisioned, true)}
+    end
+
+    after_all context do
+      Cucumber.log(context, "after_all evidence")
+      :ok
+    end
+  end
+
   defmodule SkippingAfterHook do
     use Cucumber.Hooks
 
@@ -851,6 +865,52 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
     assert first_hook_start < Enum.find_index(types, &(&1 == "testCase"))
     assert last_hook_start > Enum.find_index(types, &(&1 == "testCaseFinished"))
     assert last_hook_start < Enum.find_index(types, &(&1 == "testRunFinished"))
+  end
+
+  test "run-hook attachments reference their testRunHookStarted and land inside its events" do
+    run =
+      run_messages(
+        """
+        Feature: run hook evidence
+          Scenario: plain
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [AttachingRunHooks]
+      )
+
+    assert run.passed == 1
+
+    [before_started, after_started] = payloads(run.messages, "testRunHookStarted")
+    [before_attachment, after_attachment] = payloads(run.messages, "attachment")
+
+    assert before_attachment["body"] == "before_all evidence"
+    assert before_attachment["testRunHookStartedId"] == before_started["id"]
+    assert after_attachment["body"] == "after_all evidence"
+    assert after_attachment["mediaType"] == "text/x.cucumber.log+plain"
+    assert after_attachment["testRunHookStartedId"] == after_started["id"]
+
+    for attachment <- [before_attachment, after_attachment] do
+      refute Map.has_key?(attachment, "testCaseStartedId")
+      refute Map.has_key?(attachment, "testStepId")
+    end
+
+    # Each attachment sits between its own hook's started/finished pair:
+    # [hookStarted, attachment, hookFinished] twice over
+    run_hook_window =
+      for envelope <- run.messages,
+          type = envelope |> Map.keys() |> hd(),
+          type in ["testRunHookStarted", "attachment", "testRunHookFinished"],
+          do: {type, envelope[type]["id"] || envelope[type]["testRunHookStartedId"]}
+
+    assert run_hook_window == [
+             {"testRunHookStarted", before_started["id"]},
+             {"attachment", before_started["id"]},
+             {"testRunHookFinished", before_started["id"]},
+             {"testRunHookStarted", after_started["id"]},
+             {"attachment", after_started["id"]},
+             {"testRunHookFinished", after_started["id"]}
+           ]
   end
 
   test "attachments reference their step and land between its events" do

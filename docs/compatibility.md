@@ -28,15 +28,15 @@ fields and unimplemented message types are not promises of implemented features.
 and exactly once, globally unique IDs, references to earlier envelopes of the
 right message type, one completed run, paired run hooks, and complete ordered
 steps within each active attempt. Attachments must reference that attempt's active
-step. Attempt state is independent so concurrent scenarios may interleave.
+step, or — for attachments from `before_all`/`after_all` hooks — a run hook that
+has started and not yet finished. Attempt state is independent so concurrent scenarios may interleave.
 Both actual and reference streams pass these checks **before** approval
 normalization. The Messages emission behavior tests also use these checks,
 including abrupt process termination and hook failures. Mutation tests exercise
 rejection paths and acceptance of interleaved attempts.
 
 This validator targets complete execution streams for the supported subset. It
-does not validate arbitrary partial streams, global-hook attachments, every
-semantic relationship in the Messages model, or compatibility with every consumer.
+does not validate arbitrary partial streams, every semantic relationship in the Messages model, or compatibility with every consumer.
 
 ## Sample matrix
 
@@ -44,11 +44,10 @@ semantic relationship in the Messages model, or compatibility with every consume
 | --- | --- |
 | Approved: basic execution and arguments | `minimal`, `cdata`, `empty`, `data-tables`, `backgrounds`, `doc-strings`, `examples-tables`, `unused-steps`, `stack-traces`, `parameter-types`, `regular-expression` |
 | Approved: outcomes | `undefined`, `ambiguous`, `pending`, `skipped`, `all-statuses`, `failedish-combinations`, `undefined-multiple`, `examples-tables-undefined`, `examples-tables-undefined-multiple` |
-| Approved: hooks | `hooks`, `hooks-conditional`, `hooks-named`, `hooks-skipped`, `skipped-failing-hook`, `global-hooks`, `global-hooks-afterall-error`, `hooks-undefined` |
+| Approved: hooks | `hooks`, `hooks-conditional`, `hooks-named`, `hooks-skipped`, `skipped-failing-hook`, `global-hooks`, `global-hooks-afterall-error`, `global-hooks-attachments`, `hooks-undefined` |
 | Approved: retries | `retry`, `retry-pending`, `retry-undefined` |
 | Approved: structure and attachments | `rules`, `rules-backgrounds`, `attachments`, `hooks-attachment`, `examples-tables-attachment`, `multiple-features` |
 | Approved with additional behavior/representation allowances | `global-hooks-beforeall-error`, `retry-ambiguous`, `markdown` (details below) |
-| Excluded: global-hook attachment support absent | `global-hooks-attachments` |
 | Excluded: reference CLI reverse-order option absent; ExUnit controls order | `multiple-features-reversed` |
 | Excluded: pending/skipped use return values here, not exceptions; return-value samples are approved | `pending-exception`, `skipped-exception` |
 | Excluded: reference CLI runner-crash injection absent | `test-run-exception` |
