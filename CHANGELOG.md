@@ -4,6 +4,9 @@
 
 - Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 42 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
 - Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
+- **Behavior change:** empty data table and Examples cells now keep their column as `""`, in both `.feature` and `.feature.md` files (#54). Previously they were dropped, which shifted later cells left; a row like `| Doritos |  | 9 oz |` now parses as `["Doritos", "", "9 oz"]` instead of `["Doritos", "9 oz"]`, so step code that matched on row length may need updating.
+- A table row whose cell count differs from its table's first row now raises `Gherkin.ParseError` at that row, as the reference Gherkin parser does. Previously the row's values were silently lost or misplaced when zipped against the header.
+- Text after the last `|` of an unterminated table row (`| a | b`) is no longer read as a cell, matching the reference parser.
 
 ## v1.0.0 (2026-07-02)
 
