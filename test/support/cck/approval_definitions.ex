@@ -60,6 +60,24 @@ defmodule Cucumber.CckApproval.Definitions do
     end
   end
 
+  defmodule DataTablesDocStrings do
+    @moduledoc false
+    use Cucumber.StepDefinition
+    import ExUnit.Assertions
+
+    step "a step with a data table a doc string", context do
+      assert context.datatable.raw == [["hello"]]
+      assert context.docstring == "world"
+      :ok
+    end
+
+    step "a step with a doc string a data table", context do
+      assert context.docstring == "hello"
+      assert context.datatable.raw == [["world"]]
+      :ok
+    end
+  end
+
   defmodule DocStringsWithExpression do
     @moduledoc false
     use Cucumber.StepDefinition

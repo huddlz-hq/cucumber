@@ -412,6 +412,13 @@ defmodule Gherkin.Pickles do
     {node, ids}
   end
 
+  defp build_step_argument(%{docstring: docstring, datatable: [_ | _]} = step, ids)
+       when is_binary(docstring) do
+    {doc_string, ids} = build_step_argument(%{step | datatable: nil}, ids)
+    {data_table, ids} = build_step_argument(%{step | docstring: nil}, ids)
+    {Map.merge(doc_string, data_table), ids}
+  end
+
   defp build_step_argument(%{docstring: docstring} = step, ids) when is_binary(docstring) do
     line = step.docstring_line || row_line(step.line, 0)
 

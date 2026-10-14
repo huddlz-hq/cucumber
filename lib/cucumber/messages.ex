@@ -452,6 +452,20 @@ defmodule Cucumber.Messages do
 
   # Pickle step arguments carry content only — no ids or locations
   # (those live in the gherkinDocument nodes the astNodeIds point to).
+  defp pickle_step_argument(%{docstring: docstring, datatable: [_ | _]} = step)
+       when is_binary(docstring) do
+    %{docString: doc_string} = pickle_step_argument(%{step | datatable: nil})
+    %{dataTable: data_table} = pickle_step_argument(%{step | docstring: nil})
+    doc_line = step.docstring_line || step.line || 0
+    table_line = List.first(step.datatable_lines || []) || step.line || 0
+    doc_first = doc_line <= table_line
+
+    %{
+      docString: Map.put(doc_string, :argumentIndex, if(doc_first, do: 1, else: 2)),
+      dataTable: Map.put(data_table, :argumentIndex, if(doc_first, do: 2, else: 1))
+    }
+  end
+
   defp pickle_step_argument(%{docstring: docstring} = step) when is_binary(docstring) do
     doc_string =
       case step.docstring_media_type do
