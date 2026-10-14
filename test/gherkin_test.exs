@@ -783,4 +783,105 @@ defmodule Gherkin.ParserTest do
       assert hd(scenario.steps).docstring == "# this is content"
     end
   end
+
+  describe "line numbers in a source with leading blank lines" do
+    test "feature, scenario, step, tag, and datatable lines match the source text" do
+      source = """
+
+
+      @feature-tag
+      Feature: Leading blanks
+
+        @scenario-tag
+        Scenario: s
+          Given a table:
+            | a | b |
+            | 1 | 2 |
+      """
+
+      feature = Gherkin.Parser.parse(source)
+
+      assert feature.line == 3
+      assert feature.tag_lines == [2]
+
+      [scenario] = feature.scenarios
+      assert scenario.line == 6
+      assert scenario.tag_lines == [5]
+
+      [step] = scenario.steps
+      assert step.line == 7
+      assert step.datatable_lines == [8, 9]
+    end
+
+    test "CRLF line endings report the same lines as LF" do
+      lf = """
+
+
+      @feature-tag
+      Feature: Leading blanks
+
+        @scenario-tag
+        Scenario: s
+          Given a table:
+            | a | b |
+            | 1 | 2 |
+      """
+
+      crlf = String.replace(lf, "\n", "\r\n")
+
+      assert source_lines(Gherkin.Parser.parse(crlf)) == source_lines(Gherkin.Parser.parse(lf))
+      assert %{feature: 3, scenario: 6, steps: [7]} = source_lines(Gherkin.Parser.parse(crlf))
+    end
+
+    test "equivalent .feature and .feature.md sources report the same lines" do
+      gherkin = """
+
+
+      Feature: Parity
+
+      @t
+      Scenario: s
+        Given a table:
+          | a | b |
+          | 1 | 2 |
+        When another step
+      """
+
+      markdown = """
+
+
+      # Feature: Parity
+
+      `@t`
+      ## Scenario: s
+      * Given a table:
+        | a | b |
+        | 1 | 2 |
+      * When another step
+      """
+
+      from_gherkin = gherkin |> Gherkin.Parser.parse("parity.feature") |> source_lines()
+      from_markdown = markdown |> Gherkin.Parser.parse("parity.feature.md") |> source_lines()
+
+      # The feature line itself is format-specific: in Markdown with Gherkin
+      # a blank first line is the (unnamed) feature line, as in the reference.
+      assert Map.delete(from_gherkin, :feature) == Map.delete(from_markdown, :feature)
+
+      assert %{scenario: 5, scenario_tags: [4], steps: [6, 9], datatables: [[7, 8], nil]} =
+               from_gherkin
+    end
+  end
+
+  defp source_lines(feature) do
+    [scenario] = feature.scenarios
+
+    %{
+      feature: feature.line,
+      feature_tags: feature.tag_lines,
+      scenario: scenario.line,
+      scenario_tags: scenario.tag_lines,
+      steps: Enum.map(scenario.steps, & &1.line),
+      datatables: Enum.map(scenario.steps, & &1.datatable_lines)
+    }
+  end
 end
