@@ -52,10 +52,7 @@ defmodule Cucumber.RuntimeTest do
   end
 
   setup do
-    step_registry =
-      for {pattern, metadata} <- TestSteps.__cucumber_steps__(), into: %{} do
-        {{:expression, pattern}, {TestSteps, metadata}}
-      end
+    step_registry = Cucumber.StepRegistry.new([TestSteps])
 
     base_context = %{
       feature_file: "test/features/example.feature",

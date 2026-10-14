@@ -2,6 +2,8 @@ defmodule Cucumber.DiscoveryTest do
   use ExUnit.Case
 
   alias Cucumber.Discovery
+  alias Cucumber.StepRegistry
+  alias Cucumber.StepRegistry.Definition
 
   describe "discover/1 with syntax errors" do
     test "propagates syntax errors during step discovery instead of silencing them" do
@@ -58,7 +60,9 @@ defmodule Cucumber.DiscoveryTest do
 
         assert %Discovery.DiscoveryResult{} = result
         assert length(result.step_modules) == 1
-        assert Map.has_key?(result.step_registry, {:expression, "I am a valid step"})
+
+        assert {:ok, %Definition{module: ValidDiscoverySteps}, []} =
+                 StepRegistry.match(result.step_registry, "I am a valid step")
       after
         File.rm_rf(temp_dir)
       end
@@ -175,12 +179,10 @@ defmodule Cucumber.DiscoveryTest do
       try do
         result = Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
 
-        assert Map.has_key?(result.step_registry, {:expression, "I have {int} items"})
-        {module, metadata} = result.step_registry[{:expression, "I have {int} items"}]
-        assert is_atom(module)
-        assert is_map(metadata)
-        assert Map.has_key?(metadata, :line)
-        assert Map.has_key?(metadata, :file)
+        assert {:ok, definition, [3]} = StepRegistry.match(result.step_registry, "I have 3 items")
+        assert [definition.module] == result.step_modules
+        assert Path.basename(definition.file) == "my_steps.exs"
+        assert definition.line == 4
       after
         File.rm_rf(temp_dir)
       end
@@ -217,8 +219,8 @@ defmodule Cucumber.DiscoveryTest do
         result = Discovery.discover(steps: [Path.join(step_dir, "*.exs")])
 
         assert length(result.step_modules) == 2
-        assert Map.has_key?(result.step_registry, {:expression, "step from first module"})
-        assert Map.has_key?(result.step_registry, {:expression, "step from second module"})
+        assert {:ok, _, []} = StepRegistry.match(result.step_registry, "step from first module")
+        assert {:ok, _, []} = StepRegistry.match(result.step_registry, "step from second module")
       after
         File.rm_rf(temp_dir)
       end
@@ -437,9 +439,12 @@ defmodule Cucumber.DiscoveryTest do
       second = Discovery.discover(opts)
 
       assert second.step_modules == first.step_modules
-      assert second.step_registry == first.step_registry
       assert second.hook_modules == first.hook_modules
-      assert Map.has_key?(second.step_registry, {:expression, "a rediscovered step"})
+
+      assert {:ok, %Definition{module: module}, []} =
+               StepRegistry.match(second.step_registry, "a rediscovered step")
+
+      assert [module] == first.step_modules
     end
 
     @tag :tmp_dir
@@ -473,7 +478,7 @@ defmodule Cucumber.DiscoveryTest do
       second = Discovery.discover([{:steps, [respelled_pattern]} | base_opts])
 
       assert second.step_modules == first.step_modules
-      assert Map.has_key?(second.step_registry, {:expression, "a respelled step"})
+      assert {:ok, _, []} = StepRegistry.match(second.step_registry, "a respelled step")
     end
 
     @tag :tmp_dir
@@ -521,7 +526,7 @@ defmodule Cucumber.DiscoveryTest do
 
       assert result.features == []
       assert result.step_modules == []
-      assert result.step_registry == %{}
+      assert StepRegistry.definitions(result.step_registry) == []
       assert result.hook_modules == []
     end
   end

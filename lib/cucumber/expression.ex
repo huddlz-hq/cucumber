@@ -242,26 +242,25 @@ defmodule Cucumber.Expression do
 
   @spec compile(String.t(), custom_types()) :: compiled()
   def compile(pattern, custom_types) do
-    # The fingerprint includes transform funs: a recompiled support module
-    # produces new fun instances, which correctly invalidates cached
-    # expressions (relevant under mix test.watch).
-    cache_key = {__MODULE__, :compiled, pattern, :erlang.phash2(custom_types)}
-
-    case :persistent_term.get(cache_key, :not_found) do
-      :not_found ->
-        compiled = do_compile(pattern, custom_types)
-        :persistent_term.put(cache_key, compiled)
+    case compile_checked(pattern, custom_types) do
+      {:ok, compiled} ->
         compiled
 
-      compiled ->
-        compiled
+      {:error, {:undefined_parameter_type, type}} ->
+        raise Cucumber.UndefinedParameterTypeError.new(type, pattern)
     end
   end
 
-  defp do_compile(pattern, custom_types) do
+  @doc false
+  # Like compile/2, but reports an undefined parameter type as a value
+  # instead of raising — Cucumber.StepRegistry drops such definitions with
+  # a warning. Malformed expressions still raise.
+  @spec compile_checked(String.t(), custom_types()) ::
+          {:ok, compiled()} | {:error, {:undefined_parameter_type, String.t()}}
+  def compile_checked(pattern, custom_types) do
     case parse_expression(pattern) do
       {:ok, ast, "", _, _, _} ->
-        normalize_ast(ast, pattern, custom_types)
+        normalize_ast(ast, custom_types)
 
       {:ok, _, rest, _, _, _} ->
         raise "Failed to parse expression, unexpected: #{inspect(rest)}"
@@ -271,39 +270,44 @@ defmodule Cucumber.Expression do
     end
   end
 
-  defp normalize_ast(ast, pattern, custom_types) do
+  defp normalize_ast(ast, custom_types) do
     ast
-    |> Enum.map(fn
-      {:literal, text} ->
-        {:literal, text}
-
-      {:escaped, char} ->
-        {:literal, char}
-
-      {:parameter, [type]} ->
-        {:parameter, type, get_parser!(type, pattern, custom_types), :required}
-
-      {:parameter, [type, true]} ->
-        {:parameter, type, get_parser!(type, pattern, custom_types), :optional}
-
-      {:optional, [text]} ->
-        {:optional, text}
-
-      {:alternation, options} ->
-        {:alternation, options}
+    |> Enum.reduce_while([], fn node, acc ->
+      case normalize_node(node, custom_types) do
+        {:ok, normalized} -> {:cont, [normalized | acc]}
+        {:error, _} = error -> {:halt, error}
+      end
     end)
-    |> merge_adjacent_literals()
+    |> case do
+      {:error, _} = error -> error
+      nodes -> {:ok, nodes |> Enum.reverse() |> merge_adjacent_literals()}
+    end
   end
 
-  defp get_parser!(type, pattern, custom_types) do
+  defp normalize_node({:literal, text}, _custom_types), do: {:ok, {:literal, text}}
+  defp normalize_node({:escaped, char}, _custom_types), do: {:ok, {:literal, char}}
+  defp normalize_node({:optional, [text]}, _custom_types), do: {:ok, {:optional, text}}
+
+  defp normalize_node({:alternation, options}, _custom_types),
+    do: {:ok, {:alternation, options}}
+
+  defp normalize_node({:parameter, [type | optional]}, custom_types) do
+    modifier = if optional == [true], do: :optional, else: :required
+
+    with {:ok, parser} <- get_parser(type, custom_types) do
+      {:ok, {:parameter, type, parser, modifier}}
+    end
+  end
+
+  defp get_parser(type, custom_types) do
     case Map.fetch(@param_parsers, type) do
       {:ok, parser} ->
-        parser
+        {:ok, parser}
 
       :error ->
         case Map.fetch(custom_types, type) do
-          {:ok, definition} -> build_custom_matcher(definition)
-          :error -> raise Cucumber.UndefinedParameterTypeError.new(type, pattern)
+          {:ok, definition} -> {:ok, build_custom_matcher(definition)}
+          :error -> {:error, {:undefined_parameter_type, type}}
         end
     end
   end
@@ -322,7 +326,7 @@ defmodule Cucumber.Expression do
   # Counts capturing groups in a regex source: plain `(`, named `(?<name>`,
   # `(?'name'`, and `(?P<name>` capture; other `(?...)` constructs don't.
   # Escapes and character classes are skipped. Shared with regex step
-  # definition matching in Cucumber.Runtime.
+  # definition matching in Cucumber.StepRegistry.
   def count_capture_groups(source), do: count_groups(source, :normal, 0)
 
   defp count_groups(<<>>, _state, count), do: count

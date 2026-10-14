@@ -1,50 +1,39 @@
 defmodule Cucumber.Discovery do
-  @moduledoc """
-  Discovers and loads feature files, step definitions, and hook modules.
+  @moduledoc false
 
-  The discovery algorithm proceeds in this order:
-
-  1. **Support files** are loaded first (default: `test/features/support/**/*.exs`),
-     following the same convention as Ruby Cucumber. These typically define hooks.
-  2. **Step definitions** are loaded next (default: `test/features/step_definitions/**/*.exs`).
-     Each module using `Cucumber.StepDefinition` is registered.
-  3. A **step registry** is built from all loaded step modules, mapping patterns to
-     their implementing module and metadata. Duplicate patterns raise immediately.
-  4. **Feature files** are parsed (default: `test/features/**/*.feature`
-     plus `test/features/**/*.feature.md`) using `Gherkin.Parser` and
-     annotated with their source file path. `.feature.md` files parse as
-     Markdown with Gherkin (see `Gherkin.Markdown`).
-
-  All default paths can be overridden via application config or opts passed to `discover/1`.
-  """
+  # Discovers and loads feature files, step definitions, and hook modules.
+  #
+  # The discovery algorithm proceeds in this order:
+  #
+  # 1. **Support files** are loaded first (default: `test/features/support/**/*.exs`),
+  #    following the same convention as Ruby Cucumber. These typically define hooks.
+  # 2. **Step definitions** are loaded next (default: `test/features/step_definitions/**/*.exs`).
+  #    Each module using `Cucumber.StepDefinition` is registered.
+  # 3. A `Cucumber.StepRegistry` is built from the loaded step modules and
+  #    parameter type modules.
+  # 4. **Feature files** are parsed (default: `test/features/**/*.feature`
+  #    plus `test/features/**/*.feature.md`) using `Gherkin.Parser` and
+  #    annotated with their source file path. `.feature.md` files parse as
+  #    Markdown with Gherkin (see `Gherkin.Markdown`).
+  #
+  # All default paths can be overridden via application config or opts passed to `discover/1`.
 
   @default_features_patterns ["test/features/**/*.feature", "test/features/**/*.feature.md"]
   @default_steps_pattern "test/features/step_definitions/**/*.exs"
   @default_support_pattern "test/features/support/**/*.exs"
 
   defmodule DiscoveryResult do
-    @moduledoc "Result struct returned by `Cucumber.Discovery.discover/1`."
+    @moduledoc false
     defstruct features: [],
               step_modules: [],
-              step_registry: %{},
-              hook_modules: [],
-              parameter_types: %{}
-
-    @typedoc """
-    Registry keys identify the pattern kind and pattern — `{:expression, source}`
-    for cucumber expressions, `{:regex, {source, opts}}` for regular
-    expressions. Regexes are keyed by source and options rather than the
-    `%Regex{}` struct because identical regexes do not compile to
-    structurally-equal `re_pattern` binaries.
-    """
-    @type registry_key :: {:expression, String.t()} | {:regex, {String.t(), term()}}
+              step_registry: nil,
+              hook_modules: []
 
     @type t :: %__MODULE__{
             features: [Gherkin.Feature.t()],
             step_modules: [module()],
-            step_registry: %{registry_key() => {module(), map()}},
-            hook_modules: [module()],
-            parameter_types: Cucumber.Expression.custom_types()
+            step_registry: Cucumber.StepRegistry.t(),
+            hook_modules: [module()]
           }
   end
 
@@ -61,13 +50,11 @@ defmodule Cucumber.Discovery do
     # Load support files first (like Ruby cucumber); they define hooks and
     # custom parameter types
     {hook_modules, parameter_type_modules} = load_support_files(support_patterns)
-    parameter_types = build_parameter_types(parameter_type_modules)
 
     # Discover and load step definitions
     step_modules = load_step_definitions(steps_patterns)
 
-    # Build step registry from loaded modules
-    step_registry = build_step_registry(step_modules, parameter_types)
+    step_registry = Cucumber.StepRegistry.new(step_modules, parameter_type_modules)
 
     # Discover and parse feature files
     features = discover_features(features_patterns)
@@ -76,8 +63,7 @@ defmodule Cucumber.Discovery do
       features: features,
       step_modules: step_modules,
       step_registry: step_registry,
-      hook_modules: hook_modules,
-      parameter_types: parameter_types
+      hook_modules: hook_modules
     }
   end
 
@@ -145,27 +131,6 @@ defmodule Cucumber.Discovery do
     end
   end
 
-  defp build_parameter_types(modules) do
-    all_types =
-      for module <- modules,
-          {name, definition} <- module.__cucumber_parameter_types__(),
-          do: {name, module, definition}
-
-    Enum.reduce(all_types, %{}, &add_parameter_type/2)
-  end
-
-  defp add_parameter_type({name, module, definition}, acc) do
-    if Map.has_key?(acc, name) do
-      raise """
-      Parameter type {#{name}} is defined in more than one module
-      (#{inspect(module)} among them). Each custom parameter type may
-      only be registered once.
-      """
-    end
-
-    Map.put(acc, name, definition)
-  end
-
   defp load_step_definitions(patterns) do
     patterns
     |> expand_patterns()
@@ -178,79 +143,6 @@ defmodule Cucumber.Discovery do
     |> loaded_modules()
     |> Enum.find(&function_exported?(&1, :__cucumber_steps__, 0))
   end
-
-  defp build_step_registry(modules, parameter_types) do
-    Enum.reduce(modules, %{}, fn module, acc ->
-      steps = module.__cucumber_steps__()
-      add_module_steps_to_registry(acc, module, steps, parameter_types)
-    end)
-  end
-
-  @doc false
-  # Shared key derivation so every registry builder (discovery, test
-  # harnesses) produces the same shape. Identical regexes (same source and
-  # flags) produce equal keys, so duplicate detection covers them too.
-  @spec registry_key(String.t() | Regex.t()) :: DiscoveryResult.registry_key()
-  def registry_key(%Regex{} = regex), do: {:regex, {Regex.source(regex), Regex.opts(regex)}}
-  def registry_key(pattern) when is_binary(pattern), do: {:expression, pattern}
-
-  defp add_module_steps_to_registry(registry, module, steps, parameter_types) do
-    Enum.reduce(steps, registry, fn {pattern, metadata}, acc ->
-      key = registry_key(pattern)
-
-      cond do
-        not compilable_pattern?(pattern, metadata, parameter_types) ->
-          # Mirrors reference Cucumber: a definition with an undefined
-          # parameter type is excluded (with a warning) rather than aborting
-          # the run; steps that would have used it fail as undefined.
-          acc
-
-        Map.has_key?(acc, key) ->
-          duplicate_definition!(acc[key], pattern, module, metadata)
-
-        true ->
-          Map.put(acc, key, {module, metadata})
-      end
-    end)
-  end
-
-  @doc false
-  # Public so test harnesses building registries directly apply the same
-  # undefined-parameter-type semantics as discovery.
-  def compilable_pattern?(%Regex{}, _metadata, _parameter_types), do: true
-
-  def compilable_pattern?(pattern, metadata, parameter_types) do
-    # Eagerly compile (also warming the cache) so undefined parameter types
-    # surface at load time rather than mid-scenario.
-    Cucumber.Expression.compile(pattern, parameter_types)
-    true
-  rescue
-    e in Cucumber.UndefinedParameterTypeError ->
-      IO.warn(
-        "Cucumber: step definition \"#{pattern}\" " <>
-          "(#{metadata.file}:#{metadata.line}) references undefined parameter " <>
-          "type {#{e.type_name}} and will be ignored. Steps matching it will " <>
-          "be reported as undefined.",
-        []
-      )
-
-      false
-  end
-
-  defp duplicate_definition!({existing_module, existing_meta}, pattern, module, metadata) do
-    raise """
-    Duplicate step definition: '#{display_pattern(pattern)}'
-
-    First defined in:
-      #{existing_module} at #{existing_meta.file}:#{existing_meta.line}
-
-    Also defined in:
-      #{module} at #{metadata.file}:#{metadata.line}
-    """
-  end
-
-  defp display_pattern(%Regex{} = regex), do: inspect(regex)
-  defp display_pattern(pattern), do: pattern
 
   defp discover_features(patterns) do
     patterns

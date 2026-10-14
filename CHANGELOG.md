@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+### Changed
+
+- **Step matching moved into `Cucumber.StepRegistry`.** The registry is built once from step definition and parameter type modules (`StepRegistry.new/2`) and answers `StepRegistry.match/2` with `{:ok, definition, args}`, `:undefined`, or `{:ambiguous, matches}`. Every pattern now compiles once when the registry is built instead of on each match.
+- `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
+- `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
+- `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
 - Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 42 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
 - Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
+
+### Deprecated
+
+These keep working in 1.x and will be removed in 2.0:
+
+- `Cucumber.Messages.step_definition/3` (registry key + source reference). Use `step_definition/2`, which takes a `Cucumber.StepRegistry.Definition`.
+- `Cucumber.Messages.Emitter.configure/6`. Its `parameter_types` argument is now ignored, because the step registry carries the parameter types. Enable messages with `config :cucumber, messages: path`. `Cucumber.Messages.Emitter` will become internal in 2.0.
+
+### Bug Fixes
+
+- Regex step definitions with flags (e.g. `~r/.../i`) no longer crash when a step matches them on Elixir versions where `Regex.opts/1` returns a list.
 
 ## v1.0.0 (2026-07-02)
 

@@ -72,8 +72,9 @@ This Cucumber implementation consists of several key components:
 
 1. **Discovery System** (`lib/cucumber/discovery.ex`) - Auto-discovers features and steps
    - Scans for feature files based on patterns
-   - Loads step definition modules
-   - Builds a registry of step patterns
+   - Loads step definition and support modules
+   - Builds the step registry (`lib/cucumber/step_registry.ex`): the one place
+     step text is matched against step definitions (see `GLOSSARY.md`)
 
 2. **Gherkin Parser** (`lib/gherkin.ex`) - Parses Gherkin syntax from `.feature` files
    - Features (with descriptions and tags)
@@ -90,7 +91,7 @@ This Cucumber implementation consists of several key components:
 
 4. **Runtime** (`lib/cucumber/runtime.ex`) - Runs the scenario lifecycle inside the test body
    - Hooks, background steps, and scenario steps all run in the test process
-   - Finds matching step definitions
+   - Matches steps through `Cucumber.StepRegistry.match/2`
    - Manages context between steps
    - Handles datatables and docstrings
    - Processes step return values (incl. pending/skipped, retry)
