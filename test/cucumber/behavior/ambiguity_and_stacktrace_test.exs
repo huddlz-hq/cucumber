@@ -148,6 +148,10 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       assert run.output =~
                ~s{in scenario "failing" (test/fixtures/generated/leading_blank_lines.feature:4)}
 
+      # The generated test is tagged with the scenario's true line too
+      [test] = run.module.__ex_unit__().tests
+      assert test.tags.scenario_line == 4
+
       stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
       [first_frame | _] = stacktrace_section |> String.split("\n", trim: true)
       assert first_frame =~ "test/fixtures/generated/leading_blank_lines.feature:6"

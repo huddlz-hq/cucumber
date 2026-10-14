@@ -785,21 +785,21 @@ defmodule Gherkin.ParserTest do
   end
 
   describe "line numbers in a source with leading blank lines" do
+    @leading_blanks_source """
+
+
+    @feature-tag
+    Feature: Leading blanks
+
+      @scenario-tag
+      Scenario: s
+        Given a table:
+          | a | b |
+          | 1 | 2 |
+    """
+
     test "feature, scenario, step, tag, and datatable lines match the source text" do
-      source = """
-
-
-      @feature-tag
-      Feature: Leading blanks
-
-        @scenario-tag
-        Scenario: s
-          Given a table:
-            | a | b |
-            | 1 | 2 |
-      """
-
-      feature = Gherkin.Parser.parse(source)
+      feature = Gherkin.Parser.parse(@leading_blanks_source)
 
       assert feature.line == 3
       assert feature.tag_lines == [2]
@@ -814,19 +814,7 @@ defmodule Gherkin.ParserTest do
     end
 
     test "CRLF line endings report the same lines as LF" do
-      lf = """
-
-
-      @feature-tag
-      Feature: Leading blanks
-
-        @scenario-tag
-        Scenario: s
-          Given a table:
-            | a | b |
-            | 1 | 2 |
-      """
-
+      lf = @leading_blanks_source
       crlf = String.replace(lf, "\n", "\r\n")
 
       assert source_lines(Gherkin.Parser.parse(crlf)) == source_lines(Gherkin.Parser.parse(lf))
