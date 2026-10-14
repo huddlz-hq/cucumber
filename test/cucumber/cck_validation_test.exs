@@ -44,6 +44,28 @@ defmodule Cucumber.CckValidationTest do
     end
   end
 
+  test "simultaneous argument indices are constrained to their source order positions" do
+    pickle =
+      "test/fixtures/cck/data-tables-doc-strings/data-tables-doc-strings.ndjson"
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+      |> Enum.find(&Map.has_key?(&1, "pickle"))
+
+    CckSchema.assert_valid(pickle)
+
+    for argument <- ["dataTable", "docString"], index <- [0, 3] do
+      invalid =
+        put_in(
+          pickle,
+          ["pickle", "steps", Access.at(0), "argument", argument, "argumentIndex"],
+          index
+        )
+
+      assert_raise ExUnit.AssertionError, fn -> CckSchema.assert_valid(invalid) end
+    end
+  end
+
   test "raw validation cannot be bypassed by approval drops" do
     bad = change(minimal(), "testStepFinished", &Map.put(&1, "timestamp", "invalid"))
 

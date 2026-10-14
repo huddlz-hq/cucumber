@@ -224,13 +224,20 @@ defmodule Gherkin.NimbleParser do
       string("@")
     ])
 
-  # Complete step with optional docstring/datatable attachment
+  # Messages 34 supports a docstring and data table on the same step, in either order.
+  attachments =
+    choice([
+      docstring |> optional(datatable),
+      datatable |> optional(docstring)
+    ])
+
+  # Complete step with optional docstring/datatable attachments
   step =
     lookahead_not(section_marker)
     |> concat(optional_ws)
     |> line(concat(step_keyword, step_text))
     |> concat(eol)
-    |> optional(choice([docstring, datatable]))
+    |> optional(attachments)
     |> reduce({__MODULE__, :build_step, []})
     |> label("step")
 
@@ -647,17 +654,16 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def build_step(args) do
-    # args structure: [{[keyword, text], {line, _offset}}, optional_attachment]
-    {step_data, attachment} = extract_step_parts(args)
+    # args structure: [{[keyword, text], {line, _offset}} | attachments]
+    [step_data | attachments] = args
     {[keyword, text], {line_num, _offset}} = step_data
 
-    add_step_attachment(
+    Enum.reduce(
+      attachments,
       %Step{keyword: keyword, text: text, line: line_num - 1},
-      attachment
+      &add_step_attachment(&2, &1)
     )
   end
-
-  defp add_step_attachment(step, nil), do: step
 
   defp add_step_attachment(step, {:docstring, {content, media_type, line, delimiter}}) do
     %{
@@ -672,14 +678,6 @@ defmodule Gherkin.NimbleParser do
   defp add_step_attachment(step, {:datatable, rows}) do
     {cells, lines} = Enum.unzip(rows)
     %{step | datatable: cells, datatable_lines: lines}
-  end
-
-  defp extract_step_parts([{_data, {_line, _offset}} = step_data]) do
-    {step_data, nil}
-  end
-
-  defp extract_step_parts([{_data, {_line, _offset}} = step_data, attachment]) do
-    {step_data, attachment}
   end
 
   @doc false

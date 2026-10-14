@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 42 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
+- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved.
+- Steps support a data table and doc string together in either source order; their pickle arguments carry the protocol's one-based `argumentIndex` when both are present.
 - Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
 
 ## v1.0.0 (2026-07-02)
