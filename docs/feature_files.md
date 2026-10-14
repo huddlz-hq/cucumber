@@ -141,6 +141,11 @@ Scenario: Adding multiple items to cart
   Then the total should be 779.98
 ```
 
+Every row needs as many cells as the first row; a row with more or fewer
+cells is a parse error. Leave a cell blank (`|  |`) for an empty value: it
+arrives as `""` and keeps its column. Inside a cell, write `\|` for a literal
+pipe, `\\` for a backslash, and `\n` for a newline.
+
 ### Doc Strings
 
 ```gherkin

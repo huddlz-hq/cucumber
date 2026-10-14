@@ -140,23 +140,14 @@ defmodule Gherkin.NimbleParser do
     |> reduce({__MODULE__, :flatten_tags, []})
 
   # --- Data Tables ---
-  # Table cell: | followed by content (not including the next |)
-  # A row like "| a | b |" has cells at each | delimiter
-  # The segment after the last | is not a cell, and filter_table_cells/1
-  # drops it
-  table_cell =
-    ignore(string("|"))
-    |> ignore(optional(horizontal_ws))
-    |> utf8_string([not: ?|, not: ?\n, not: ?\r], min: 0)
-    |> map({String, :trim, []})
-
   # Table row: | cell1 | cell2 | cell3 |
-  # Note: times(table_cell, min: 1) also consumes the segment after the final
-  # | (empty for a well-formed row) as a cell.
+  # The row is captured whole from its first | and split into cells by
+  # Gherkin.Tables.cells/1, which handles escapes (\|, \\, \n) the same way
+  # for .feature and .feature.md sources.
   # Each row carries its source line (for Cucumber Messages locations).
   table_row =
     optional_ws
-    |> line(times(table_cell, min: 1))
+    |> line(string("|") |> utf8_string([not: ?\n, not: ?\r], min: 0))
     |> concat(eol)
     |> reduce({__MODULE__, :build_table_row, []})
     |> label("table row")
@@ -475,22 +466,19 @@ defmodule Gherkin.NimbleParser do
     normalized = String.trim_leading(gherkin_string, "\n")
 
     case parse_feature(normalized) do
-      {:ok, [feature], "", _context, _line, _offset} ->
-        feature |> put_comments(normalized) |> Gherkin.Tables.validate!()
-
       {:ok, [feature], rest, _context, {line, col}, _offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
-        if String.trim(rest) == "" do
-          feature |> put_comments(normalized) |> Gherkin.Tables.validate!()
-        else
+        if String.trim(rest) != "" do
           raise Gherkin.ParseError,
             message: "Unexpected content; parser stopped before end of file",
             line: line,
             column: col,
             rest: String.slice(rest, 0, 80)
         end
+
+        feature |> put_comments(normalized) |> Gherkin.Tables.validate!(normalized)
 
       {:error, message, rest, _context, {line, col}, _offset} ->
         raise Gherkin.ParseError,
@@ -575,8 +563,8 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   # A table row as {cells, line}.
-  def build_table_row([{cells, {line, _offset}}]) do
-    {filter_table_cells(cells), line - 1}
+  def build_table_row([{parts, {line, _offset}}]) do
+    {parts |> Enum.join() |> Gherkin.Tables.cells(), line - 1}
   end
 
   @doc false
@@ -621,15 +609,6 @@ defmodule Gherkin.NimbleParser do
   @doc false
   def filter_steps(items) do
     Enum.filter(items, &is_struct(&1, Step))
-  end
-
-  @doc false
-  def filter_table_cells(cells) do
-    # The last segment follows the final | and is not a cell: empty for a
-    # well-formed row, stray text for an unterminated one (`| a | b`), which
-    # the reference parser also discards. Empty cells inside the row are real
-    # values and keep their column position.
-    Enum.drop(cells, -1)
   end
 
   @doc false

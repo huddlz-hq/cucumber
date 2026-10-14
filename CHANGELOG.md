@@ -13,6 +13,7 @@
 - **Behavior change:** empty data table and Examples cells now keep their column as `""`, in both `.feature` and `.feature.md` files (#54). Previously they were dropped, which shifted later cells left; a row like `| Doritos |  | 9 oz |` now parses as `["Doritos", "", "9 oz"]` instead of `["Doritos", "9 oz"]`, so step code that matched on row length may need updating.
 - A table row whose cell count differs from its table's first row now raises `Gherkin.ParseError` at that row, as the reference Gherkin parser does. Previously the row's values were silently lost or misplaced when zipped against the header.
 - Text after the last `|` of an unterminated table row (`| a | b`) is no longer read as a cell, matching the reference parser.
+- Table cells support the reference Gherkin escapes in both `.feature` and `.feature.md` files: `\|` is a literal pipe, `\\` a backslash and `\n` a newline. Previously `\|` split the cell in two, so a row containing one now has the cell count its header expects instead of failing the row-width check. Any other backslash is kept as written.
 
 ### Deprecated
 

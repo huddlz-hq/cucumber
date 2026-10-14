@@ -841,6 +841,20 @@ defmodule Gherkin.ParserTest do
       assert examples.table_body == [["Doritos", ""]]
     end
 
+    test "unescapes \\|, \\\\ and \\n in cells and keeps other backslashes" do
+      gherkin = ~S"""
+      Feature: Tables
+
+      Scenario: Escapes
+        Given these cells
+          | a \| b | c\\d | e\nf | g\h | \n |
+      """
+
+      [scenario] = Gherkin.Parser.parse(gherkin).scenarios
+
+      assert hd(scenario.steps).datatable == [["a | b", "c\\d", "e\nf", "g\\h", "\n"]]
+    end
+
     test "drops text after the last pipe of an unterminated row" do
       gherkin = """
       Feature: Tables
@@ -870,6 +884,8 @@ defmodule Gherkin.ParserTest do
       error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
 
       assert error.line == 6
+      assert error.column == 5
+      assert error.rest == "| Doritos | Nacho  |"
       assert Exception.message(error) =~ "a table row with 3 cells to match the first row, got 2"
     end
 
