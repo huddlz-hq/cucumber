@@ -623,9 +623,12 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   def filter_table_cells(cells) do
-    # Remove trailing empty cell created by the final |
-    cells
-    |> Enum.reject(&(&1 == ""))
+    # Remove only the trailing empty cell created by the final |. Empty cells
+    # inside the row are real values and keep their column position.
+    case List.last(cells) do
+      "" -> Enum.drop(cells, -1)
+      _cell -> cells
+    end
   end
 
   @doc false

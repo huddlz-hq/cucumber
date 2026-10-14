@@ -783,4 +783,62 @@ defmodule Gherkin.ParserTest do
       assert hd(scenario.steps).docstring == "# this is content"
     end
   end
+
+  describe "parse/1 empty data table cells" do
+    test "keeps an empty cell in its column" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario: Sparse rows
+        Given these products
+          | name    | flavor | size  |
+          | Doritos |        | 9 oz  |
+          |         | Nacho  | 12 oz |
+          | Lay's   | Plain  |       |
+      """
+
+      [scenario] = Gherkin.Parser.parse(gherkin).scenarios
+      [step] = scenario.steps
+
+      assert step.datatable == [
+               ["name", "flavor", "size"],
+               ["Doritos", "", "9 oz"],
+               ["", "Nacho", "12 oz"],
+               ["Lay's", "Plain", ""]
+             ]
+    end
+
+    test "keeps a row whose only cell is empty" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario: One column
+        Given these notes
+          | note |
+          |      |
+      """
+
+      [scenario] = Gherkin.Parser.parse(gherkin).scenarios
+
+      assert hd(scenario.steps).datatable == [["note"], [""]]
+    end
+
+    test "keeps empty cells in an Examples table" do
+      gherkin = """
+      Feature: Tables
+
+      Scenario Outline: Optional flavor
+        Given a product named "<name>" with flavor "<flavor>"
+
+        Examples:
+          | name    | flavor |
+          | Doritos |        |
+      """
+
+      [outline] = Gherkin.Parser.parse(gherkin).scenarios
+      [examples] = outline.examples
+
+      assert examples.table_body == [["Doritos", ""]]
+    end
+  end
 end
