@@ -94,7 +94,9 @@ but every scenario in the run fails with the original error.
 `after_all` hooks run once after the whole suite, in reverse definition
 order, receiving the `before_all` context with the ExUnit suite summary
 merged under `:suite_result`. A failing `after_all` hook fails the run; the
-remaining `after_all` hooks still run.
+remaining `after_all` hooks still run. `after_all` hooks can attach too; with
+Cucumber Messages output enabled, attachments from either run-level hook are
+emitted against that hook's `testRunHookStarted`.
 
 Run-level hooks cannot be tagged (they don't belong to any scenario):
 

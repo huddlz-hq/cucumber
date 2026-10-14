@@ -623,6 +623,19 @@ defmodule Cucumber.CckApproval.Definitions do
     end
   end
 
+  defmodule AttachingRunHooks do
+    @moduledoc false
+    use Cucumber.Hooks
+
+    before_all context do
+      Cucumber.attach(context, "Attachment from BeforeAll hook", "text/plain")
+    end
+
+    after_all context do
+      Cucumber.attach(context, "Attachment from AfterAll hook", "text/plain")
+    end
+  end
+
   defmodule Attachments do
     @moduledoc false
     use Cucumber.StepDefinition

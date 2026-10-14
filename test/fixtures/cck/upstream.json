@@ -81,6 +81,8 @@
     "failedish-combinations/failedish-combinations.ndjson": "c1463eba78777e205cf57d21f9b365da51ec0bc7",
     "global-hooks-afterall-error/global-hooks-afterall-error.feature": "0ef1bfed33e3b0a46d6e2aec821ca5d51d93e258",
     "global-hooks-afterall-error/global-hooks-afterall-error.ndjson": "42acf7cbb6b579770b7be4210f1eb1a25a48977e",
+    "global-hooks-attachments/global-hooks-attachments.feature": "d96ccf2bf9258bd191fe2546c3c50aaeadc150cf",
+    "global-hooks-attachments/global-hooks-attachments.ndjson": "7fddf5e4849d27a4eec55828a2f201a04b8ac637",
     "global-hooks-beforeall-error/global-hooks-beforeall-error.feature": "2b42678e3aad7b0fc2637bd1d11e525e1a59c623",
     "global-hooks-beforeall-error/global-hooks-beforeall-error.ndjson": "4186963905808c23fc6ae61506c631a1bd167fa7",
     "global-hooks/global-hooks.feature": "715a76f340428240699e3cdd79f3f7e45809caae",

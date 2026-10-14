@@ -135,6 +135,12 @@ defmodule Cucumber.CckStream do
     %{state | attempts: Map.delete(state.attempts, payload["testCaseStartedId"])}
   end
 
+  defp lifecycle("attachment", %{"testRunHookStartedId" => hook_id}, state) do
+    running!(state)
+    assert MapSet.member?(state.hooks, hook_id), "attachment outside its active run hook"
+    state
+  end
+
   defp lifecycle("attachment", payload, state) do
     update_attempt(state, payload, fn attempt ->
       assert is_binary(attempt.active) and attempt.active == payload["testStepId"],

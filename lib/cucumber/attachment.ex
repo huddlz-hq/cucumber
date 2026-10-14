@@ -6,11 +6,18 @@ defmodule Cucumber.Attachment do
   Attachments are attributed to the execution that recorded them:
 
     * `phase` - `:step`, `:before_scenario`, or `:after_scenario` (nil when
-      recorded outside the scenario lifecycle, e.g. from a `before_all` hook)
+      recorded outside the scenario lifecycle, i.e. from a `before_all` or
+      `after_all` hook)
     * `step_text`/`step_line` - set when `phase` is `:step`
     * `feature_file`/`scenario_name` - the owning scenario
     * `attempt` - the scenario's 1-based retry attempt (nil when recorded
       outside the scenario lifecycle)
+
+  Run-hook attachments (from `before_all`/`after_all`) belong to no
+  scenario: their scenario fields are nil. With Cucumber Messages output
+  enabled they are emitted as `attachment` envelopes carrying the hook's
+  `testRunHookStartedId`, between that hook's `testRunHookStarted` and
+  `testRunHookFinished` envelopes.
 
   `body` holds text as-is (`encoding: :identity`) or Base64-encoded bytes
   (`encoding: :base64`), mirroring the Cucumber Messages attachment

@@ -186,4 +186,25 @@ defmodule Cucumber.CckValidationTest do
       end
     end
   end
+
+  test "run-hook attachments are rejected outside their run hook's window" do
+    stream =
+      "test/fixtures/cck/global-hooks-attachments/global-hooks-attachments.ndjson"
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+
+    assert :ok = CckStream.assert_valid(stream)
+
+    # The BeforeAll attachment sits between its testRunHookStarted (8) and
+    # testRunHookFinished (10)
+    assert %{"attachment" => %{"testRunHookStartedId" => _id}} = attachment = Enum.at(stream, 9)
+    without = List.delete_at(stream, 9)
+
+    for index <- [8, 10, 12] do
+      assert_raise ExUnit.AssertionError, fn ->
+        without |> List.insert_at(index, attachment) |> CckStream.assert_valid()
+      end
+    end
+  end
 end

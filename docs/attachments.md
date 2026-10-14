@@ -49,11 +49,18 @@ Cucumber.link(context, "https://dashboard.example.com/run/123")
 Each `Cucumber.Attachment` records where it came from:
 
 - `phase` — `:step`, `:before_scenario`, or `:after_scenario` (`nil` for
-  attachments from a `before_all` hook, which belong to no scenario)
+  attachments from a `before_all` or `after_all` hook, which belong to no
+  scenario)
 - `step_text` / `step_line` — the attaching step, when `phase` is `:step`
   (attachments from `before_step`/`after_step` hooks attribute to the step
   they bracket)
 - `feature_file` / `scenario_name` — the owning scenario
+
+In the Cucumber Messages stream, a step's attachment references its
+`testCaseStarted` and `testStep`; a scenario hook's attachment references the
+hook's test step; and a run hook's attachment (`before_all`/`after_all`)
+references that hook's `testRunHookStarted`, landing between its
+`testRunHookStarted` and `testRunHookFinished` envelopes.
 
 Attachments from concurrent `@async` scenarios are recorded safely and
 keep their own scenario's attribution.

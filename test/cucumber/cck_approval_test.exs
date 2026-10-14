@@ -28,8 +28,6 @@ defmodule Cucumber.CckApprovalTest do
     * `multiple-features-reversed` — exercises the reference CLI's
       `--order reverse`; execution order here is ExUnit's (the plain
       `multiple-features` sample is approved)
-    * `global-hooks-attachments` — attachments from BeforeAll/AfterAll
-      hooks (`attachment.testRunHookStartedId`) are not supported
 
   Per-sample comparison allowances (the `:drop` / `:drop_feature_description`
   / `:drop_step_definition_patterns` options below) are documented inline.
@@ -120,6 +118,8 @@ defmodule Cucumber.CckApprovalTest do
     {"hooks-undefined", steps: [], hooks: [Definitions.HooksHooks]},
     {"hooks-attachment",
      steps: [Definitions.PassingStep], hooks: [Definitions.AttachingScenarioHooks]},
+    {"global-hooks-attachments",
+     steps: [Definitions.PassingStep], hooks: [Definitions.AttachingRunHooks]},
     {"examples-tables-undefined", steps: [Definitions.ExamplesTablesUndefined]},
     {"examples-tables-undefined-multiple", steps: [Definitions.ExamplesTablesUndefined]},
     {"examples-tables-attachment", steps: [Definitions.ExamplesTablesAttachment]},
@@ -140,7 +140,7 @@ defmodule Cucumber.CckApprovalTest do
 
   test "every pinned upstream sample is approved or explicitly excluded" do
     excluded =
-      ~w(global-hooks-attachments multiple-features-reversed pending-exception skipped-exception test-run-exception unknown-parameter-type)
+      ~w(multiple-features-reversed pending-exception skipped-exception test-run-exception unknown-parameter-type)
 
     approved = Enum.map(@samples, &elem(&1, 0))
     assert Enum.sort(approved ++ excluded) == Cucumber.CckFixtures.manifest()["samples"]
