@@ -342,19 +342,36 @@ defmodule Gherkin.Markdown do
       section ->
         case current_step(section) do
           nil -> parse_error("a step or an Examples heading before a table row", line, raw)
-          step -> update_current_step(state, add_table_row(step, cells, line))
+          step -> update_current_step(state, add_table_row(step, cells, line, raw))
         end
     end
   end
 
   # Rows accumulate prepended, like every other list in this parser;
   # finalize_step/1 restores source order when the section closes.
-  defp add_table_row(step, cells, line) do
+  # A step's table must be contiguous: rows that resume after the step's
+  # docstring would start a second table.
+  defp add_table_row(
+         %Step{datatable_lines: [last_row | _], docstring_line: docstring_line},
+         _cells,
+         line,
+         raw
+       )
+       when is_integer(docstring_line) and last_row < docstring_line do
+    parse_error("a single data table per step", line, raw)
+  end
+
+  defp add_table_row(step, cells, line, _raw) do
     %{
       step
       | datatable: [cells | step.datatable || []],
-        datatable_lines: [line | step.datatable_lines || []]
+        datatable_lines: [line | step.datatable_lines || []],
+        argument_order: record_argument(step.argument_order, :datatable)
     }
+  end
+
+  defp record_argument(order, argument) do
+    if argument in order, do: order, else: order ++ [argument]
   end
 
   # Cells follow the `.feature` parser's conventions: split on `|`,
@@ -412,12 +429,15 @@ defmodule Gherkin.Markdown do
       |> Enum.reverse()
       |> Enum.map_join("\n", &dedent(&1, fence.indent))
 
+    step = current_step(state.section)
+
     updated = %{
-      current_step(state.section)
+      step
       | docstring: content,
         docstring_media_type: fence.media_type,
         docstring_line: fence.line,
-        docstring_delimiter: fence.delimiter
+        docstring_delimiter: fence.delimiter,
+        argument_order: record_argument(step.argument_order, :docstring)
     }
 
     %{update_current_step(state, updated) | fence: nil}

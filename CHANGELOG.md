@@ -4,6 +4,10 @@
 
 - Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved.
 - Steps support a data table and doc string together in either source order; their pickle arguments carry the protocol's one-based `argumentIndex` when both are present.
+- Blank and comment lines may now separate a step from its data table or doc string, and the two arguments from each other, as in upstream Gherkin.
+- `Gherkin.Step` records `argument_order`, the source order of its data table and doc string.
+- **Breaking:** step arguments are scoped to their step. `:datatable`, `:docstring`, and `:docstring_media_type` no longer carry over from an earlier step's context; copy them into your own key if a later step needs them.
+- Markdown feature files reject a step whose table rows appear on both sides of its fenced doc string.
 - Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
 
 ## v1.0.0 (2026-07-02)

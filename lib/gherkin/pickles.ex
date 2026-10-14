@@ -412,25 +412,29 @@ defmodule Gherkin.Pickles do
     {node, ids}
   end
 
-  defp build_step_argument(%{docstring: docstring, datatable: [_ | _]} = step, ids)
-       when is_binary(docstring) do
-    {doc_string, ids} = build_step_argument(%{step | datatable: nil}, ids)
-    {data_table, ids} = build_step_argument(%{step | docstring: nil}, ids)
-    {Map.merge(doc_string, data_table), ids}
+  # A step carries a doc string, a data table, both, or neither.
+  defp build_step_argument(step, ids) do
+    {data_table, ids} = data_table_node(step, ids)
+
+    argument =
+      %{}
+      |> put_unless_nil(:docString, doc_string_node(step))
+      |> put_unless_nil(:dataTable, data_table)
+
+    {argument, ids}
   end
 
-  defp build_step_argument(%{docstring: docstring} = step, ids) when is_binary(docstring) do
+  defp doc_string_node(%{docstring: docstring} = step) when is_binary(docstring) do
     line = step.docstring_line || row_line(step.line, 0)
 
-    doc_string =
-      %{location: location(line), content: docstring}
-      |> put_unless_nil(:mediaType, step.docstring_media_type)
-      |> put_unless_nil(:delimiter, Map.get(step, :docstring_delimiter))
-
-    {%{docString: doc_string}, ids}
+    %{location: location(line), content: docstring}
+    |> put_unless_nil(:mediaType, step.docstring_media_type)
+    |> put_unless_nil(:delimiter, Map.get(step, :docstring_delimiter))
   end
 
-  defp build_step_argument(%{datatable: [_ | _] = datatable} = step, ids) do
+  defp doc_string_node(_step), do: nil
+
+  defp data_table_node(%{datatable: [_ | _] = datatable} = step, ids) do
     {rows, ids} =
       datatable
       |> Enum.with_index()
@@ -438,10 +442,10 @@ defmodule Gherkin.Pickles do
         build_table_row(row, datatable_row_line(step, index), ids)
       end)
 
-    {%{dataTable: %{location: location(datatable_row_line(step, 0)), rows: rows}}, ids}
+    {%{location: location(datatable_row_line(step, 0)), rows: rows}, ids}
   end
 
-  defp build_step_argument(_step, ids), do: {%{}, ids}
+  defp data_table_node(_step, ids), do: {nil, ids}
 
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)

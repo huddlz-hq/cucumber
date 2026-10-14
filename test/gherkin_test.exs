@@ -697,6 +697,69 @@ defmodule Gherkin.ParserTest do
     end
   end
 
+  describe "parse/1 step arguments" do
+    test "blank and comment lines may separate a step from its arguments and the arguments from each other" do
+      gherkin = """
+      Feature: Spaced arguments
+
+        Scenario: table then doc string
+          Given a step
+
+            # the table
+            | hello |
+
+            # the doc string
+            \"\"\"
+            world
+            \"\"\"
+
+        Scenario: doc string then table
+          Given a step
+            \"\"\"
+            hello
+            \"\"\"
+            # the table
+
+            | world |
+      """
+
+      [table_first, doc_first] = Gherkin.Parser.parse(gherkin).scenarios
+
+      assert [%Step{datatable: [["hello"]], docstring: "world"}] = table_first.steps
+      assert [%Step{docstring: "hello", datatable: [["world"]]}] = doc_first.steps
+    end
+
+    test "each step records its arguments in source order" do
+      gherkin = """
+      Feature: Argument order
+
+        Scenario: s
+          Given no arguments
+          And a table and a doc string
+            | hello |
+            \"\"\"
+            world
+            \"\"\"
+          And a doc string and a table
+            \"\"\"
+            hello
+            \"\"\"
+            | world |
+          And only a table
+            | alone |
+      """
+
+      [scenario] = Gherkin.Parser.parse(gherkin).scenarios
+
+      assert Enum.map(scenario.steps, & &1.argument_order) == [
+               [],
+               [:datatable, :docstring],
+               [:docstring, :datatable],
+               [:datatable]
+             ]
+    end
+  end
+
   describe "parse/1 source metadata for Cucumber Messages" do
     test "each tag records its own source line, parallel to tags" do
       gherkin = """
