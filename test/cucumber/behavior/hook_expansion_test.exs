@@ -120,6 +120,38 @@ defmodule Cucumber.HookExpansionTest do
       assert count(run.events, :before_all_one) == 1
       assert count(run.events, {:saw_before_all, true}) == 3
     end
+
+    defmodule SlowBeforeAllHooks do
+      use Cucumber.Hooks
+
+      # Slow enough that the other async modules arrive while it is running
+      before_all context do
+        Collector.record(:slow_before_all)
+        Process.sleep(100)
+        {:ok, Map.put(context, :provisioned, true)}
+      end
+    end
+
+    test "BeforeAll runs exactly once when several async modules reach it concurrently" do
+      run =
+        run_features(
+          for name <- ~w(alpha beta gamma delta) do
+            """
+            @async
+            Feature: #{name}
+              Scenario: #{name} scenario
+                Given the before-all context is visible
+            """
+          end,
+          steps: [Steps],
+          hooks: [SlowBeforeAllHooks]
+        )
+
+      assert %{total: 4, failures: 0, passed: 4} = run
+      assert count(run.events, :slow_before_all) == 1
+      # Every module waited for the first caller's context
+      assert count(run.events, {:saw_before_all, true}) == 4
+    end
   end
 
   describe "BeforeAll errors (CCK global-hooks-beforeall-error)" do
@@ -172,6 +204,32 @@ defmodule Cucumber.HookExpansionTest do
       assert :before_all_third in run.events
       assert :after_all_cleanup_one in run.events
       assert :after_all_cleanup_two in run.events
+    end
+
+    test "concurrent async modules all fail with the first BeforeAll error" do
+      run =
+        run_features(
+          for name <- ~w(alpha beta gamma) do
+            """
+            @async
+            Feature: #{name}
+              Scenario: #{name} scenario
+                Given a step passes
+            """
+          end,
+          steps: [Steps],
+          hooks: [BeforeAllErrorHooks]
+        )
+
+      assert %{total: 3, failures: 3, passed: 0} = run
+      refute :step_passed in run.events
+
+      # The hooks ran once — the waiting modules received the cached error
+      assert count(run.events, :before_all_exploding) == 1
+      assert count(run.events, :before_all_third) == 1
+
+      failures = Regex.scan(~r/BeforeAll hook "exploding"/, run.output)
+      assert length(failures) == 3
     end
   end
 

@@ -48,7 +48,8 @@ Cucumber.link(context, "https://dashboard.example.com/run/123")
 
 Each `Cucumber.Attachment` records where it came from:
 
-- `phase` — `:step`, `:before_scenario`, or `:after_scenario`
+- `phase` — `:step`, `:before_scenario`, or `:after_scenario` (`nil` for
+  attachments from a `before_all` hook, which belong to no scenario)
 - `step_text` / `step_line` — the attaching step, when `phase` is `:step`
   (attachments from `before_step`/`after_step` hooks attribute to the step
   they bracket)
