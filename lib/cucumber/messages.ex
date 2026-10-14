@@ -68,7 +68,7 @@ defmodule Cucumber.Messages do
   @markdown_media_type "text/x.cucumber.gherkin+markdown"
 
   # Validated against the pinned upstream schema in test/fixtures/messages/.
-  @protocol_version "33.0.2"
+  @protocol_version "34.2.1"
 
   @typedoc "A single-key envelope map, e.g. `%{pickle: %{...}}`."
   @type envelope :: %{required(atom()) => map()}

@@ -1,7 +1,7 @@
 # Compatibility boundaries
 
-Cucumber for Elixir runs 40 of 46 samples from the Cucumber Compatibility Kit
-(CCK) at commit `bed15e9c30fb5e37c19be7ecfe6aa2a2f7d890f7`. All vendored feature
+Cucumber for Elixir runs 42 of 49 samples from the Cucumber Compatibility Kit
+(CCK) v31.0.0 at commit `0a3cc60bf3a783bfcbdeb8b754ce46860e0388e5`. All vendored feature
 files, reference streams, and the attachment PDF match that revision byte for
 byte. These approvals establish compatibility for the covered behavior subject
 to the allowances below; they do not establish complete Cucumber, Gherkin,
@@ -9,13 +9,11 @@ Cucumber Expressions, or formatter compatibility.
 
 ## Messages contract
 
-The emitter declares **Messages 33.0.2**. Its unmodified authoritative JSON
+The emitter declares **Messages 34.2.1**. Its unmodified authoritative JSON
 Schema bundle is vendored at `test/fixtures/messages/messages.schema.json`, from
-[cucumber/messages commit 7f9c117](https://github.com/cucumber/messages/tree/7f9c117785b0547b09d7570e54b46b393d7e91fb)
-(tag `v33.0.2`). Version 27 previously advertised by the emitter was inaccurate:
-the emitter already used newer shapes, including run-hook events and run IDs.
-The version change is backed by validating every raw envelope in all supported
-samples against 33.0.2, including metadata and fields later removed for comparison.
+[cucumber/messages commit e5769e8](https://github.com/cucumber/messages/tree/e5769e89dd8dd7aa7e8c8163023f38bad539e3aa)
+(tag `v34.2.1`). Every raw envelope in all supported samples is validated
+against 34.2.1, including metadata and fields later removed for comparison.
 
 `Cucumber.CckSchema` is a test-only, dependency-free evaluator of the vocabulary
 used by this pinned bundle: references (including document-local definitions),
@@ -42,12 +40,13 @@ semantic relationship in the Messages model, or compatibility with every consume
 
 | Coverage | Samples |
 | --- | --- |
-| Approved: basic execution and arguments | `minimal`, `cdata`, `empty`, `data-tables`, `backgrounds`, `doc-strings`, `examples-tables`, `unused-steps`, `stack-traces`, `parameter-types`, `regular-expression` |
+| Approved: basic execution and arguments | `minimal`, `cdata`, `empty`, `data-tables`, `data-tables-with-expression`, `backgrounds`, `doc-strings`, `doc-strings-with-expression`, `examples-tables`, `unused-steps`, `stack-traces`, `parameter-types`, `regular-expression` |
 | Approved: outcomes | `undefined`, `ambiguous`, `pending`, `skipped`, `all-statuses`, `failedish-combinations`, `undefined-multiple`, `examples-tables-undefined`, `examples-tables-undefined-multiple` |
 | Approved: hooks | `hooks`, `hooks-conditional`, `hooks-named`, `hooks-skipped`, `skipped-failing-hook`, `global-hooks`, `global-hooks-afterall-error`, `hooks-undefined` |
 | Approved: retries | `retry`, `retry-pending`, `retry-undefined` |
 | Approved: structure and attachments | `rules`, `rules-backgrounds`, `attachments`, `hooks-attachment`, `examples-tables-attachment`, `multiple-features` |
 | Approved with additional behavior/representation allowances | `global-hooks-beforeall-error`, `retry-ambiguous`, `markdown` (details below) |
+| Excluded: a step with both a data table and a doc string (Messages 34) is not supported | `data-tables-doc-strings` |
 | Excluded: global-hook attachment support absent | `global-hooks-attachments` |
 | Excluded: reference CLI reverse-order option absent; ExUnit controls order | `multiple-features-reversed` |
 | Excluded: pending/skipped use return values here, not exceptions; return-value samples are approved | `pending-exception`, `skipped-exception` |
@@ -66,7 +65,7 @@ All approvals use these rules, implemented in `Cucumber.CckApproval`:
 | Category | Allowance and boundary |
 | --- | --- |
 | Nondeterministic | Timestamps and durations are removed after raw type/range validation. IDs are consistently renumbered after raw uniqueness/reference checks. |
-| Host/language specific | `meta` is omitted from equality, but validated and required to declare 33.0.2. `sourceReference` is removed because Elixir definitions differ from TypeScript. Error `message` and `exception` fields are removed because wording and stack traces differ. |
+| Host/language specific | `meta` is omitted from equality, but validated and required to declare 34.2.1. `sourceReference` is removed because Elixir definitions differ from TypeScript. Error `message` and `exception` fields are removed because wording and stack traces differ. |
 | Path representation | `uri` becomes its basename, ignoring fixture root paths. This does not prove disambiguation for duplicate basenames. |
 | Parser representation | Every `column` is removed (our parser tracks lines). Descriptions have whitespace trimmed per line and at their boundaries. Exact columns and indentation are not approved. |
 | Unsupported optional output | `stepMatchArgumentsLists` is removed: matching produces converted values, not source offsets. `suggestion` envelopes are removed: undefined-step suggestions are reported through errors rather than these envelopes. Parameter-type and hook source lines are not recorded; raw optional source references still undergo schema validation when present. |

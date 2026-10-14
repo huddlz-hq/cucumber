@@ -30,6 +30,9 @@ defmodule Cucumber.CckApprovalTest do
       `multiple-features` sample is approved)
     * `global-hooks-attachments` — attachments from BeforeAll/AfterAll
       hooks (`attachment.testRunHookStartedId`) are not supported
+    * `data-tables-doc-strings` — a step carrying both a data table and a
+      doc string (Messages 34) is not supported; each step takes at most
+      one argument
 
   Per-sample comparison allowances (the `:drop` / `:drop_feature_description`
   / `:drop_step_definition_patterns` options below) are documented inline.
@@ -51,8 +54,10 @@ defmodule Cucumber.CckApprovalTest do
     {"cdata", steps: [Definitions.Cdata]},
     {"empty", steps: []},
     {"data-tables", steps: [Definitions.DataTables]},
+    {"data-tables-with-expression", steps: [Definitions.DataTablesWithExpression]},
     {"backgrounds", steps: [Definitions.Backgrounds]},
     {"doc-strings", steps: [Definitions.DocStrings]},
+    {"doc-strings-with-expression", steps: [Definitions.DocStringsWithExpression]},
     {"examples-tables", steps: [Definitions.ExamplesTables]},
     {"unused-steps", steps: [Definitions.UnusedSteps]},
     {"stack-traces", steps: [Definitions.StackTraces]},
@@ -140,7 +145,7 @@ defmodule Cucumber.CckApprovalTest do
 
   test "every pinned upstream sample is approved or explicitly excluded" do
     excluded =
-      ~w(global-hooks-attachments multiple-features-reversed pending-exception skipped-exception test-run-exception unknown-parameter-type)
+      ~w(data-tables-doc-strings global-hooks-attachments multiple-features-reversed pending-exception skipped-exception test-run-exception unknown-parameter-type)
 
     approved = Enum.map(@samples, &elem(&1, 0))
     assert Enum.sort(approved ++ excluded) == Cucumber.CckFixtures.manifest()["samples"]
