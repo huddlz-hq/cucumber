@@ -1,21 +1,29 @@
 # Changelog
 
-## Unreleased
+## v1.1.0 (2026-10-14)
 
-### Changed
+### Behavior changes
 
-- **Step matching moved into `Cucumber.StepRegistry`.** The registry is built once from step definition and parameter type modules (`StepRegistry.new/2`) and answers `StepRegistry.match/2` with `{:ok, definition, args}`, `:undefined`, or `{:ambiguous, matches}`. Every pattern now compiles once when the registry is built instead of on each match.
-- `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
-- `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
-- `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
-- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
-- Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
-- **Behavior change:** empty data table and Examples cells now keep their column as `""`, in both `.feature` and `.feature.md` files (#54). Previously they were dropped, which shifted later cells left; a row like `| Doritos |  | 9 oz |` now parses as `["Doritos", "", "9 oz"]` instead of `["Doritos", "9 oz"]`, so step code that matched on row length may need updating.
+These follow the reference Gherkin parser or fix silent misbehavior, but can change what an existing suite sees:
+
+- Empty data table and Examples cells now keep their column as `""`, in both `.feature` and `.feature.md` files (#54). Previously they were dropped, which shifted later cells left; a row like `| Doritos |  | 9 oz |` now parses as `["Doritos", "", "9 oz"]` instead of `["Doritos", "9 oz"]`, so step code that matched on row length may need updating.
 - A table row whose cell count differs from its table's first row now raises `Gherkin.ParseError` at that row, as the reference Gherkin parser does. Previously the row's values were silently lost or misplaced when zipped against the header.
 - Text after the last `|` of an unterminated table row (`| a | b`) is no longer read as a cell, matching the reference parser.
 - Table cells support the reference Gherkin escapes in both `.feature` and `.feature.md` files: `\|` is a literal pipe, `\\` a backslash and `\n` a newline. Previously `\|` split the cell in two, so a row containing one now has the cell count its header expects instead of failing the row-width check. Any other backslash is kept as written.
 - `.feature` parse errors read naturally and point at the right place. A line the parser cannot read now says `Expected a step, table row, doc string, tag, comment or keyword line` instead of `Expected Unexpected content; parser stopped before end of file`, and a file with no feature says `Expected feature` instead of `Expected expected feature`. The column is now 1-based at the start of the line's content rather than a byte offset, and `Near:` quotes only that line.
+- `Cucumber.Discovery`, `Cucumber.Runtime`, and `Cucumber.Compiler` are now internal (`@moduledoc false`); see `docs/adr/0001-pipeline-modules-are-internal.md`. Code that read `DiscoveryResult.step_registry` as a map of `{:expression, source}` / `{:regex, {source, opts}}` keys must use `Cucumber.StepRegistry` instead, and `DiscoveryResult.parameter_types` is gone (use `StepRegistry.parameter_types/1`).
+- `Cucumber.AmbiguousStepError` lists matching definitions in definition order (file, then line) rather than alphabetically by pattern.
+
+### Added
+
+- **Step matching moved into `Cucumber.StepRegistry`.** The registry is built once from step definition and parameter type modules (`StepRegistry.new/2`) and answers `StepRegistry.match/2` with `{:ok, definition, args}`, `:undefined`, or `{:ambiguous, matches}`. Every pattern now compiles once when the registry is built instead of on each match.
 - `Gherkin.ParseError` names the feature file it came from. Errors raised while discovering or compiling features (anything parsed with `Gherkin.Parser.parse/2`) set the new `file` field and lead with `path:line:column`, e.g. `Gherkin parse error at test/features/checkout.feature:6:7:`, for `.feature` and `.feature.md` files alike. `Gherkin.Parser.parse/1` has no path and keeps the `line N, column N` form.
+
+### Changed
+
+- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
+- `Cucumber.Expression.compile/2` no longer caches compiled expressions in `:persistent_term`.
+- Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
 
 ### Deprecated
 
