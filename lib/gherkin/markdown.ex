@@ -102,7 +102,7 @@ defmodule Gherkin.Markdown do
     |> Enum.with_index()
     |> Enum.reduce(state, &handle_line/2)
     |> finish()
-    |> Gherkin.Tables.validate!()
+    |> Gherkin.Tables.validate!(source)
   end
 
   # --- Line dispatch ---------------------------------------------------
@@ -322,7 +322,7 @@ defmodule Gherkin.Markdown do
     if separator_row?(raw) do
       state
     else
-      attach_table_row(table_cells(raw), raw, line, state)
+      attach_table_row(Gherkin.Tables.cells(raw), raw, line, state)
     end
   end
 
@@ -359,23 +359,13 @@ defmodule Gherkin.Markdown do
     }
   end
 
-  # Cells follow the `.feature` parser's conventions: the text between
-  # consecutive `|`s, trimmed. Text before the first `|` and after the last
-  # is not a cell; empty cells keep their column position.
-  defp table_cells(raw) do
-    raw
-    |> String.split("|")
-    |> Enum.slice(1..-2//1)
-    |> Enum.map(&String.trim/1)
-  end
-
   # A GFM separator row: any cell of dashes with optional alignment colons
   # (`---`, `:--`, `--:`), matching the reference tokenizer.
   defp separator_row?(raw) do
     trimmed = String.trim(raw)
 
     String.starts_with?(trimmed, "|") and
-      Enum.any?(table_cells(raw), &Regex.match?(@separator_cell_regex, &1))
+      Enum.any?(Gherkin.Tables.cells(raw), &Regex.match?(@separator_cell_regex, &1))
   end
 
   # --- Docstrings (fenced code blocks) ---------------------------------

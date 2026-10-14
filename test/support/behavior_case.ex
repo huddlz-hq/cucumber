@@ -64,7 +64,8 @@ defmodule Cucumber.BehaviorCase do
           run_features: 2,
           fixture: 1,
           fixture: 2,
-          count: 2
+          count: 2,
+          unique_markdown_path: 0
         ]
 
       alias Cucumber.BehaviorCase.Collector
@@ -255,6 +256,14 @@ defmodule Cucumber.BehaviorCase do
 
   defp unique_feature_path do
     "test/fixtures/generated/behavior_#{System.unique_integer([:positive])}.feature"
+  end
+
+  @doc """
+  A unique synthetic `.feature.md` path, for passing as `:file` to
+  `run_feature/2` so the source parses as Markdown with Gherkin.
+  """
+  def unique_markdown_path do
+    unique_feature_path() <> ".md"
   end
 
   @doc """

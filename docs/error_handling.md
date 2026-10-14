@@ -121,13 +121,9 @@ Step execution history:
 If there are syntax errors in your feature files, you'll get an error when the parser tries to process the file:
 
 ```
-** (Cucumber.ParseError) Syntax error in feature file:
-
-  test/features/invalid.feature:5
-
-Expected a scenario or background but found:
-
-  Invalid line that doesn't start with a Gherkin keyword
+** (Gherkin.ParseError) Gherkin parse error at test/features/checkout.feature:6:7:
+  Expected a table row with 3 cells to match the first row, got 2
+Near: "| Smartphone   | 1        |..."
 ```
 
 ## Step Failure Handling

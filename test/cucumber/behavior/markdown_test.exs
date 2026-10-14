@@ -195,8 +195,4 @@ defmodule Cucumber.Behavior.MarkdownTest do
     opts = Keyword.put_new_lazy(opts, :file, &unique_markdown_path/0)
     run_feature(source, Keyword.put(opts, :steps, [Steps]))
   end
-
-  defp unique_markdown_path do
-    "test/fixtures/generated/behavior_#{System.unique_integer([:positive])}.feature.md"
-  end
 end

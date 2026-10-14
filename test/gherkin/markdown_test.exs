@@ -334,7 +334,22 @@ defmodule Gherkin.MarkdownTest do
         end
 
       assert error.line == 5
+      assert error.column == 3
+      assert error.rest == "| Doritos | Nacho  |"
       assert Exception.message(error) =~ "3 cells to match the first row, got 2"
+    end
+
+    test "cells unescape \\|, \\\\ and \\n like .feature tables" do
+      feature =
+        Markdown.parse(~S"""
+        # Feature: Escapes
+        ## Scenario: s
+        * Given these cells:
+          | a \| b | c\\d | e\nf | g\h |
+        """)
+
+      [%{steps: [step]}] = feature.scenarios
+      assert step.datatable == [["a | b", "c\\d", "e\nf", "g\\h"]]
     end
 
     test "an indented table row with nothing to attach to raises" do

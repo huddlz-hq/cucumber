@@ -140,23 +140,14 @@ defmodule Gherkin.NimbleParser do
     |> reduce({__MODULE__, :flatten_tags, []})
 
   # --- Data Tables ---
-  # Table cell: | followed by content (not including the next |)
-  # A row like "| a | b |" has cells at each | delimiter
-  # The segment after the last | is not a cell, and filter_table_cells/1
-  # drops it
-  table_cell =
-    ignore(string("|"))
-    |> ignore(optional(horizontal_ws))
-    |> utf8_string([not: ?|, not: ?\n, not: ?\r], min: 0)
-    |> map({String, :trim, []})
-
   # Table row: | cell1 | cell2 | cell3 |
-  # Note: times(table_cell, min: 1) also consumes the segment after the final
-  # | (empty for a well-formed row) as a cell.
+  # The row is captured whole from its first | and split into cells by
+  # Gherkin.Tables.cells/1, which handles escapes (\|, \\, \n) the same way
+  # for .feature and .feature.md sources.
   # Each row carries its source line (for Cucumber Messages locations).
   table_row =
     optional_ws
-    |> line(times(table_cell, min: 1))
+    |> line(string("|") |> utf8_string([not: ?\n, not: ?\r], min: 0))
     |> concat(eol)
     |> reduce({__MODULE__, :build_table_row, []})
     |> label("table row")
@@ -474,30 +465,44 @@ defmodule Gherkin.NimbleParser do
     # The source is parsed as-is (leading blank lines included) so every
     # recorded line matches the text the feature's source points at.
     case parse_feature(gherkin_string) do
-      {:ok, [feature], "", _context, _line, _offset} ->
-        feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!()
-
-      {:ok, [feature], rest, _context, {line, col}, _offset} ->
+      {:ok, [feature], rest, _context, {line, line_offset}, offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
         # Raising prevents scenarios from being dropped without notice.
-        if String.trim(rest) == "" do
-          feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!()
-        else
+        if String.trim(rest) != "" do
           raise Gherkin.ParseError,
-            message: "Unexpected content; parser stopped before end of file",
+            message: "a step, table row, doc string, tag, comment or keyword line",
             line: line,
-            column: col,
-            rest: String.slice(rest, 0, 80)
+            column: error_column(gherkin_string, line_offset, offset, rest),
+            rest: error_snippet(rest)
         end
 
-      {:error, message, rest, _context, {line, col}, _offset} ->
+        feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!(gherkin_string)
+
+      {:error, message, rest, _context, {line, line_offset}, offset} ->
         raise Gherkin.ParseError,
-          message: message,
+          # ParseError.message/1 supplies the "Expected"
+          message: String.replace_prefix(message, "expected ", ""),
           line: line,
-          column: col,
-          rest: String.slice(rest, 0, 50)
+          column: error_column(gherkin_string, line_offset, offset, rest),
+          rest: error_snippet(rest)
     end
+  end
+
+  # NimbleParsec reports the byte offset where the error line starts and
+  # where parsing stopped; the column is 1-based, in characters, and skips
+  # the indentation still ahead in `rest`.
+  defp error_column(source, line_offset, offset, rest) do
+    before = binary_part(source, line_offset, offset - line_offset)
+    [indent] = Regex.run(~r/\A[ \t]*/, rest)
+    String.length(before) + byte_size(indent) + 1
+  end
+
+  # The line parsing stopped on, trimmed and capped like the Markdown
+  # parser's snippets.
+  defp error_snippet(rest) do
+    [line | _] = String.split(rest, ~r/\r?\n/, parts: 2)
+    line |> String.trim() |> String.slice(0, 50)
   end
 
   # Comment lines are content-less to the grammar (skipped like blank
@@ -574,8 +579,8 @@ defmodule Gherkin.NimbleParser do
 
   @doc false
   # A table row as {cells, line}.
-  def build_table_row([{cells, {line, _offset}}]) do
-    {filter_table_cells(cells), line - 1}
+  def build_table_row([{parts, {line, _offset}}]) do
+    {parts |> Enum.join() |> Gherkin.Tables.cells(), line - 1}
   end
 
   @doc false
@@ -620,15 +625,6 @@ defmodule Gherkin.NimbleParser do
   @doc false
   def filter_steps(items) do
     Enum.filter(items, &is_struct(&1, Step))
-  end
-
-  @doc false
-  def filter_table_cells(cells) do
-    # The last segment follows the final | and is not a cell: empty for a
-    # well-formed row, stray text for an unterminated one (`| a | b`), which
-    # the reference parser also discards. Empty cells inside the row are real
-    # values and keep their column position.
-    Enum.drop(cells, -1)
   end
 
   @doc false
@@ -886,18 +882,22 @@ defmodule Gherkin.ParseError do
   Exception raised when parsing a Gherkin file fails.
 
   Contains detailed information about the parse error including
-  line number, column, and context.
+  line number, column, and context. `file` is the feature file's path when
+  the source was parsed with `Gherkin.Parser.parse/2`, and `nil` otherwise.
   """
 
-  defexception [:message, :line, :column, :rest]
+  defexception [:message, :line, :column, :rest, :file]
 
   @impl true
-  def message(%{message: msg, line: line, column: col, rest: rest}) do
+  def message(%{message: msg, rest: rest} = error) do
     snippet = if rest && rest != "", do: ~s(\nNear: "#{rest}..."), else: ""
 
     """
-    Gherkin parse error at line #{line}, column #{col}:
+    Gherkin parse error at #{location(error)}:
       Expected #{msg}#{snippet}
     """
   end
+
+  defp location(%{file: nil, line: line, column: col}), do: "line #{line}, column #{col}"
+  defp location(%{file: file, line: line, column: col}), do: "#{file}:#{line}:#{col}"
 end
