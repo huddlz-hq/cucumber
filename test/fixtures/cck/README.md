@@ -25,8 +25,8 @@ represent failing test runs and must never join the live suite.
 ## Provenance
 
 Every vendored sample file matches upstream commit
-`bed15e9c30fb5e37c19be7ecfe6aa2a2f7d890f7` byte for byte. `upstream.json`
-records the full 46-sample inventory and upstream Git blob hashes.
+`0a3cc60bf3a783bfcbdeb8b754ce46860e0388e5` byte for byte. `upstream.json`
+records the full 49-sample inventory and upstream Git blob hashes.
 `mix test test/cucumber/cck_fixtures_test.exs` checks this offline;
 `MIX_ENV=test mix run scripts/check_cck.exs` verifies it against GitHub.
 Pass `main` to the script to detect upstream drift. See

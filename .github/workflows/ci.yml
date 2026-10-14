@@ -23,19 +23,19 @@ jobs:
             otp: "26"
           - elixir: "1.19"
             otp: "28"
-          - elixir: "1.20.2"
+          - elixir: "1.20.4"
             otp: "28"
-          - elixir: "1.20.2"
+          - elixir: "1.20.4"
             otp: "29"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@v1.24.1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6.1.0
         with:
           path: |
             deps
@@ -47,7 +47,7 @@ jobs:
       - run: mix deps.get
       - run: mix validate
       - name: Verify pinned CCK provenance
-        if: matrix.elixir == '1.20.2' && matrix.otp == '29'
+        if: matrix.elixir == '1.20.4' && matrix.otp == '29'
         run: mix run scripts/check_cck.exs
         env:
           GH_TOKEN: ${{ github.token }}

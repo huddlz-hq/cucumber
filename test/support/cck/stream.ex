@@ -6,7 +6,7 @@ defmodule Cucumber.CckStream do
   import ExUnit.Assertions
 
   def assert_valid(envelopes) do
-    assert [%{"meta" => %{"protocolVersion" => "33.0.2"}} | _] = envelopes
+    assert [%{"meta" => %{"protocolVersion" => "34.2.1"}} | _] = envelopes
 
     state = %{ids: %{}, run: nil, cases: %{}, attempts: %{}, hooks: MapSet.new()}
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- Upgrade the emitted Messages protocol to 34.2.1 and the pinned Cucumber Compatibility Kit to 31.0.0, with 43 of 49 samples approved. The new `data-tables-doc-strings` sample is excluded: a step carrying both a data table and a doc string is not yet supported.
+- Refresh Mix dependencies and the Elixir/Erlang and GitHub Actions toolchains.
+
 ### Bug Fixes
 
 - Attaching from a `before_all` hook (`Cucumber.attach/4`, `Cucumber.log/2`, `Cucumber.link/2`) no longer deadlocks the run coordinator and fails every scenario (#57). `before_all` hooks now run in the calling test process; the coordinator still guarantees they run exactly once per run, and concurrent `@async` features wait for the first caller's result. The attachment is recorded with no phase.
