@@ -82,8 +82,11 @@ end
 ### Run-Level Hooks (BeforeAll/AfterAll)
 
 `before_all` hooks run lazily, exactly once per test run, before the first
-scenario that executes — serialized through a run coordinator, so they are
-safe with `@async` features. Their accumulated context map is merged into
+scenario that executes. They run in that scenario's test process; a run
+coordinator guarantees they run only once, and any `@async` features that
+reach them concurrently wait for the result. Because they run in a test
+process, they can attach (`Cucumber.attach/4`, `Cucumber.log/2`,
+`Cucumber.link/2`) like any other hook. Their accumulated context map is merged into
 every scenario's context. If a `before_all` hook fails, the remaining
 `before_all` hooks still run (to set up as much as possible for cleanup),
 but every scenario in the run fails with the original error.

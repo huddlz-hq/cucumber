@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- Attaching from a `before_all` hook (`Cucumber.attach/4`, `Cucumber.log/2`, `Cucumber.link/2`) no longer deadlocks the run coordinator and fails every scenario (#57). `before_all` hooks now run in the calling test process; the coordinator still guarantees they run exactly once per run, and concurrent `@async` features wait for the first caller's result. The attachment is recorded with no phase.
+
 ## v1.0.0 (2026-07-02)
 
 This release completes the Cucumber Compatibility Kit roadmap (#17–#29) and marks 1.0. Cucumber for Elixir is now CCK compliant: the official [CCK](https://github.com/cucumber/compatibility-kit) runs as an approval suite in this repo, comparing the Cucumber Messages we emit against the reference implementation's output. Full documentation for every feature below lives in the [guides](https://hexdocs.pm/cucumber).

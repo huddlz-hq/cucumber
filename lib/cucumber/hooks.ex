@@ -62,8 +62,10 @@ defmodule Cucumber.Hooks do
   ## Run-level hooks
 
   `before_all` hooks run lazily, exactly once per run, before the first
-  scenario that executes (serialized through `Cucumber.RunCoordinator`, so
-  this is safe with `@async` features). Their accumulated context map is
+  scenario that executes. They run in that scenario's test process;
+  `Cucumber.RunCoordinator` guarantees they run only once, and `@async`
+  features that reach them concurrently wait for the result. They may
+  attach via `Cucumber.attach/4` and friends. Their accumulated context map is
   merged into every scenario's context. If a `before_all` hook fails, the
   remaining `before_all` hooks still run (to set up as much as possible for
   cleanup), but every scenario in the run fails with the original error.
