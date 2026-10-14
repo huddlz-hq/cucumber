@@ -147,6 +147,22 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       refute run.output =~ "lib/cucumber/runtime.ex"
     end
 
+    test "the feature file frame counts blank lines at the top of the file" do
+      run =
+        run_feature(
+          "\n\nFeature: spaced frames\n  Scenario: failing\n    Given a step that raises\n",
+          steps: [FailingSteps],
+          file: "test/fixtures/generated/spaced_frames.feature"
+        )
+
+      assert run.failures == 1
+
+      stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
+      [first_frame | _] = stacktrace_section |> String.split("\n", trim: true)
+
+      assert first_frame =~ "test/fixtures/generated/spaced_frames.feature:5"
+    end
+
     test "a missing step's stack trace also leads with the feature file" do
       run =
         run_feature(

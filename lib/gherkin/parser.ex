@@ -462,10 +462,7 @@ defmodule Gherkin.NimbleParser do
   Raises `Gherkin.ParseError` on failure.
   """
   def parse(gherkin_string) do
-    # Strip leading newline that heredoc strings add
-    normalized = String.trim_leading(gherkin_string, "\n")
-
-    case parse_feature(normalized) do
+    case parse_feature(gherkin_string) do
       {:ok, [feature], rest, _context, {line, col}, _offset} ->
         # Trailing whitespace is benign; non-whitespace content means the
         # parser silently stopped mid-file (e.g. on a malformed line).
@@ -478,7 +475,7 @@ defmodule Gherkin.NimbleParser do
             rest: String.slice(rest, 0, 80)
         end
 
-        feature |> put_comments(normalized) |> Gherkin.Tables.validate!(normalized)
+        feature |> put_comments(gherkin_string) |> Gherkin.Tables.validate!(gherkin_string)
 
       {:error, message, rest, _context, {line, col}, _offset} ->
         raise Gherkin.ParseError,

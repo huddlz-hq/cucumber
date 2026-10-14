@@ -698,6 +698,26 @@ defmodule Gherkin.ParserTest do
   end
 
   describe "parse/1 source metadata for Cucumber Messages" do
+    test "lines count from the top of the file when it starts with blank lines" do
+      gherkin = "\n\nFeature: Spaced\n\n  Scenario: s\n    Given a step\n"
+
+      feature = Gherkin.Parser.parse(gherkin)
+
+      assert feature.line == 2
+      [scenario] = feature.scenarios
+      assert scenario.line == 4
+      assert hd(scenario.steps).line == 5
+    end
+
+    test "parse errors count blank lines at the top of the file" do
+      gherkin =
+        "\n\nFeature: Spaced\n\n  Scenario: s\n    Given a table\n      | a | b |\n      | c |\n"
+
+      error = assert_raise Gherkin.ParseError, fn -> Gherkin.Parser.parse(gherkin) end
+
+      assert error.line == 8
+    end
+
     test "each tag records its own source line, parallel to tags" do
       gherkin = """
       @feature-tag
