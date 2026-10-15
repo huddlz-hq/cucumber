@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Each scenario's steps are matched against the step registry once, when the scenario starts, and every retry reuses those matches. A custom parameter type's `transform` therefore runs once per scenario rather than once per attempt.
+
 ## v1.1.0 (2026-10-14)
 
 ### Behavior changes

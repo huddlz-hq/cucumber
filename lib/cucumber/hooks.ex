@@ -342,13 +342,12 @@ defmodule Cucumber.Hooks do
     |> Enum.map(fn {_type, _tag, name, hook_ref} -> {name, hook_ref} end)
   end
 
-  @typedoc """
-  Wraps each scenario hook invocation — receives the hook's
-  `Cucumber.TestCase.HookStep` and a one-arity function that executes the
-  hook with the given context overrides merged in; must return that
-  function's result. The scenario runner uses this to bracket hooks with
-  Cucumber Messages events and to inject each hook's message reference.
-  """
+  # Wraps each scenario hook invocation — receives the hook's
+  # Cucumber.TestCase.HookStep and a one-arity function that executes the
+  # hook with the given context overrides merged in; must return that
+  # function's result. The scenario runner uses this to bracket hooks with
+  # Cucumber Messages events and to inject each hook's message reference.
+  @typedoc false
   @type around :: (Cucumber.TestCase.HookStep.t(), (map() -> term()) -> term())
 
   @doc false

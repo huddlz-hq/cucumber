@@ -40,7 +40,7 @@ StepRegistry.match(registry, step_text)
   # => {:ok, definition, args} | :undefined | {:ambiguous, [{definition, args}]}
 ```
 
-The runtime executes the matched definition and the Cucumber Messages emitter references the same definitions, so matching semantics live in exactly one module.
+Each scenario is matched once, into a test case (`lib/cucumber/test_case.ex`): its scenario hooks selected by tag and every step's match result, in run order. The runtime executes the test case, retries reuse it, and the Cucumber Messages emitter builds `testCase.testSteps` from it, so hook selection and matching happen in exactly one place.
 
 ### Gherkin Parser
 
@@ -117,9 +117,12 @@ Each generated test body is a single call into the runtime, which owns the whole
 
 ```elixir
 Runtime.run_scenario(context, ...)
+  ├── Builds the scenario's test case once (Cucumber.TestCase): scenario hooks
+  │   selected by tag, every step matched against the step registry
+  │   (0 → undefined, >1 → ambiguous), test steps numbered in run order
   ├── Runs before-scenario hooks (and lazily before_all, once per run)
   ├── Executes background steps, then scenario steps:
-  │   ├── Matches the step against the step registry (0 → undefined, >1 → ambiguous)
+  │   ├── Uses the step's match from the test case
   │   ├── Prepares context with args, datatables, docstrings
   │   ├── Brackets it with before_step/after_step hooks
   │   └── Processes the return value (incl. pending/skipped, retry)

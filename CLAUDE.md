@@ -91,7 +91,9 @@ This Cucumber implementation consists of several key components:
 
 4. **Runtime** (`lib/cucumber/runtime.ex`) - Runs the scenario lifecycle inside the test body
    - Hooks, background steps, and scenario steps all run in the test process
-   - Matches steps through `Cucumber.StepRegistry.match/2`
+   - Builds each scenario's test case once (`lib/cucumber/test_case.ex`):
+     hooks selected by tag, steps matched via `Cucumber.StepRegistry.match/2`;
+     retries and the Messages emitter reuse it (see `GLOSSARY.md`)
    - Manages context between steps
    - Handles datatables and docstrings
    - Processes step return values (incl. pending/skipped, retry)
