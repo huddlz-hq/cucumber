@@ -25,3 +25,17 @@ _Avoid_: missing step, unknown step
 **Ambiguous step**:
 A step whose text matches more than one step definition in the step registry.
 _Avoid_: duplicate match
+
+### Running scenarios
+
+**Pickle**:
+One concrete, runnable scenario compiled from a feature: an outline row or plain scenario, with its background and rule background steps and inherited tags folded in.
+_Avoid_: expanded scenario, scenario spec
+
+**Test case**:
+A pickle prepared to run: its ordered test steps, with every pickle step already matched against the step registry and every scenario hook already selected by tags. The generated ExUnit test runs one test case, possibly over several attempts.
+_Avoid_: plan, scenario spec (and don't confuse it with an ExUnit test module)
+
+**Test step**:
+One entry in a test case, either a hook step (a before or after scenario hook) or a pickle step (a pickle's step together with its match result).
+_Avoid_: plan entry
