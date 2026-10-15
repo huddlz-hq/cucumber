@@ -33,9 +33,9 @@ One concrete, runnable scenario compiled from a feature: an outline row or plain
 _Avoid_: expanded scenario, scenario spec
 
 **Test case**:
-A pickle prepared to run: its ordered test steps, with every pickle step already matched against the step registry and every scenario hook already selected by tags. The generated ExUnit test runs one test case, possibly over several attempts.
+A pickle prepared to run: its ordered test steps, with every pickle step already matched against the step registry and every scenario hook already selected by tags. Step arguments are not part of it: they are converted when each step runs. The generated ExUnit test runs one test case, possibly over several attempts.
 _Avoid_: plan, scenario spec (and don't confuse it with an ExUnit test module)
 
 **Test step**:
-One entry in a test case, either a hook step (a before or after scenario hook) or a pickle step (a pickle's step together with its match result).
+One entry in a test case, either a hook step (a before or after scenario hook) or a step match (a pickle's step together with the step definitions it matches).
 _Avoid_: plan entry

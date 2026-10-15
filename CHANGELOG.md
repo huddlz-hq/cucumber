@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- With Cucumber Messages enabled, a custom parameter type's `transform` no longer runs an extra time for every step when the scenario starts, before its hooks and for steps that never run. A transform now runs only when its step does, once per attempt, and one that raises fails that step (reported as a failed test step) rather than the scenario before anything ran.
+
 ### Changed
 
-- Each scenario's steps are matched against the step registry once, when the scenario starts, and every retry reuses those matches. A custom parameter type's `transform` therefore runs once per scenario rather than once per attempt.
+- Hook internals changed shape: the around-callback that `Cucumber.Hooks.run_before_hooks`/`run_after_hooks` take now receives the hook's test step and the function that runs it, `(hook_step, fun)`, instead of `(index, name, fun)`, and the `Cucumber.Hooks.around` type is no longer documented.
 
 ## v1.1.0 (2026-10-14)
 

@@ -4,7 +4,7 @@ defmodule Cucumber.TestCaseTest do
   alias Cucumber.StepRegistry
   alias Cucumber.TestCase
   alias Cucumber.TestCase.HookStep
-  alias Cucumber.TestCase.PickleStep
+  alias Cucumber.TestCase.StepMatch
 
   defmodule Steps do
     use Cucumber.StepDefinition
@@ -18,6 +18,23 @@ defmodule Cucumber.TestCaseTest do
     end
 
     step "I have {int} {word}", context do
+      context
+    end
+  end
+
+  defmodule Types do
+    use Cucumber.ParameterTypes
+
+    parameter_type(:exploding,
+      regexp: ~r/apples/,
+      transform: fn _ -> raise "transform ran while building the test case" end
+    )
+  end
+
+  defmodule TransformSteps do
+    use Cucumber.StepDefinition
+
+    step "I have {int} {exploding}", context do
       context
     end
   end
@@ -83,6 +100,15 @@ defmodule Cucumber.TestCaseTest do
       assert hook_names(test_case.after_hooks) == ["database after", "first after"]
     end
 
+    test "combined feature and scenario tags select every matching hook once", ctx do
+      test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, ["database", "other"])
+
+      assert hook_names(test_case.before_hooks) ==
+               ["global before", "database before", "other before"]
+
+      assert hook_names(test_case.after_hooks) == ["database after", "first after"]
+    end
+
     test "untagged scenarios get only the global hooks", ctx do
       test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, [])
 
@@ -120,15 +146,24 @@ defmodule Cucumber.TestCaseTest do
                Enum.map(ctx.pickle.steps, & &1.id)
     end
 
-    test "carries each step's match result from the step registry", ctx do
+    test "carries the step definitions each step matches, without its args", ctx do
       test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, [])
 
       assert [
-               %PickleStep{match: {:ok, %{source: "the app is running"}, []}},
-               %PickleStep{match: {:ok, %{source: "I have {int} {word}"}, [3, "apples"]}},
-               %PickleStep{match: {:ambiguous, [_, _]}},
-               %PickleStep{match: :undefined}
+               %StepMatch{match: {:ok, %{source: "the app is running"}}},
+               %StepMatch{match: {:ok, %{source: "I have {int} {word}"}}},
+               %StepMatch{match: {:ambiguous, [%{source: "I have {int} cukes"}, _]}},
+               %StepMatch{match: :undefined}
              ] = test_case.pickle_steps
+    end
+
+    test "does not run parameter type transforms", ctx do
+      registry = StepRegistry.new([TransformSteps], [Types])
+
+      test_case = TestCase.new(ctx.scenario, registry, ctx.hooks, [])
+
+      assert [_, %StepMatch{match: {:ok, %{source: "I have {int} {exploding}"}}}, _, _] =
+               test_case.pickle_steps
     end
   end
 

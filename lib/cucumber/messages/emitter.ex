@@ -12,7 +12,7 @@ defmodule Cucumber.Messages.Emitter do
       `Cucumber.compile_features!/1` when
       `config :cucumber, messages: path` is set.
     * **Run-time sessions** — the scenario runner opens a session per
-      scenario (`open_test_case/2` emits the `testCase` envelope),
+      scenario (`open_test_case/1` emits the `testCase` envelope),
       starts one attempt at a time (`start_attempt/2` emits
       `testCaseStarted`), brackets steps and scenario hooks with
       started/finished events, and closes each attempt
@@ -184,13 +184,13 @@ defmodule Cucumber.Messages.Emitter do
     %{id: Map.fetch!(ids, hook_step.position), hookId: Map.get(context.hook_ids, hook_step.ref)}
   end
 
-  defp test_step_envelope(%TestCase.PickleStep{} = pickle_step, ids, context) do
+  defp test_step_envelope(%TestCase.StepMatch{} = step_match, ids, context) do
     %{
-      id: Map.fetch!(ids, pickle_step.position),
-      pickleStepId: pickle_step.pickle_step_id,
+      id: Map.fetch!(ids, step_match.position),
+      pickleStepId: step_match.pickle_step_id,
       stepDefinitionIds:
         Enum.map(
-          matched_definitions(pickle_step.match),
+          matched_definitions(step_match.match),
           &Map.fetch!(context.step_definition_ids, &1.position)
         )
     }
@@ -198,11 +198,10 @@ defmodule Cucumber.Messages.Emitter do
 
   # Every definition the step matched — one, none, or all of an ambiguous
   # set (in definition order, so ids ascend)
-  defp matched_definitions({:ok, definition, _args}), do: [definition]
+  defp matched_definitions({:ok, definition}), do: [definition]
   defp matched_definitions(:undefined), do: []
 
-  defp matched_definitions({:ambiguous, matches}),
-    do: Enum.map(matches, fn {definition, _args} -> definition end)
+  defp matched_definitions({:ambiguous, definitions}), do: definitions
 
   @doc false
   # Emits testCaseStarted for one attempt (0-based in the message, 1-based
@@ -246,7 +245,7 @@ defmodule Cucumber.Messages.Emitter do
   @doc false
   # Builds the per-step message reference the runner threads into a test
   # step's execution: ids plus the monotonic start time for duration.
-  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.PickleStep.t()) ::
+  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.StepMatch.t()) ::
           map() | nil
   def step_message(nil, _test_step), do: nil
 

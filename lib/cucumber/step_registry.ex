@@ -87,6 +87,9 @@ defmodule Cucumber.StepRegistry do
           | :undefined
           | {:ambiguous, [{Definition.t(), [term()]}]}
 
+  @typedoc false
+  @type resolution :: {:ok, Definition.t()} | :undefined | {:ambiguous, [Definition.t()]}
+
   @doc """
   Builds a registry from step definition modules and parameter type modules.
 
@@ -140,6 +143,30 @@ defmodule Cucumber.StepRegistry do
       [{definition, args}] -> {:ok, definition, args}
       many -> {:ambiguous, many}
     end
+  end
+
+  @doc false
+  # Which definitions the step text matches, without converting any
+  # arguments: custom parameter type transforms are user code, and run
+  # only when the step does (see args/2). Matches exactly the definitions
+  # match/2 would.
+  @spec resolve(t(), String.t()) :: resolution()
+  def resolve(%__MODULE__{definitions: definitions}, step_text) do
+    case Enum.filter(definitions, &(run_resolver(&1.matcher, step_text) != :no_match)) do
+      [] -> :undefined
+      [definition] -> {:ok, definition}
+      many -> {:ambiguous, many}
+    end
+  end
+
+  @doc false
+  # The converted arguments of step text that resolve/2 matched to
+  # `definition` — the args match/2 would return for it. Runs the
+  # parameter types' transforms.
+  @spec args(Definition.t(), String.t()) :: [term()]
+  def args(%Definition{matcher: matcher}, step_text) do
+    {:match, args} = run_matcher(matcher, step_text)
+    args
   end
 
   @doc """
@@ -258,13 +285,15 @@ defmodule Cucumber.StepRegistry do
 
   defp compile_matcher(expression, parameter_types) do
     with {:ok, compiled} <- Expression.compile_checked(expression, parameter_types) do
-      {:ok, :expression, expression, {:expression, compiled}}
+      {:ok, :expression, expression,
+       {:expression, compiled, Expression.without_transforms(compiled)}}
     end
   end
 
   # -- matching ---------------------------------------------------------------
 
-  defp run_matcher({:expression, compiled}, step_text), do: Expression.match(step_text, compiled)
+  defp run_matcher({:expression, compiled, _resolver}, step_text),
+    do: Expression.match(step_text, compiled)
 
   defp run_matcher({:regex, _regex, anchored, capture}, step_text) do
     case :re.run(step_text, anchored.re_pattern, [{:capture, capture, :index}]) do
@@ -273,6 +302,11 @@ defmodule Cucumber.StepRegistry do
       {:match, indexes} -> {:match, Enum.map(indexes, &group_value(&1, step_text))}
     end
   end
+
+  defp run_resolver({:expression, _compiled, resolver}, step_text),
+    do: Expression.match(step_text, resolver)
+
+  defp run_resolver(regex_matcher, step_text), do: run_matcher(regex_matcher, step_text)
 
   defp group_value({-1, 0}, _step_text), do: nil
   defp group_value({start, length}, step_text), do: binary_part(step_text, start, length)

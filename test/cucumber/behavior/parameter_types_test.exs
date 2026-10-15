@@ -71,6 +71,221 @@ defmodule Cucumber.ParameterTypesBehaviorTest do
     end
   end
 
+  # Transforms are user code: they run when their step runs, on every
+  # attempt, after the scenario's before hooks — never ahead of time.
+  defmodule TimingTypes do
+    use Cucumber.ParameterTypes
+
+    parameter_type(:recorded,
+      regexp: ~r/thing\d/,
+      transform: fn value ->
+        Collector.record({:transform, value})
+        value
+      end
+    )
+
+    # Looks the ship up in state the before hook sets up
+    parameter_type(:ship,
+      regexp: ~r/ship-\d/,
+      transform: fn name -> Map.fetch!(Process.get(:fleet, %{}), name) end
+    )
+
+    # Raises on its first call only
+    parameter_type(:fragile,
+      regexp: ~r/TNT/,
+      transform: fn value ->
+        Collector.record(:fragile_transform)
+
+        if Collector.events() |> Enum.count(&(&1 == :fragile_transform)) < 2 do
+          raise "transformer exploded"
+        end
+
+        value
+      end
+    )
+  end
+
+  defmodule TimingHooks do
+    use Cucumber.Hooks
+
+    before_scenario _context do
+      Collector.record(:before_hook)
+      Process.put(:fleet, %{"ship-1" => :victory})
+      :ok
+    end
+  end
+
+  defmodule TimingSteps do
+    use Cucumber.StepDefinition
+
+    step "a passing step", _context do
+      Collector.record(:passing_step)
+      :ok
+    end
+
+    step "a failing step", _context do
+      Collector.record(:failing_step)
+      raise "step failed"
+    end
+
+    step "a skipping step", _context do
+      Collector.record(:skipping_step)
+      :skipped
+    end
+
+    step "a step that fails the first time", _context do
+      Collector.record(:flaky_step)
+
+      if Collector.events() |> Enum.count(&(&1 == :flaky_step)) < 2 do
+        raise "flaky step failed"
+      end
+
+      :ok
+    end
+
+    step "I use {recorded}", %{args: [value]} do
+      Collector.record({:used, value})
+      :ok
+    end
+
+    step "{ship} sails", %{args: [ship]} do
+      Collector.record({:sails, ship})
+      :ok
+    end
+
+    step "handling {fragile} once", _context do
+      Collector.record(:fragile_step)
+      :ok
+    end
+  end
+
+  defp run_timing(source, opts \\ []) do
+    run_feature(
+      source,
+      [steps: [TimingSteps], hooks: [TimingHooks], parameter_types: [TimingTypes]] ++ opts
+    )
+  end
+
+  describe "when transforms run" do
+    test "a transform for a step after a failing step never runs" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          Scenario: fails first
+            Given a failing step
+            Then I use thing1
+        """)
+
+      assert %{total: 1, failures: 1} = run
+      assert run.events == [:before_hook, :failing_step]
+    end
+
+    test "a transform for a step after a skipping step never runs" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          Scenario: skips first
+            Given a skipping step
+            Then I use thing1
+        """)
+
+      assert %{total: 1, passed: 1} = run
+      assert run.events == [:before_hook, :skipping_step]
+    end
+
+    test "a transform runs after the before hook and can use the state it set up" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          Scenario: hook state
+            Given I use thing1
+            Then ship-1 sails
+        """)
+
+      assert %{total: 1, passed: 1} = run
+
+      assert run.events == [
+               :before_hook,
+               {:transform, "thing1"},
+               {:used, "thing1"},
+               {:sails, :victory}
+             ]
+    end
+
+    test "a raising transform fails its step and the scenario is retried" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          @retry-2
+          Scenario: transform fails once
+            Given a passing step
+            Then handling TNT once
+        """)
+
+      assert %{total: 1, passed: 1} = run
+      assert run.output =~ "attempt 1 of 3 failed"
+
+      assert run.events == [
+               :before_hook,
+               :passing_step,
+               :fragile_transform,
+               :before_hook,
+               :passing_step,
+               :fragile_transform,
+               :fragile_step
+             ]
+    end
+
+    test "a transform runs once per attempt" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          @retry-2
+          Scenario: flaky
+            Given I use thing1
+            Then a step that fails the first time
+        """)
+
+      assert %{total: 1, passed: 1} = run
+      assert count(run.events, {:transform, "thing1"}) == 2
+
+      assert run.events == [
+               :before_hook,
+               {:transform, "thing1"},
+               {:used, "thing1"},
+               :flaky_step,
+               :before_hook,
+               {:transform, "thing1"},
+               {:used, "thing1"},
+               :flaky_step
+             ]
+    end
+
+    @tag :tmp_dir
+    test "a raising transform is reported as its step failing", %{tmp_dir: tmp_dir} do
+      run =
+        run_timing(
+          """
+          Feature: transform timing
+            Scenario: transform fails
+              Given a passing step
+              Then handling TNT once
+          """,
+          messages: Path.join(tmp_dir, "messages.ndjson")
+        )
+
+      assert %{total: 1, failures: 1} = run
+      Cucumber.CckStream.assert_valid(run.messages)
+
+      statuses =
+        for %{"testStepFinished" => finished} <- run.messages,
+            do: finished["testStepResult"]["status"]
+
+      # before hook, passing step, the step whose transform raised
+      assert statuses == ["PASSED", "PASSED", "FAILED"]
+    end
+  end
+
   describe "CCK: parameter-types" do
     test "a custom type transforms capture groups into a domain value" do
       run =

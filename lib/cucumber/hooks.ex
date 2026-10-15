@@ -362,9 +362,7 @@ defmodule Cucumber.Hooks do
           | {:error, term(), String.t() | nil}
           | {:halted, :pending | :skipped, String.t() | nil}
   def run_before_hooks(hook_steps, context, around \\ nil) do
-    hook_steps
-    |> Enum.map(&{&1, &1.name, &1.ref})
-    |> run_halting_hooks(context, around || (&unwrapped/2))
+    run_halting_hooks(hook_steps, context, around || (&unwrapped/2))
   end
 
   @doc false
@@ -377,12 +375,14 @@ defmodule Cucumber.Hooks do
   def run_before_step_hooks(hooks, context, tags) do
     hooks
     |> filter_hooks(:before_step, tags)
-    |> Enum.map(fn {name, ref} -> {nil, name, ref} end)
+    |> Enum.map(fn {name, ref} -> %{name: name, ref: ref} end)
     |> run_halting_hooks(context, &unwrapped/2)
   end
 
   defp unwrapped(_hook_step, hook_fun), do: hook_fun.(%{})
 
+  # Each hook is a map or struct with :name and :ref — a test case's
+  # HookStep, or a before_step hook — and is what `around` receives.
   defp run_halting_hooks(hooks, context, around) do
     Enum.reduce(hooks, {:ok, context}, fn
       _hook, {:error, _, _} = error ->
@@ -391,15 +391,15 @@ defmodule Cucumber.Hooks do
       _hook, {:halted, _status, _reason} = halted ->
         halted
 
-      {hook_step, name, hook_ref}, {:ok, context} ->
-        invoke_halting_hook(around, hook_step, name, hook_ref, context)
+      hook, {:ok, context} ->
+        invoke_halting_hook(around, hook, context)
     end)
   end
 
-  defp invoke_halting_hook(around, hook_step, name, {module, func_name}, context) do
+  defp invoke_halting_hook(around, %{name: name, ref: {module, func_name}} = hook, context) do
     run = fn overrides -> apply_before_hook(module, func_name, Map.merge(context, overrides)) end
 
-    case around.(hook_step, run) do
+    case around.(hook, run) do
       {:error, reason} -> {:error, reason, name}
       other -> other
     end
