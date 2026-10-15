@@ -256,9 +256,6 @@ defmodule Cucumber.Compiler do
 
     name = test_name(pickle)
 
-    {background_steps, scenario_steps} =
-      Enum.split_with(pickle.steps, & &1.from_background)
-
     # The whole scenario lifecycle (before hooks, background, steps, after
     # hooks) runs inside the test body via the runtime — see
     # Cucumber.Runtime.run_scenario/3.
@@ -272,12 +269,9 @@ defmodule Cucumber.Compiler do
       async: async,
       scenario_name: name,
       scenario_line: (pickle.scenario_line || 0) + 1,
-      background_steps: Enum.map(background_steps, & &1.step),
-      steps: Enum.map(scenario_steps, & &1.step),
-      # Pickle step ids parallel to the step lists — testCase.testSteps
-      # references them when the message sink is enabled
-      background_step_ids: Enum.map(background_steps, & &1.id),
-      step_ids: Enum.map(scenario_steps, & &1.id),
+      # Gherkin.PickleStep structs (step, pickle step id, from_background):
+      # Cucumber.TestCase turns them into the test case's pickle steps
+      pickle_steps: pickle.steps,
       pickle_id: pickle.id
     }
 

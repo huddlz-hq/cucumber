@@ -40,7 +40,7 @@ StepRegistry.match(registry, step_text)
   # => {:ok, definition, args} | :undefined | {:ambiguous, [{definition, args}]}
 ```
 
-The runtime executes the matched definition and the Cucumber Messages emitter references the same definitions, so matching semantics live in exactly one module.
+Each scenario is matched once, into a test case (`lib/cucumber/test_case.ex`): its scenario hooks selected by tag and the step definitions every step matches, in run order. The runtime executes the test case, retries reuse it, and the Cucumber Messages emitter builds `testCase.testSteps` from it, so hook selection and matching happen in exactly one place. A step's arguments are converted only when the step runs, on every attempt: parameter type transforms are user code, and may depend on what earlier hooks and steps set up.
 
 ### Gherkin Parser
 
@@ -106,7 +106,7 @@ Compiler.compile_features!()
   ├── Expands features into pickles (outlines × example rows, rules flattened)
   ├── For each feature file:
   │   ├── Generates a test module
-  │   ├── Creates one test case per pickle
+  │   ├── Creates one ExUnit test per pickle
   │   └── Adds appropriate tags
   └── Compiles modules into memory
 ```
@@ -117,9 +117,13 @@ Each generated test body is a single call into the runtime, which owns the whole
 
 ```elixir
 Runtime.run_scenario(context, ...)
+  ├── Builds the scenario's test case once (Cucumber.TestCase): scenario hooks
+  │   selected by tag, every step matched to its step definitions
+  │   (0 → undefined, >1 → ambiguous), test steps numbered in run order
   ├── Runs before-scenario hooks (and lazily before_all, once per run)
   ├── Executes background steps, then scenario steps:
-  │   ├── Matches the step against the step registry (0 → undefined, >1 → ambiguous)
+  │   ├── Uses the step's match from the test case
+  │   ├── Converts its args (running parameter type transforms)
   │   ├── Prepares context with args, datatables, docstrings
   │   ├── Brackets it with before_step/after_step hooks
   │   └── Processes the return value (incl. pending/skipped, retry)

@@ -237,6 +237,51 @@ defmodule Cucumber.StepRegistryTest do
     end
   end
 
+  describe "resolve/2 and args/2" do
+    defmodule ExplodingTypes do
+      use Cucumber.ParameterTypes
+
+      parameter_type(:color,
+        regexp: ~r/red|blue/,
+        transform: fn _ -> raise "transform ran" end
+      )
+    end
+
+    test "resolve/2 finds the definitions match/2 would, without converting args" do
+      registry = StepRegistry.new([OverlappingSteps, CukeSteps, RegexSteps])
+
+      for text <- ["I have 3 cukes", "there are 3 cukes", "no captures here", "nothing"] do
+        expected =
+          case StepRegistry.match(registry, text) do
+            {:ok, definition, _args} -> {:ok, definition}
+            :undefined -> :undefined
+            {:ambiguous, matches} -> {:ambiguous, Enum.map(matches, &elem(&1, 0))}
+          end
+
+        assert StepRegistry.resolve(registry, text) == expected
+      end
+    end
+
+    test "resolve/2 never runs a custom parameter type's transform" do
+      registry = StepRegistry.new([ColorSteps], [ExplodingTypes])
+
+      assert {:ok, %Definition{source: "the light is {color}"}} =
+               StepRegistry.resolve(registry, "the light is red")
+
+      assert StepRegistry.resolve(registry, "the light is green") == :undefined
+    end
+
+    test "args/2 converts the resolved definition's args, running transforms" do
+      registry = StepRegistry.new([ColorSteps, RegexSteps], [ColorTypes])
+
+      {:ok, color} = StepRegistry.resolve(registry, "the light is blue")
+      assert StepRegistry.args(color, "the light is blue") == ["BLUE"]
+
+      {:ok, regex} = StepRegistry.resolve(registry, "there are 3 cukes")
+      assert StepRegistry.args(regex, "there are 3 cukes") == ["3", nil]
+    end
+  end
+
   describe "Definition.display_pattern/1" do
     test "shows expressions as written and regexes as sigils, flags included" do
       registry = StepRegistry.new([CukeSteps, RegexSteps])

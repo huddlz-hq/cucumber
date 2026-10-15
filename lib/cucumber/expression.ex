@@ -359,6 +359,22 @@ defmodule Cucumber.Expression do
     |> Enum.reverse()
   end
 
+  @doc false
+  # The same expression with every custom parameter type's transform
+  # dropped: it matches exactly the same text, but yields the matched
+  # strings without calling user code. Cucumber.StepRegistry resolves
+  # which definitions a step matches with it, ahead of running the step.
+  @spec without_transforms(compiled()) :: compiled()
+  def without_transforms(compiled) do
+    Enum.map(compiled, fn
+      {:parameter, type, {:custom, regex, group_count, _transform}, presence} ->
+        {:parameter, type, {:custom, regex, group_count, nil}, presence}
+
+      node ->
+        node
+    end)
+  end
+
   @doc """
   Matches a step text against a compiled Cucumber Expression.
 

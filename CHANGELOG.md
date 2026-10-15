@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- With Cucumber Messages enabled, a custom parameter type's `transform` no longer runs an extra time for every step when the scenario starts, before its hooks and for steps that never run. A transform now runs only when its step does, once per attempt, and one that raises fails that step (reported as a failed test step) rather than the scenario before anything ran.
+- A step that matches more than one definition always fails with `Cucumber.AmbiguousStepError`. Matching it used to run the parameter type transforms of every definition it matched, so a transform that raised surfaced as that error instead of the ambiguity. Its transforms no longer run.
+
+### Changed
+
+- Undocumented (`@doc false`) hook and Cucumber Messages functions changed shape:
+  - `Cucumber.Hooks.run_before_hooks/3` and `run_after_hooks/3` take the scenario's hooks already selected by tag, instead of every hook plus the scenario's tags (`run_before_hooks/4`, `run_after_hooks/4`). Their around-callback now receives the hook's test step and the function that runs it, `(hook_step, fun)`, instead of `(index, name, fun)`, and the `Cucumber.Hooks.around` type is no longer documented.
+  - `Cucumber.Hooks.before_scenario_hooks/2` and `after_scenario_hooks/2` are removed.
+  - `Cucumber.Messages.Emitter.open_test_case/1` takes the scenario's test case instead of `open_test_case/2`; `hook_around/1` no longer takes a hook kind (was `hook_around/2`); `step_message/2` takes a test step instead of a test step id; and `step_id/2` is removed.
+
 ## v1.1.0 (2026-10-14)
 
 ### Behavior changes
