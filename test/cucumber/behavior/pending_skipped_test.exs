@@ -400,12 +400,15 @@ defmodule Cucumber.PendingSkippedTest do
         async: false,
         scenario_name: "skip tail",
         scenario_line: 2,
-        background_steps: [],
-        steps: [
-          %Gherkin.Step{keyword: "Given", text: "I skip a step", line: 2},
-          %Gherkin.Step{keyword: "And", text: "a step that is skipped", line: 3},
-          %Gherkin.Step{keyword: "And", text: "a normal step", line: 4}
-        ]
+        pickle_steps:
+          Enum.map(
+            [
+              %Gherkin.Step{keyword: "Given", text: "I skip a step", line: 2},
+              %Gherkin.Step{keyword: "And", text: "a step that is skipped", line: 3},
+              %Gherkin.Step{keyword: "And", text: "a normal step", line: 4}
+            ],
+            &%Gherkin.PickleStep{id: "step-#{&1.line}", text: &1.text, step: &1}
+          )
       }
 
       runtime_data = %{step_registry: registry, hooks: []}

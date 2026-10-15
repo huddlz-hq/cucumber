@@ -89,26 +89,21 @@ defmodule Cucumber.HooksTest do
       assert length(filtered_empty) == 1
     end
 
-    test "run_before_hooks executes matching hooks and updates context" do
+    test "run_before_hooks runs the given hook steps in order, threading the context" do
       defmodule RunTestModule do
-        def hook_a(context), do: {:ok, Map.put(context, :hook_a, true)}
-        def hook_b(context), do: {:ok, Map.put(context, :hook_b, true)}
+        def hook_a(context), do: {:ok, Map.put(context, :order, [:a])}
+        def hook_b(context), do: {:ok, Map.update!(context, :order, &(&1 ++ [:b]))}
       end
 
-      hooks = [
-        {:before_scenario, nil, nil, {RunTestModule, :hook_a}},
-        {:before_scenario, "@database", nil, {RunTestModule, :hook_b}}
-      ]
+      # Tag selection happens when the test case is built (see
+      # Cucumber.TestCaseTest); the hooks module runs what it is given
+      {:ok, result} =
+        Cucumber.Hooks.run_before_hooks(
+          hook_steps([{RunTestModule, :hook_a}, {RunTestModule, :hook_b}]),
+          %{}
+        )
 
-      # With database tag, both hooks run
-      {:ok, result} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database"])
-      assert result.hook_a == true
-      assert result.hook_b == true
-
-      # Without database tag, only global hook runs
-      {:ok, result_no_tag} = Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
-      assert result_no_tag.hook_a == true
-      refute Map.has_key?(result_no_tag, :hook_b)
+      assert result.order == [:a, :b]
     end
 
     test "run_before_hooks accepts keyword list return values" do
@@ -116,11 +111,9 @@ defmodule Cucumber.HooksTest do
         def keyword_hook(_context), do: [db_ready: true, cache: :warm]
       end
 
-      hooks = [
-        {:before_scenario, nil, nil, {KeywordReturnModule, :keyword_hook}}
-      ]
+      {:ok, result} =
+        Cucumber.Hooks.run_before_hooks(hook_steps([{KeywordReturnModule, :keyword_hook}]), %{})
 
-      {:ok, result} = Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
       assert result.db_ready == true
       assert result.cache == :warm
     end
@@ -130,41 +123,18 @@ defmodule Cucumber.HooksTest do
         def bad_hook(_context), do: :something_wrong
       end
 
-      hooks = [
-        {:before_scenario, nil, nil, {InvalidReturnModule, :bad_hook}}
-      ]
-
       assert_raise RuntimeError, ~r/Invalid hook return value/, fn ->
-        Cucumber.Hooks.run_before_hooks(hooks, %{}, [])
+        Cucumber.Hooks.run_before_hooks(hook_steps([{InvalidReturnModule, :bad_hook}]), %{})
       end
     end
+  end
 
-    test "hooks run once per scenario with combined feature and scenario tags" do
-      defmodule CombinedTagsModule do
-        def count_hook(context) do
-          count = Map.get(context, :hook_count, 0)
-          {:ok, Map.put(context, :hook_count, count + 1)}
-        end
-      end
-
-      hooks = [
-        {:before_scenario, nil, nil, {CombinedTagsModule, :count_hook}},
-        {:before_scenario, "@database", nil, {CombinedTagsModule, :count_hook}},
-        {:before_scenario, "@special", nil, {CombinedTagsModule, :count_hook}}
-      ]
-
-      # Scenario 1: feature has @database, scenario has no extra tags
-      # Combined tags: ["database"]
-      # Should run: global + @database = 2 hooks
-      {:ok, scenario1} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database"])
-      assert scenario1.hook_count == 2
-
-      # Scenario 2: feature has @database, scenario has @special
-      # Combined tags: ["database", "special"]
-      # Should run: global + @database + @special = 3 hooks
-      {:ok, scenario2} = Cucumber.Hooks.run_before_hooks(hooks, %{}, ["database", "special"])
-      assert scenario2.hook_count == 3
-    end
+  defp hook_steps(refs) do
+    refs
+    |> Enum.with_index()
+    |> Enum.map(fn {ref, position} ->
+      %Cucumber.TestCase.HookStep{position: position, name: nil, ref: ref}
+    end)
   end
 
   describe "collect_hooks/1" do

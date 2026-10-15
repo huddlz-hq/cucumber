@@ -27,6 +27,7 @@ defmodule Cucumber.Runtime do
   alias Cucumber.Messages.Emitter
   alias Cucumber.StepRegistry
   alias Cucumber.StepRegistry.Definition
+  alias Cucumber.TestCase
 
   # Standard ExUnit context keys — everything else in the test context is a
   # scenario tag (ExUnit puts @tag values directly in the context as keys).
@@ -92,8 +93,12 @@ defmodule Cucumber.Runtime do
     # Combine feature tags + scenario tags for hook matching
     all_tags = Enum.uniq(scenario.feature_tags ++ scenario_tags)
 
+    # Hook selection and step matching happen once, here; every attempt
+    # and the message session share the result
+    test_case = TestCase.new(scenario, step_registry, hooks, all_tags)
+
     exec = %{
-      step_registry: step_registry,
+      test_case: test_case,
       hooks: hooks,
       tags: all_tags,
       scenario_tags: scenario_tags
@@ -107,7 +112,7 @@ defmodule Cucumber.Runtime do
 
     # Cucumber Messages session (nil unless the message sink is enabled):
     # emits the testCase envelope now, per-attempt/per-step events later
-    exec = Map.put(exec, :msg, Emitter.open_test_case(scenario, exec))
+    exec = Map.put(exec, :msg, Emitter.open_test_case(test_case))
 
     attempt_scenario(exunit_context, scenario, exec, 1, max_attempts(scenario))
   end
@@ -232,9 +237,13 @@ defmodule Cucumber.Runtime do
         {:error, message} -> raise Cucumber.BeforeAllError, message
       end
 
-    before_around = Emitter.hook_around(exec.msg, :before)
+    test_case = exec.test_case
 
-    case Cucumber.Hooks.run_before_hooks(exec.hooks, context, exec.tags, before_around) do
+    case Cucumber.Hooks.run_before_hooks(
+           test_case.before_hooks,
+           context,
+           Emitter.hook_around(exec.msg)
+         ) do
       {:error, reason, hook_name} ->
         raise "Before hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
 
@@ -242,7 +251,7 @@ defmodule Cucumber.Runtime do
         # Pending/skipped from a before hook: every step (background and
         # scenario) is skipped, but after hooks still run — CCK
         # hooks-skipped semantics.
-        skipped = scenario.background_steps ++ scenario.steps
+        skipped = Enum.map(test_case.pickle_steps, & &1.step)
 
         with_after_hooks(exec, context, fn ->
           context
@@ -256,11 +265,13 @@ defmodule Cucumber.Runtime do
   end
 
   defp run_background(scenario, context, exec) do
-    case execute_steps(scenario.background_steps, context, exec, 0) do
+    {background, scenario_steps} = Enum.split_with(exec.test_case.pickle_steps, & &1.background?)
+
+    case execute_steps(background, context, exec) do
       {:halted, status, reason, step, remaining, context} ->
         # Pending/skipped is a deliberate signal, not a crash, so —
         # unlike a *failing* background step — after hooks run.
-        skipped = remaining ++ scenario.steps
+        skipped = Enum.map(remaining ++ scenario_steps, & &1.step)
 
         with_after_hooks(exec, context, fn ->
           context
@@ -269,19 +280,19 @@ defmodule Cucumber.Runtime do
         end)
 
       {:ok, context} ->
-        run_scenario_steps(scenario, context, exec)
+        run_scenario_steps(scenario, scenario_steps, context, exec)
     end
   end
 
-  defp run_scenario_steps(scenario, context, exec) do
+  defp run_scenario_steps(scenario, scenario_steps, context, exec) do
     with_after_hooks(exec, context, fn ->
-      case execute_steps(scenario.steps, context, exec, length(scenario.background_steps)) do
+      case execute_steps(scenario_steps, context, exec) do
         {:ok, context} ->
           context
 
         {:halted, status, reason, step, remaining, context} ->
           context
-          |> Map.put(:skipped_steps, remaining)
+          |> Map.put(:skipped_steps, Enum.map(remaining, & &1.step))
           |> halt_scenario(status, reason, {:step, step}, scenario)
       end
     end)
@@ -311,10 +322,9 @@ defmodule Cucumber.Runtime do
     Emitter.skip_unexecuted_steps(exec.msg, outcome)
 
     Cucumber.Hooks.run_after_hooks(
-      exec.hooks,
+      exec.test_case.after_hooks,
       Map.put(context, :cucumber_phase, :after_scenario),
-      exec.tags,
-      Emitter.hook_around(exec.msg, :after)
+      Emitter.hook_around(exec.msg)
     )
 
     case result do
@@ -350,17 +360,16 @@ defmodule Cucumber.Runtime do
     :erlang.raise(:error, error, stacktrace)
   end
 
-  # `id_offset` positions these steps within the message session's step id
-  # list (scenario steps come after the background's).
-  defp execute_steps(steps, context, exec, id_offset) do
-    steps
+  # Runs pickle steps in order until one halts; a halt returns the halting
+  # Gherkin step and the pickle steps that never ran.
+  defp execute_steps(pickle_steps, context, exec) do
+    pickle_steps
     |> Enum.with_index()
-    |> Enum.reduce_while({:ok, context}, fn {step, index}, {:ok, ctx} ->
-      test_step_id = Emitter.step_id(exec.msg, id_offset + index)
-
-      case do_execute_step(ctx, step, exec, test_step_id) do
+    |> Enum.reduce_while({:ok, context}, fn {pickle_step, index}, {:ok, ctx} ->
+      case do_execute_step(ctx, pickle_step, exec) do
         {:halted, status, reason, ctx} ->
-          {:halt, {:halted, status, reason, step, Enum.drop(steps, index + 1), ctx}}
+          {:halt,
+           {:halted, status, reason, pickle_step.step, Enum.drop(pickle_steps, index + 1), ctx}}
 
         ctx when is_map(ctx) ->
           {:cont, {:ok, ctx}}
@@ -383,30 +392,25 @@ defmodule Cucumber.Runtime do
   def execute_step(context, step, step_registry) do
     do_execute_step(
       context,
-      step,
-      %{
-        step_registry: step_registry,
-        hooks: [],
-        tags: [],
-        msg: nil
-      },
-      nil
+      TestCase.pickle_step(step, step_registry),
+      %{hooks: [], tags: [], msg: nil}
     )
   end
 
-  defp do_execute_step(context, step, exec, test_step_id) do
+  defp do_execute_step(context, %TestCase.PickleStep{step: step} = pickle_step, exec) do
     # Add step to history (ensure it exists first)
     context = Map.put_new(context, :step_history, [])
     context = update_in(context, [:step_history], &(&1 ++ [step]))
     context = Map.put(context, :cucumber_phase, :step)
 
     # Message bookkeeping for this step (nil when the sink is disabled)
-    msg = Emitter.step_message(exec.msg, test_step_id)
+    msg = Emitter.step_message(exec.msg, pickle_step)
     Emitter.step_started(msg)
     context = put_step_message_ref(context, msg)
 
-    # Find matching step definition
-    case StepRegistry.match(exec.step_registry, step.text) do
+    # The step was matched against the step registry when the test case
+    # was built
+    case pickle_step.match do
       {:ok, definition, args} ->
         # Prepare context with step arguments; :step is visible to step
         # hooks and the step body alike

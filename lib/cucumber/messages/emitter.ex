@@ -31,6 +31,7 @@ defmodule Cucumber.Messages.Emitter do
   alias Cucumber.Messages
   alias Cucumber.RunCoordinator
   alias Cucumber.StepRegistry
+  alias Cucumber.TestCase
 
   @doc """
   Builds the run's static envelopes and id maps and configures the
@@ -139,42 +140,26 @@ defmodule Cucumber.Messages.Emitter do
   end
 
   @doc false
-  # Opens a message session for one scenario: allocates ids for the test
-  # case and every test step (matched before/after scenario hooks, then the
-  # pickle's steps), emits the testCase envelope, and returns the session.
-  # Returns nil when the sink is disabled.
-  @spec open_test_case(map(), map()) :: map() | nil
-  def open_test_case(scenario, exec) do
+  # Opens a message session for one test case: allocates ids for the test
+  # case and every test step (keyed by the step's position), emits the
+  # testCase envelope, and returns the session. Returns nil when the sink
+  # is disabled.
+  @spec open_test_case(TestCase.t()) :: map() | nil
+  def open_test_case(%TestCase{} = test_case) do
     case RunCoordinator.message_context() do
       nil ->
         nil
 
       context ->
-        # The same resolved lists Cucumber.Hooks executes, so the
-        # pre-allocated ids line up positionally with the around callback
-        before_hooks = Cucumber.Hooks.before_scenario_hooks(exec.hooks, exec.tags)
-        after_hooks = Cucumber.Hooks.after_scenario_hooks(exec.hooks, exec.tags)
-
-        steps = scenario.background_steps ++ scenario.steps
-
-        pickle_step_ids =
-          Map.get(scenario, :background_step_ids, []) ++ Map.get(scenario, :step_ids, [])
-
-        total = length(before_hooks) + length(steps) + length(after_hooks)
-        [test_case_id | step_test_ids] = RunCoordinator.take_message_ids(total + 1)
-        {before_ids, rest} = Enum.split(step_test_ids, length(before_hooks))
-        {step_ids, after_ids} = Enum.split(rest, length(steps))
-
-        test_steps =
-          hook_test_steps(before_ids, before_hooks, context.hook_ids) ++
-            pickle_test_steps(step_ids, steps, pickle_step_ids, context, exec) ++
-            hook_test_steps(after_ids, after_hooks, context.hook_ids)
+        test_steps = TestCase.test_steps(test_case)
+        [test_case_id | step_ids] = RunCoordinator.take_message_ids(length(test_steps) + 1)
+        ids = test_steps |> Enum.map(& &1.position) |> Enum.zip(step_ids) |> Map.new()
 
         envelope =
           Messages.test_case(
             test_case_id,
-            Map.get(scenario, :pickle_id),
-            test_steps,
+            test_case.pickle_id,
+            Enum.map(test_steps, &test_step_envelope(&1, ids, context)),
             context.test_run_started_id
           )
 
@@ -183,40 +168,41 @@ defmodule Cucumber.Messages.Emitter do
         %{
           test_case_id: test_case_id,
           case_started_id: nil,
-          before_ids: before_ids,
-          step_ids: step_ids,
-          after_ids: after_ids
+          ids: ids,
+          # Before-hook and pickle steps that haven't run when the after
+          # hooks start are synthesized as skipped (see skip_unexecuted_steps/2)
+          skippable_ids:
+            Enum.map(
+              test_case.before_hooks ++ test_case.pickle_steps,
+              &Map.fetch!(ids, &1.position)
+            )
         }
     end
   end
 
-  defp hook_test_steps(ids, hooks, hook_ids) do
-    Enum.zip_with(ids, hooks, fn id, {_name, ref} ->
-      %{id: id, hookId: Map.get(hook_ids, ref)}
-    end)
+  defp test_step_envelope(%TestCase.HookStep{} = hook_step, ids, context) do
+    %{id: Map.fetch!(ids, hook_step.position), hookId: Map.get(context.hook_ids, hook_step.ref)}
   end
 
-  defp pickle_test_steps(ids, steps, pickle_step_ids, context, exec) do
-    [ids, steps, pickle_step_ids]
-    |> Enum.zip_with(fn [id, step, pickle_step_id] ->
-      definition_ids =
-        exec.step_registry
-        |> matching_definitions(step.text)
-        |> Enum.map(&Map.fetch!(context.step_definition_ids, &1.position))
-
-      %{id: id, pickleStepId: pickle_step_id, stepDefinitionIds: definition_ids}
-    end)
+  defp test_step_envelope(%TestCase.PickleStep{} = pickle_step, ids, context) do
+    %{
+      id: Map.fetch!(ids, pickle_step.position),
+      pickleStepId: pickle_step.pickle_step_id,
+      stepDefinitionIds:
+        Enum.map(
+          matched_definitions(pickle_step.match),
+          &Map.fetch!(context.step_definition_ids, &1.position)
+        )
+    }
   end
 
-  # Every definition the step text matches — one, none, or all of an
-  # ambiguous set (in definition order, so ids ascend)
-  defp matching_definitions(step_registry, step_text) do
-    case StepRegistry.match(step_registry, step_text) do
-      {:ok, definition, _args} -> [definition]
-      :undefined -> []
-      {:ambiguous, matches} -> Enum.map(matches, fn {definition, _args} -> definition end)
-    end
-  end
+  # Every definition the step matched — one, none, or all of an ambiguous
+  # set (in definition order, so ids ascend)
+  defp matched_definitions({:ok, definition, _args}), do: [definition]
+  defp matched_definitions(:undefined), do: []
+
+  defp matched_definitions({:ambiguous, matches}),
+    do: Enum.map(matches, fn {definition, _args} -> definition end)
 
   @doc false
   # Emits testCaseStarted for one attempt (0-based in the message, 1-based
@@ -254,32 +240,23 @@ defmodule Cucumber.Messages.Emitter do
   def skip_unexecuted_steps(nil, _outcome), do: :ok
 
   def skip_unexecuted_steps(session, outcome) do
-    RunCoordinator.skip_unfinished_steps(
-      session.case_started_id,
-      session.before_ids ++ session.step_ids,
-      outcome
-    )
+    RunCoordinator.skip_unfinished_steps(session.case_started_id, session.skippable_ids, outcome)
   end
 
   @doc false
-  # Builds the per-step message reference the runner threads into step
-  # execution: ids plus the monotonic start time for duration.
-  @spec step_message(map() | nil, String.t() | nil) :: map() | nil
-  def step_message(nil, _test_step_id), do: nil
-  def step_message(_session, nil), do: nil
+  # Builds the per-step message reference the runner threads into a test
+  # step's execution: ids plus the monotonic start time for duration.
+  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.PickleStep.t()) ::
+          map() | nil
+  def step_message(nil, _test_step), do: nil
 
-  def step_message(session, test_step_id) do
+  def step_message(session, test_step) do
     %{
       test_case_started_id: session.case_started_id,
-      test_step_id: test_step_id,
+      test_step_id: Map.fetch!(session.ids, test_step.position),
       started_at: System.monotonic_time(:nanosecond)
     }
   end
-
-  @doc false
-  @spec step_id(map() | nil, non_neg_integer()) :: String.t() | nil
-  def step_id(nil, _index), do: nil
-  def step_id(session, index), do: Enum.at(session.step_ids, index)
 
   @doc false
   @spec step_started(map() | nil) :: :ok
@@ -313,30 +290,18 @@ defmodule Cucumber.Messages.Emitter do
 
   @doc false
   # Builds the around-callback `Cucumber.Hooks` uses to bracket each
-  # scenario hook of the given kind (:before or :after) with
-  # testStepStarted/testStepFinished events, injecting the hook's own
-  # message reference so attachments recorded inside it land on the hook's
-  # test step. Returns nil (hooks then run unbracketed) when the session is
-  # nil.
-  @spec hook_around(map() | nil, :before | :after) :: Cucumber.Hooks.around() | nil
-  def hook_around(nil, _kind), do: nil
+  # scenario hook with testStepStarted/testStepFinished events, injecting
+  # the hook's own message reference so attachments recorded inside it land
+  # on the hook's test step. Returns nil (hooks then run unbracketed) when
+  # the session is nil.
+  @spec hook_around(map() | nil) :: Cucumber.Hooks.around() | nil
+  def hook_around(nil), do: nil
 
-  def hook_around(session, kind) do
-    ids =
-      case kind do
-        :before -> session.before_ids
-        :after -> session.after_ids
-      end
-
-    fn index, _name, hook_fun ->
-      case step_message(session, Enum.at(ids, index)) do
-        nil ->
-          hook_fun.(%{})
-
-        message ->
-          step_started(message)
-          run_bracketed_hook(message, hook_fun)
-      end
+  def hook_around(session) do
+    fn hook_step, hook_fun ->
+      message = step_message(session, hook_step)
+      step_started(message)
+      run_bracketed_hook(message, hook_fun)
     end
   end
 
