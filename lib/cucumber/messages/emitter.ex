@@ -173,7 +173,7 @@ defmodule Cucumber.Messages.Emitter do
           # hooks start are synthesized as skipped (see skip_unexecuted_steps/2)
           skippable_ids:
             Enum.map(
-              test_case.before_hooks ++ test_case.pickle_steps,
+              test_case.before_hooks ++ test_case.pickle_test_steps,
               &Map.fetch!(ids, &1.position)
             )
         }
@@ -184,13 +184,13 @@ defmodule Cucumber.Messages.Emitter do
     %{id: Map.fetch!(ids, hook_step.position), hookId: Map.get(context.hook_ids, hook_step.ref)}
   end
 
-  defp test_step_envelope(%TestCase.StepMatch{} = step_match, ids, context) do
+  defp test_step_envelope(%TestCase.PickleTestStep{} = pickle_test_step, ids, context) do
     %{
-      id: Map.fetch!(ids, step_match.position),
-      pickleStepId: step_match.pickle_step_id,
+      id: Map.fetch!(ids, pickle_test_step.position),
+      pickleStepId: pickle_test_step.pickle_step_id,
       stepDefinitionIds:
         Enum.map(
-          matched_definitions(step_match.match),
+          matched_definitions(pickle_test_step.match),
           &Map.fetch!(context.step_definition_ids, &1.position)
         )
     }
@@ -245,7 +245,7 @@ defmodule Cucumber.Messages.Emitter do
   @doc false
   # Builds the per-step message reference the runner threads into a test
   # step's execution: ids plus the monotonic start time for duration.
-  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.StepMatch.t()) ::
+  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.PickleTestStep.t()) ::
           map() | nil
   def step_message(nil, _test_step), do: nil
 

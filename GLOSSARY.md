@@ -37,5 +37,5 @@ A pickle prepared to run: its ordered test steps, with every pickle step already
 _Avoid_: plan, scenario spec (and don't confuse it with an ExUnit test module)
 
 **Test step**:
-One entry in a test case, either a hook step (a before or after scenario hook) or a step match (a pickle's step together with the step definitions it matches).
-_Avoid_: plan entry
+One entry in a test case, either a hook step (a before or after scenario hook) or a pickle test step (one of the pickle's steps together with the step definitions it matches).
+_Avoid_: plan entry, step match

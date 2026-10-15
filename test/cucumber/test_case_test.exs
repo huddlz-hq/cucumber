@@ -4,7 +4,7 @@ defmodule Cucumber.TestCaseTest do
   alias Cucumber.StepRegistry
   alias Cucumber.TestCase
   alias Cucumber.TestCase.HookStep
-  alias Cucumber.TestCase.StepMatch
+  alias Cucumber.TestCase.PickleTestStep
 
   defmodule Steps do
     use Cucumber.StepDefinition
@@ -135,14 +135,14 @@ defmodule Cucumber.TestCaseTest do
     test "keeps the pickle's steps in order, marking background steps", ctx do
       test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, [])
 
-      assert Enum.map(test_case.pickle_steps, &{&1.step.text, &1.background?}) == [
+      assert Enum.map(test_case.pickle_test_steps, &{&1.step.text, &1.background?}) == [
                {"the app is running", true},
                {"I have 3 apples", false},
                {"I have 3 cukes", false},
                {"nothing matches this", false}
              ]
 
-      assert Enum.map(test_case.pickle_steps, & &1.pickle_step_id) ==
+      assert Enum.map(test_case.pickle_test_steps, & &1.pickle_step_id) ==
                Enum.map(ctx.pickle.steps, & &1.id)
     end
 
@@ -150,11 +150,11 @@ defmodule Cucumber.TestCaseTest do
       test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, [])
 
       assert [
-               %StepMatch{match: {:ok, %{source: "the app is running"}}},
-               %StepMatch{match: {:ok, %{source: "I have {int} {word}"}}},
-               %StepMatch{match: {:ambiguous, [%{source: "I have {int} cukes"}, _]}},
-               %StepMatch{match: :undefined}
-             ] = test_case.pickle_steps
+               %PickleTestStep{match: {:ok, %{source: "the app is running"}}},
+               %PickleTestStep{match: {:ok, %{source: "I have {int} {word}"}}},
+               %PickleTestStep{match: {:ambiguous, [%{source: "I have {int} cukes"}, _]}},
+               %PickleTestStep{match: :undefined}
+             ] = test_case.pickle_test_steps
     end
 
     test "does not run parameter type transforms", ctx do
@@ -162,8 +162,8 @@ defmodule Cucumber.TestCaseTest do
 
       test_case = TestCase.new(ctx.scenario, registry, ctx.hooks, [])
 
-      assert [_, %StepMatch{match: {:ok, %{source: "I have {int} {exploding}"}}}, _, _] =
-               test_case.pickle_steps
+      assert [_, %PickleTestStep{match: {:ok, %{source: "I have {int} {exploding}"}}}, _, _] =
+               test_case.pickle_test_steps
     end
   end
 
@@ -174,7 +174,7 @@ defmodule Cucumber.TestCaseTest do
       assert Enum.map(TestCase.test_steps(test_case), & &1.position) == Enum.to_list(0..7)
 
       assert [%HookStep{position: 0}, %HookStep{position: 1}] = test_case.before_hooks
-      assert Enum.map(test_case.pickle_steps, & &1.position) == [2, 3, 4, 5]
+      assert Enum.map(test_case.pickle_test_steps, & &1.position) == [2, 3, 4, 5]
       assert [%HookStep{position: 6}, %HookStep{position: 7}] = test_case.after_hooks
     end
 

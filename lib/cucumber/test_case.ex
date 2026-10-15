@@ -12,7 +12,7 @@ defmodule Cucumber.TestCase do
   # user code and run only when the step does, on every attempt.
   #
   # Test steps carry a `position` numbering them in run order — before
-  # hooks, then pickle steps, then after hooks — which is the order of the
+  # hooks, then pickle test steps, then after hooks — which is the order of the
   # Cucumber Messages `testCase.testSteps`. The test case holds no message
   # ids; the emitter maps positions to ids.
 
@@ -31,10 +31,11 @@ defmodule Cucumber.TestCase do
           }
   end
 
-  defmodule StepMatch do
+  defmodule PickleTestStep do
     @moduledoc false
-    # One of the pickle's steps with the step definitions its text matches,
-    # as StepRegistry.resolve/2 returned them.
+    # The test step for one of the pickle's steps (a Cucumber Messages
+    # TestStep with a pickleStepId): the step with the step definitions its
+    # text matches, as StepRegistry.resolve/2 returned them.
     @enforce_keys [:position, :step, :pickle_step_id, :background?, :match]
     defstruct @enforce_keys
 
@@ -47,13 +48,13 @@ defmodule Cucumber.TestCase do
           }
   end
 
-  @enforce_keys [:pickle_id, :before_hooks, :pickle_steps, :after_hooks]
+  @enforce_keys [:pickle_id, :before_hooks, :pickle_test_steps, :after_hooks]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           pickle_id: String.t() | nil,
           before_hooks: [HookStep.t()],
-          pickle_steps: [StepMatch.t()],
+          pickle_test_steps: [PickleTestStep.t()],
           after_hooks: [HookStep.t()]
         }
 
@@ -67,13 +68,13 @@ defmodule Cucumber.TestCase do
     after_hooks = hooks |> Cucumber.Hooks.filter_hooks(:after_scenario, tags) |> Enum.reverse()
 
     {before_hooks, next} = hook_steps(before_hooks, 0)
-    {pickle_steps, next} = pickle_steps(scenario.pickle_steps, step_registry, next)
+    {pickle_test_steps, next} = pickle_test_steps(scenario.pickle_steps, step_registry, next)
     {after_hooks, _next} = hook_steps(after_hooks, next)
 
     %__MODULE__{
       pickle_id: Map.get(scenario, :pickle_id),
       before_hooks: before_hooks,
-      pickle_steps: pickle_steps,
+      pickle_test_steps: pickle_test_steps,
       after_hooks: after_hooks
     }
   end
@@ -81,9 +82,9 @@ defmodule Cucumber.TestCase do
   @doc false
   # Matches a single step outside any test case — the path
   # Cucumber.Runtime.execute_step/3 takes.
-  @spec step_match(Gherkin.Step.t(), StepRegistry.t()) :: StepMatch.t()
-  def step_match(step, step_registry) do
-    %StepMatch{
+  @spec pickle_test_step(Gherkin.Step.t(), StepRegistry.t()) :: PickleTestStep.t()
+  def pickle_test_step(step, step_registry) do
+    %PickleTestStep{
       position: 0,
       step: step,
       pickle_step_id: nil,
@@ -94,9 +95,9 @@ defmodule Cucumber.TestCase do
 
   @doc false
   # Every test step in run order.
-  @spec test_steps(t()) :: [HookStep.t() | StepMatch.t()]
+  @spec test_steps(t()) :: [HookStep.t() | PickleTestStep.t()]
   def test_steps(%__MODULE__{} = test_case) do
-    test_case.before_hooks ++ test_case.pickle_steps ++ test_case.after_hooks
+    test_case.before_hooks ++ test_case.pickle_test_steps ++ test_case.after_hooks
   end
 
   defp hook_steps(hooks, first_position) do
@@ -105,9 +106,9 @@ defmodule Cucumber.TestCase do
     end)
   end
 
-  defp pickle_steps(steps, step_registry, first_position) do
+  defp pickle_test_steps(steps, step_registry, first_position) do
     Enum.map_reduce(steps, first_position, fn %Gherkin.PickleStep{} = pickle_step, position ->
-      step = %StepMatch{
+      step = %PickleTestStep{
         position: position,
         step: pickle_step.step,
         pickle_step_id: pickle_step.id,
