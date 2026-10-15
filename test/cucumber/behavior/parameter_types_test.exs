@@ -103,6 +103,15 @@ defmodule Cucumber.ParameterTypesBehaviorTest do
         value
       end
     )
+
+    # Always raises
+    parameter_type(:explosive,
+      regexp: ~r/dynamite/,
+      transform: fn _value ->
+        Collector.record(:explosive_transform)
+        raise "explosive transform"
+      end
+    )
   end
 
   defmodule TimingHooks do
@@ -155,6 +164,17 @@ defmodule Cucumber.ParameterTypesBehaviorTest do
 
     step "handling {fragile} once", _context do
       Collector.record(:fragile_step)
+      :ok
+    end
+
+    # Both match "dynamite detonates"
+    step "{explosive} detonates", _context do
+      Collector.record(:explosive_step)
+      :ok
+    end
+
+    step "dynamite detonates", _context do
+      Collector.record(:literal_step)
       :ok
     end
   end
@@ -259,6 +279,20 @@ defmodule Cucumber.ParameterTypesBehaviorTest do
                {:used, "thing1"},
                :flaky_step
              ]
+    end
+
+    test "an ambiguous step fails as ambiguous without running its transforms" do
+      run =
+        run_timing("""
+        Feature: transform timing
+          Scenario: ambiguous
+            Given dynamite detonates
+        """)
+
+      assert %{total: 1, failures: 1} = run
+      assert run.output =~ "Cucumber.AmbiguousStepError"
+      refute run.output =~ "explosive transform"
+      assert run.events == [:before_hook]
     end
 
     @tag :tmp_dir
