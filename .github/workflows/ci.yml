@@ -51,33 +51,3 @@ jobs:
         run: mix run scripts/check_cck.exs
         env:
           GH_TOKEN: ${{ github.token }}
-
-  resolve-dependencies:
-    name: Generate dependency lockfile
-    if: github.event_name == 'pull_request' && github.head_ref == 'chore/dependencies-2026-10-19'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: erlef/setup-beam@v1.24.1
-        with:
-          elixir-version: "1.20.4"
-          otp-version: "29.1.2"
-      - name: Resolve all dependencies with Mix
-        run: |
-          mix deps.update --all
-          git diff --check
-          git diff -- mix.lock
-        env:
-          MIX_ENV: dev
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: resolved-mix-lock
-          path: mix.lock
-          if-no-files-found: error
-          retention-days: 1
