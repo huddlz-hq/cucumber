@@ -33,9 +33,14 @@ defmodule Cucumber.Messages.EmitterTest do
       # Called through apply/3 so the deprecation doesn't warn at compile time
       # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert apply(Emitter, :configure, [path, [], registry, [], %{"ignored" => %{}}, 5]) == :ok
+      RunCoordinator.flush_messages(%{failures: 0})
 
-      assert %{step_definition_ids: ids} = RunCoordinator.message_context()
-      assert ids == %{0 => "5", 1 => "6"}
+      step_definition_ids =
+        for line <- path |> File.read!() |> String.split("\n", trim: true),
+            %{"stepDefinition" => %{"id" => id}} <- [JSON.decode!(line)],
+            do: id
+
+      assert step_definition_ids == ["5", "6"]
     end
   end
 end

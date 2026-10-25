@@ -46,7 +46,7 @@ defmodule Cucumber.Compiler do
   # set by discovery) into test modules, threading the pickle id sequence so
   # ids are unique across the whole run — the messages stream references
   # them run-wide. When `messages_path` is set, builds the run's static
-  # envelopes and enables the coordinator's message sink; the runner and the
+  # envelopes and turns on the coordinator's message recorder; the runner and the
   # after_suite flush do the rest. Shared by compile_features!/1 and
   # Cucumber.BehaviorCase.
   @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::

@@ -12,13 +12,12 @@ defmodule Cucumber.Messages.Emitter do
       `Cucumber.compile_features!/1` when
       `config :cucumber, messages: path` is set.
     * **Run-time sessions** — the scenario runner opens a session per
-      scenario (`open_test_case/1` emits the `testCase` envelope),
-      starts one attempt at a time (`start_attempt/2` emits
-      `testCaseStarted`), brackets steps and scenario hooks with
-      started/finished events, and closes each attempt
-      (`close_test_case/2`).
+      scenario, starts one attempt at a time, brackets steps and scenario
+      hooks with started/finished events, and closes each attempt. Each
+      becomes an event recorded through the coordinator, which decides
+      what the stream says.
 
-  Every session function is nil-safe: when the sink is disabled the session
+  Every session function is nil-safe: when messages are off the session
   is nil and all of this is a no-op, so the runner carries no conditionals.
 
   > #### Deprecated {: .warning}
@@ -140,106 +139,54 @@ defmodule Cucumber.Messages.Emitter do
   end
 
   @doc false
-  # Opens a message session for one test case: allocates ids for the test
-  # case and every test step (keyed by the step's position), emits the
-  # testCase envelope, and returns the session. Returns nil when the sink
-  # is disabled.
+  # Opens a message session for one test case: the recorder allocates ids
+  # for the test case and every test step and emits the testCase envelope.
+  # Returns nil when messages are off, so a run without them makes no
+  # further coordinator calls.
   @spec open_test_case(TestCase.t()) :: map() | nil
   def open_test_case(%TestCase{} = test_case) do
-    case RunCoordinator.message_context() do
+    case RunCoordinator.record_message({:open_test_case, test_case}) do
       nil ->
         nil
 
-      context ->
-        test_steps = TestCase.test_steps(test_case)
-        [test_case_id | step_ids] = RunCoordinator.take_message_ids(length(test_steps) + 1)
-        ids = test_steps |> Enum.map(& &1.position) |> Enum.zip(step_ids) |> Map.new()
-
-        envelope =
-          Messages.test_case(
-            test_case_id,
-            test_case.pickle_id,
-            Enum.map(test_steps, &test_step_envelope(&1, ids, context)),
-            context.test_run_started_id
-          )
-
-        RunCoordinator.emit_runtime([envelope])
-
-        %{
-          test_case_id: test_case_id,
-          case_started_id: nil,
-          ids: ids,
-          # Before-hook and pickle steps that haven't run when the after
-          # hooks start are synthesized as skipped (see skip_unexecuted_steps/2)
-          skippable_ids:
-            Enum.map(
-              test_case.before_hooks ++ test_case.pickle_test_steps,
-              &Map.fetch!(ids, &1.position)
-            )
-        }
+      %{test_case_id: test_case_id, step_ids: step_ids} ->
+        %{test_case_id: test_case_id, case_started_id: nil, step_ids: step_ids}
     end
   end
 
-  defp test_step_envelope(%TestCase.HookStep{} = hook_step, ids, context) do
-    %{id: Map.fetch!(ids, hook_step.position), hookId: Map.get(context.hook_ids, hook_step.ref)}
-  end
-
-  defp test_step_envelope(%TestCase.PickleTestStep{} = pickle_test_step, ids, context) do
-    %{
-      id: Map.fetch!(ids, pickle_test_step.position),
-      pickleStepId: pickle_test_step.pickle_step_id,
-      stepDefinitionIds:
-        Enum.map(
-          matched_definitions(pickle_test_step.match),
-          &Map.fetch!(context.step_definition_ids, &1.position)
-        )
-    }
-  end
-
-  # Every definition the step matched — one, none, or all of an ambiguous
-  # set (in definition order, so ids ascend)
-  defp matched_definitions({:ok, definition}), do: [definition]
-  defp matched_definitions(:undefined), do: []
-
-  defp matched_definitions({:ambiguous, definitions}), do: definitions
-
   @doc false
-  # Emits testCaseStarted for one attempt (0-based in the message, 1-based
-  # in the runner) and stores its id in the session.
+  # Starts one attempt (1-based) and stores its testCaseStarted id in the
+  # session.
   @spec start_attempt(map() | nil, pos_integer()) :: map() | nil
   def start_attempt(nil, _attempt), do: nil
 
   def start_attempt(session, attempt) do
-    [id] = RunCoordinator.take_message_ids(1)
-    envelope = Messages.test_case_started(id, session.test_case_id, attempt - 1, now())
-    RunCoordinator.emit_runtime([envelope])
+    id = RunCoordinator.record_message({:start_attempt, session.test_case_id, attempt})
     %{session | case_started_id: id}
   end
 
   @doc false
-  # Closes the current attempt: any step still unexecuted is synthesized as
-  # SKIPPED and testCaseFinished is emitted (with willBeRetried when a retry
-  # follows).
+  # Closes the current attempt (with willBeRetried when a retry follows);
+  # steps that never ran are reported first.
   @spec close_test_case(map() | nil, boolean()) :: :ok
   def close_test_case(nil, _will_be_retried), do: :ok
 
   def close_test_case(session, will_be_retried) do
-    RunCoordinator.finish_test_case(session.case_started_id, :skipped, will_be_retried)
+    RunCoordinator.record_message({:close_attempt, session.case_started_id, will_be_retried})
+    :ok
   end
 
   @doc false
-  # Synthesizes skip events for this attempt's unexecuted before-hook and
-  # pickle steps. The runner calls this right before the after-scenario
-  # hooks run, so skipped pickle steps precede the after-hook events in the
-  # stream (reference ordering); the after-hook steps themselves are
-  # excluded — their real events follow. `outcome` is how the scenario
-  # stopped: after a `:failedish` stop, unmatched steps report
-  # UNDEFINED/AMBIGUOUS instead of SKIPPED (CCK failedish semantics).
+  # Reports this attempt's before-hook and pickle steps that never ran.
+  # The runner calls this right before the after-scenario hooks, so they
+  # precede the after-hook events in the stream. `outcome` is how the
+  # scenario stopped: `:skipped` or `:failedish`.
   @spec skip_unexecuted_steps(map() | nil, :skipped | :failedish) :: :ok
   def skip_unexecuted_steps(nil, _outcome), do: :ok
 
   def skip_unexecuted_steps(session, outcome) do
-    RunCoordinator.skip_unfinished_steps(session.case_started_id, session.skippable_ids, outcome)
+    RunCoordinator.record_message({:skip_unexecuted, session.case_started_id, outcome})
+    :ok
   end
 
   @doc false
@@ -252,7 +199,7 @@ defmodule Cucumber.Messages.Emitter do
   def step_message(session, test_step) do
     %{
       test_case_started_id: session.case_started_id,
-      test_step_id: Map.fetch!(session.ids, test_step.position),
+      test_step_id: Map.fetch!(session.step_ids, test_step.position),
       started_at: System.monotonic_time(:nanosecond)
     }
   end
@@ -262,9 +209,11 @@ defmodule Cucumber.Messages.Emitter do
   def step_started(nil), do: :ok
 
   def step_started(message) do
-    RunCoordinator.emit_runtime([
-      Messages.test_step_started(message.test_case_started_id, message.test_step_id, now())
-    ])
+    RunCoordinator.record_message(
+      {:step_started, message.test_case_started_id, message.test_step_id}
+    )
+
+    :ok
   end
 
   @doc false
@@ -275,16 +224,13 @@ defmodule Cucumber.Messages.Emitter do
 
   def step_finished(message, status, error_message) do
     duration = System.monotonic_time(:nanosecond) - message.started_at
-    result = Messages.test_step_result(status, duration, error_message)
 
-    RunCoordinator.emit_runtime([
-      Messages.test_step_finished(
-        message.test_case_started_id,
-        message.test_step_id,
-        result,
-        now()
-      )
-    ])
+    RunCoordinator.record_message(
+      {:step_finished, message.test_case_started_id, message.test_step_id, status, duration,
+       error_message}
+    )
+
+    :ok
   end
 
   @doc false
@@ -333,6 +279,4 @@ defmodule Cucumber.Messages.Emitter do
   defp hook_result({:pending, message}) when is_binary(message), do: {:pending, message}
   defp hook_result({:skipped, reason}) when is_binary(reason), do: {:skipped, reason}
   defp hook_result(_result), do: {:passed, nil}
-
-  defp now, do: Messages.timestamp(System.system_time(:nanosecond))
 end

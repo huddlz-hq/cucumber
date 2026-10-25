@@ -112,7 +112,7 @@ defmodule Cucumber.Runtime do
     # raised per attempt in run_single_attempt/4.
     exec = Map.put(exec, :before_all, Cucumber.RunCoordinator.before_all_context(hooks))
 
-    # Cucumber Messages session (nil unless the message sink is enabled):
+    # Cucumber Messages session (nil unless messages are on):
     # emits the testCase envelope now, per-attempt/per-step events later
     exec = Map.put(exec, :msg, Emitter.open_test_case(test_case))
 
@@ -408,7 +408,7 @@ defmodule Cucumber.Runtime do
     context = update_in(context, [:step_history], &(&1 ++ [step]))
     context = Map.put(context, :cucumber_phase, :step)
 
-    # Message bookkeeping for this step (nil when the sink is disabled)
+    # Message bookkeeping for this step (nil when messages are off)
     msg = Emitter.step_message(exec.msg, pickle_test_step)
     Emitter.step_started(msg)
     context = put_step_message_ref(context, msg)
