@@ -46,6 +46,7 @@ defmodule Cucumber.Messages.Recorder do
             next_id: 0,
             step_definition_ids: %{},
             hook_ids: %{},
+            parameter_types: MapSet.new(),
             run_started_id: nil,
             test_cases: %{},
             attempts: %{},
@@ -53,26 +54,78 @@ defmodule Cucumber.Messages.Recorder do
 
   @opaque t :: %__MODULE__{}
 
+  @typedoc false
+  # One compile_features!/1 call's static envelopes. Step definitions are
+  # keyed by their step function, hooks by their ref and parameter types by
+  # name, so a second call in the run can't repeat the first's.
+  @type static :: %{
+          meta: Messages.envelope(),
+          features: [Messages.envelope()],
+          step_definitions: [{{module(), atom()}, Messages.envelope()}],
+          hooks: [{{module(), atom()}, Messages.envelope()}],
+          parameter_types: [{String.t(), Messages.envelope()}],
+          next_id: non_neg_integer()
+        }
+
   @doc false
   # The recorder for a run with messages off.
   @spec disabled() :: t()
   def disabled, do: %__MODULE__{}
 
   @doc false
-  # A recorder for a run with messages on. `static_envelopes` (meta,
-  # sources, pickles, definitions...) open the stream in the given order;
-  # ids continue from `next_id`. Run-time envelopes reference step
-  # definitions by `step_definition_ids` (definition position => id) and
-  # hooks by `hook_ids` (hook ref => id).
-  @spec new([Messages.envelope()], non_neg_integer(), map(), map()) :: t()
-  def new(static_envelopes, next_id, step_definition_ids, hook_ids) do
-    %__MODULE__{
-      enabled: true,
-      envelopes: Enum.reverse(static_envelopes),
-      next_id: next_id,
-      step_definition_ids: step_definition_ids,
-      hook_ids: hook_ids
+  # An empty recorder for a run with messages on.
+  @spec new() :: t()
+  def new, do: %__MODULE__{enabled: true}
+
+  @doc false
+  # Takes `n` run-unique ids for a caller to assign itself (pickles, step
+  # definitions...), returning the first.
+  @spec reserve_ids(t(), non_neg_integer()) :: {non_neg_integer(), t()}
+  def reserve_ids(recorder, n) do
+    {recorder.next_id, %{recorder | next_id: recorder.next_id + n}}
+  end
+
+  @doc false
+  # Adds one compile_features!/1 call's static envelopes: its sources,
+  # documents and pickles, then the step definitions, hooks and parameter
+  # types the stream doesn't have yet. The meta envelope opens the stream
+  # once. Ids continue after `static.next_id`. A later call's envelopes
+  # land after testRunStarted when scenarios are already running.
+  @spec add_static(t(), static()) :: t()
+  def add_static(recorder, static) do
+    step_definitions =
+      new_entries(static.step_definitions, Map.keys(recorder.step_definition_ids))
+
+    hooks = new_entries(static.hooks, Map.keys(recorder.hook_ids))
+    parameter_types = new_entries(static.parameter_types, recorder.parameter_types)
+
+    recorder =
+      if recorder.envelopes == [], do: append(recorder, [static.meta]), else: recorder
+
+    recorder =
+      append(
+        recorder,
+        static.features ++ Enum.map(step_definitions ++ hooks ++ parameter_types, &elem(&1, 1))
+      )
+
+    %{
+      recorder
+      | next_id: max(recorder.next_id, static.next_id),
+        step_definition_ids:
+          Enum.into(step_definitions, recorder.step_definition_ids, fn {key, envelope} ->
+            {key, envelope.stepDefinition.id}
+          end),
+        hook_ids:
+          Enum.into(hooks, recorder.hook_ids, fn {ref, envelope} -> {ref, envelope.hook.id} end),
+        parameter_types:
+          Enum.into(parameter_types, recorder.parameter_types, fn {name, _envelope} -> name end)
     }
+  end
+
+  # The entries whose key isn't among `known`
+  defp new_entries(entries, known) do
+    known = MapSet.new(known)
+    Enum.reject(entries, fn {key, _envelope} -> MapSet.member?(known, key) end)
   end
 
   @doc false
@@ -251,7 +304,7 @@ defmodule Cucumber.Messages.Recorder do
       stepDefinitionIds:
         Enum.map(
           matched_definitions(test_step.match),
-          &Map.fetch!(recorder.step_definition_ids, &1.position)
+          &Map.fetch!(recorder.step_definition_ids, {&1.module, &1.function})
         )
     }
   end
