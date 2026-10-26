@@ -190,11 +190,16 @@ defmodule Cucumber.RetryTest do
             Scenario: flaky
               Given a step that passes the second time
           """,
+          file: "test/fixtures/generated/tagged_retry.feature",
           steps: [Steps]
         )
 
       assert %{total: 1, failures: 0, passed: 1} = run
       assert count(run.events, :second_time) == 2
+
+      # The flake notice names the scenario, its location, and the attempt
+      assert run.output =~
+               ~s{Cucumber: retrying scenario "flaky" (test/fixtures/generated/tagged_retry.feature:3) — attempt 1 of 2 failed}
     end
 
     test "a feature-level @retry-n tag applies to its scenarios" do
