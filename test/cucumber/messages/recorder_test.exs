@@ -15,12 +15,21 @@ defmodule Cucumber.Messages.RecorderTest do
   # to "16" its test steps by position, and "17" the first attempt.
   setup do
     recorder =
-      Recorder.new(
-        [%{meta: %{}}],
-        10,
-        %{0 => "def-0", 1 => "def-1"},
-        %{@before_hook => "hook-before", @after_hook => "hook-after", @run_hook => "hook-run"}
-      )
+      Recorder.add_static(Recorder.new(), %{
+        meta: %{meta: %{}},
+        features: [],
+        step_definitions: [
+          {{__MODULE__, :step_0}, %{stepDefinition: %{id: "def-0"}}},
+          {{__MODULE__, :step_1}, %{stepDefinition: %{id: "def-1"}}}
+        ],
+        hooks: [
+          {@before_hook, %{hook: %{id: "hook-before"}}},
+          {@after_hook, %{hook: %{id: "hook-after"}}},
+          {@run_hook, %{hook: %{id: "hook-run"}}}
+        ],
+        parameter_types: [],
+        next_id: 10
+      })
 
     %{recorder: recorder}
   end
@@ -56,7 +65,7 @@ defmodule Cucumber.Messages.RecorderTest do
       kind: :expression,
       source: "step",
       module: __MODULE__,
-      function: :step,
+      function: :"step_#{position}",
       file: "steps.exs",
       line: position + 1,
       matcher: nil
@@ -106,7 +115,17 @@ defmodule Cucumber.Messages.RecorderTest do
       {_replies, recorder} =
         record(recorder, [{:run_hook_started, @run_hook}, {:open_test_case, test_case()}])
 
-      assert [%{meta: %{}}, %{testRunStarted: %{id: "10"}} | rest] = Recorder.envelopes(recorder)
+      assert [
+               %{meta: %{}},
+               %{stepDefinition: %{id: "def-0"}},
+               %{stepDefinition: %{id: "def-1"}},
+               %{hook: %{id: "hook-before"}},
+               %{hook: %{id: "hook-after"}},
+               %{hook: %{id: "hook-run"}},
+               %{testRunStarted: %{id: "10"}}
+               | rest
+             ] = Recorder.envelopes(recorder)
+
       refute Enum.any?(rest, &Map.has_key?(&1, :testRunStarted))
     end
 
@@ -115,9 +134,74 @@ defmodule Cucumber.Messages.RecorderTest do
 
       lines = recorder |> Recorder.to_ndjson() |> IO.iodata_to_binary() |> String.split("\n")
 
-      assert [~s({"meta":{}}), started, test_case, ""] = lines
-      assert %{"testRunStarted" => %{"id" => "10"}} = JSON.decode!(started)
-      assert %{"testCase" => %{"id" => "11"}} = JSON.decode!(test_case)
+      assert length(lines) == length(Recorder.envelopes(recorder)) + 1
+      assert List.last(lines) == ""
+      assert ~s({"meta":{}}) == hd(lines)
+      assert %{"testCase" => %{"id" => "11"}} = lines |> Enum.at(-2) |> JSON.decode!()
+    end
+  end
+
+  describe "add_static/2" do
+    test "a second call adds its features and only the definitions, hooks and parameter types the stream lacks",
+         %{recorder: recorder} do
+      recorder =
+        Recorder.add_static(recorder, %{
+          meta: %{meta: %{}},
+          features: [%{source: %{uri: "browser.feature"}}],
+          step_definitions: [
+            {{__MODULE__, :step_1}, %{stepDefinition: %{id: "def-1-again"}}},
+            {{__MODULE__, :step_2}, %{stepDefinition: %{id: "def-2"}}}
+          ],
+          hooks: [{@run_hook, %{hook: %{id: "hook-run-again"}}}],
+          parameter_types: [{"color", %{parameterType: %{id: "color"}}}],
+          next_id: 5
+        })
+
+      new_envelopes = recorder |> Recorder.envelopes() |> Enum.drop(6)
+
+      assert new_envelopes == [
+               %{source: %{uri: "browser.feature"}},
+               %{stepDefinition: %{id: "def-2"}},
+               %{parameterType: %{id: "color"}}
+             ]
+
+      assert [%{meta: %{}}] = for(%{meta: _} = meta <- Recorder.envelopes(recorder), do: meta)
+
+      # Ids continue from the first call's: next_id never moves back
+      {[%{test_case_id: "11"}], _recorder} = record(recorder, [{:open_test_case, test_case()}])
+    end
+
+    test "test cases reference definitions from either call by step function", %{
+      recorder: recorder
+    } do
+      recorder =
+        Recorder.add_static(recorder, %{
+          meta: %{meta: %{}},
+          features: [],
+          step_definitions: [{{__MODULE__, :step_2}, %{stepDefinition: %{id: "def-2"}}}],
+          hooks: [],
+          parameter_types: [],
+          next_id: 10
+        })
+
+      test_case = %{test_case() | pickle_test_steps: [pickle_test_step(1, {:ok, definition(2)})]}
+      {_replies, recorder} = record(recorder, [{:open_test_case, test_case}])
+
+      assert [%{testSteps: [_before, %{stepDefinitionIds: ["def-2"]}, _after]}] =
+               payloads(recorder, :testCase)
+    end
+  end
+
+  describe "reserve_ids/2" do
+    test "takes a block of run-unique ids that later allocation skips", %{recorder: recorder} do
+      {first, recorder} = Recorder.reserve_ids(recorder, 25)
+      assert first == 10
+
+      {[%{test_case_id: test_case_id}], _recorder} =
+        record(recorder, [{:open_test_case, test_case()}])
+
+      # 35 is testRunStarted
+      assert test_case_id == "36"
     end
   end
 
