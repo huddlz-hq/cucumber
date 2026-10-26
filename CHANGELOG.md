@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The Cucumber Messages stream is built by a pure message recorder that `Cucumber.RunCoordinator` holds. The stream is unchanged. The undocumented (`@doc false`) `Cucumber.RunCoordinator.record_message/1` replaces `message_context/0`, `take_message_ids/1`, `emit_runtime/1`, `finish_test_case/3` and `skip_unfinished_steps/3`.
+
 ## v1.1.1 (2026-10-25)
 
 ### Fixed

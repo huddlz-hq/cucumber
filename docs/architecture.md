@@ -132,11 +132,13 @@ Runtime.run_scenario(context, ...)
 
 ### RunCoordinator
 
-A GenServer holding run-wide state: `before_all` once-guards and their shared context, attachments, retry bookkeeping, and the ordered Cucumber Messages sink. It serializes run-level effects so `@async` features stay safe.
+A GenServer holding run-wide state: `before_all` once-guards and their shared context, attachments, retry bookkeeping, and the run's Cucumber Messages recorder. It serializes run-level effects so `@async` features stay safe.
 
 ### Messages
 
 With `config :cucumber, messages: "path.ndjson"`, the run emits the standard [Cucumber Messages](https://github.com/cucumber/messages) stream — source, gherkinDocument, pickles, and testCase/testStep lifecycle events — as NDJSON, verified against the reference implementation by the Cucumber Compatibility Kit approval suite in this repo.
+
+The stream is built by a pure message recorder (`lib/cucumber/messages/recorder.ex`): run-time events go in (a test case opened, an attempt started, a step finished, a run hook finished, the run ended) and envelopes come out. It owns message ids, the status of steps that never ran, closing crashed test cases as UNKNOWN, and NDJSON encoding, and is tested by feeding it event sequences. `RunCoordinator` holds it and feeds it events in order; `Messages.Emitter` builds the run's static envelopes and turns the runner's progress into events.
 
 ### StepDefinition Macro
 

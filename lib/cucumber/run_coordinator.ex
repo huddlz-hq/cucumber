@@ -23,23 +23,25 @@ defmodule Cucumber.RunCoordinator do
     * **Attachments** — `record_attachment/2` collects
       `Cucumber.Attachment` structs (see `Cucumber.attach/4`) in run order;
       `attachments/0` returns them.
-    * **Cucumber Messages sink** — when `config :cucumber, messages: path`
-      is set, `Cucumber.Messages.Emitter` configures the sink with the
-      run's static envelopes and id maps (`configure_messages/1`); the
-      runner then appends run-time envelopes in order (`emit_runtime/1`,
-      `take_message_ids/1`, `finish_test_case/3`), and the `after_suite`
-      callback flushes the NDJSON file (`flush_messages/1`), reconciling
-      test cases the runner never finished (e.g. a killed test process).
-      Serializing emission through this process is what keeps the stream
-      ordered under `@async` features. Note that `ExUnit.after_suite/1`
-      callbacks fire on *every* `ExUnit.run/1` — the sink flushes (and
-      disables itself) when the first run in the VM completes, so a project
-      that invokes a nested `ExUnit.run/1` mid-suite with the sink enabled
-      gets the stream truncated at that point (`Cucumber.BehaviorCase`
-      relies on exactly this per-run firing to capture streams in tests).
+    * **Cucumber Messages** — when `config :cucumber, messages: path` is
+      set, `Cucumber.Messages.Emitter` hands the coordinator the run's
+      static envelopes (`configure_messages/1`), and the runner reports
+      each run-time event as it happens (`record_message/1`). The
+      coordinator holds the stream in a message recorder
+      (`lib/cucumber/messages/recorder.ex`) and feeds it one event at a time, which is what keeps the stream ordered
+      under `@async` features. The `after_suite` callback writes the NDJSON
+      file (`flush_messages/1`). Note that `ExUnit.after_suite/1`
+      callbacks fire on *every* `ExUnit.run/1` — the stream is written
+      (and messages turn off) when the first run in the VM completes, so a
+      project that invokes a nested `ExUnit.run/1` mid-suite with messages
+      enabled gets the stream truncated at that point
+      (`Cucumber.BehaviorCase` relies on exactly this per-run firing to
+      capture streams in tests).
   """
 
   use GenServer
+
+  alias Cucumber.Messages.Recorder
 
   @doc """
   Starts the coordinator for a new run, or resets it if already running.
@@ -112,8 +114,8 @@ defmodule Cucumber.RunCoordinator do
   # Records an attachment against the current run. Synchronous so that an
   # attachment recorded right before a step failure is reliably visible to
   # the failure-output formatting that follows. `message_ref` carries the
-  # current `:test_case_started_id`/`:test_step_id` (or nil) so the sink can
-  # emit an `attachment` envelope in stream order.
+  # current `:test_case_started_id`/`:test_step_id` (or nil) so the message
+  # stream gets an `attachment` envelope in order.
   @spec record_attachment(Cucumber.Attachment.t(), map() | nil) :: :ok
   def record_attachment(%Cucumber.Attachment{} = attachment, message_ref \\ nil) do
     ensure_process()
@@ -121,10 +123,10 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Enables the message sink for this run: `config` carries the output
-  # `:path`, the static `:envelopes` (already in emission order), the
-  # `:next_id` to continue id allocation from, and the `:step_definition_ids`
-  # / `:hook_ids` maps the runner uses to reference static envelopes.
+  # Turns messages on for this run: `config` carries the output `:path`,
+  # the static `:envelopes` (already in emission order), the `:next_id` to
+  # continue id allocation from, and the `:step_definition_ids` /
+  # `:hook_ids` maps run-time envelopes reference.
   @spec configure_messages(map()) :: :ok
   def configure_messages(config) do
     ensure_process()
@@ -132,81 +134,19 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Returns what the runner needs to build a test case — the id maps and the
-  # run's `testRunStarted` id — or nil when the sink is disabled. The first
-  # call emits the `testRunStarted` envelope (after all static envelopes,
-  # before any test case).
-  @spec message_context() :: map() | nil
-  def message_context do
+  # Records one run-time message event (see Cucumber.Messages.Recorder)
+  # and returns the recorder's reply — nil when messages are off or the
+  # coordinator isn't running.
+  @spec record_message(Recorder.event()) :: term()
+  def record_message(event) do
     if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, :message_context)
+      GenServer.call(__MODULE__, {:record_message, event})
     end
   end
 
   @doc false
-  # Allocates `n` run-unique message ids (sequential strings), or nil when
-  # the sink is disabled.
-  @spec take_message_ids(pos_integer()) :: [String.t()] | nil
-  def take_message_ids(n) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, {:take_message_ids, n})
-    end
-  end
-
-  @doc false
-  # Appends run-time envelopes to the stream in order. The sink tracks
-  # testCase/testCaseStarted/testStep* envelopes so `finish_test_case/3`
-  # and flush-time reconciliation know which planned steps never finished.
-  @spec emit_runtime([Cucumber.Messages.envelope()]) :: :ok
-  def emit_runtime(envelopes) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, {:emit_runtime, envelopes})
-    end
-
-    :ok
-  end
-
-  @doc false
-  # Closes a test case: synthesizes testStepStarted/testStepFinished (with
-  # `skip_status`, zero duration) for planned steps that never ran, then
-  # emits testCaseFinished. Idempotent — a second call for the same id is a
-  # no-op, so flush-time reconciliation can't double-close.
-  @spec finish_test_case(String.t(), Cucumber.Messages.status(), boolean()) :: :ok
-  def finish_test_case(test_case_started_id, skip_status, will_be_retried) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(
-        __MODULE__,
-        {:finish_test_case, test_case_started_id, skip_status, will_be_retried}
-      )
-    end
-
-    :ok
-  end
-
-  @doc false
-  # Synthesizes started/finished pairs for the given planned step ids of an
-  # open test case that never ran. The runner calls this before the
-  # after-scenario hooks, so skipped pickle steps precede the after-hook
-  # events in the stream. After a `:failedish` stop, steps that match no
-  # definition (or several) report UNDEFINED/AMBIGUOUS; after a `:skipped`
-  # stop everything is SKIPPED.
-  @spec skip_unfinished_steps(String.t(), [String.t()], :skipped | :failedish) :: :ok
-  def skip_unfinished_steps(test_case_started_id, step_ids, outcome) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(
-        __MODULE__,
-        {:skip_unfinished_steps, test_case_started_id, step_ids, outcome}
-      )
-    end
-
-    :ok
-  end
-
-  @doc false
-  # Flushes the message stream to the configured NDJSON path: closes any
-  # test case the runner never finished (status UNKNOWN), appends
-  # testRunFinished, writes the file, and disables the sink. No-op when the
-  # sink is not configured.
+  # Ends the message stream and writes it to the configured NDJSON path,
+  # then turns messages off. No-op when messages are off.
   @spec flush_messages(map()) :: :ok
   def flush_messages(suite_result) do
     if Process.whereis(__MODULE__) do
@@ -308,20 +248,13 @@ defmodule Cucumber.RunCoordinator do
     do: Map.put(context, :cucumber_message_ref, %{test_run_hook_started_id: started_id})
 
   # Run-level hooks run in a caller's process (never inside the coordinator),
-  # so their testRunHook envelopes go through GenServer calls.
-  defp run_hook_started_call(ref) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, {:run_hook_started, ref})
-    end
-  end
+  # so their testRunHook events go through GenServer calls.
+  defp run_hook_started_call(ref), do: record_message({:run_hook_started, ref})
 
   defp run_hook_finished_call(nil, _status, _duration), do: :ok
 
   defp run_hook_finished_call(started_id, status, duration) do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, {:run_hook_finished, started_id, status, duration})
-    end
-
+    record_message({:run_hook_finished, started_id, status, duration})
     :ok
   end
 
@@ -396,115 +329,29 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call({:record_attachment, attachment, message_ref}, _from, state) do
-    state =
-      if state.messages do
-        append_envelopes(state, [Cucumber.Messages.attachment(attachment, message_ref)])
-      else
-        state
-      end
-
+    {_reply, state} = record(state, {:attachment, attachment, message_ref})
     {:reply, :ok, %{state | attachments: [attachment | state.attachments]}}
   end
 
   def handle_call({:configure_messages, config}, _from, state) do
-    messages = %{
-      path: config.path,
-      envelopes: Enum.reverse(config.envelopes),
-      next_id: config.next_id,
-      step_definition_ids: config.step_definition_ids,
-      hook_ids: config.hook_ids,
-      run_started_id: nil,
-      cases: %{},
-      open_cases: %{},
-      run_hook_failed: false
-    }
+    recorder =
+      Recorder.new(config.envelopes, config.next_id, config.step_definition_ids, config.hook_ids)
 
-    {:reply, :ok, %{state | messages: messages}}
+    {:reply, :ok, %{state | recorder: recorder, messages_path: config.path}}
   end
 
-  def handle_call(:message_context, _from, %{messages: nil} = state) do
-    {:reply, nil, state}
-  end
-
-  def handle_call(:message_context, _from, state) do
-    state = ensure_run_started(state)
-    messages = state.messages
-
-    context = %{
-      step_definition_ids: messages.step_definition_ids,
-      hook_ids: messages.hook_ids,
-      test_run_started_id: messages.run_started_id
-    }
-
-    {:reply, context, state}
-  end
-
-  def handle_call({:take_message_ids, _n}, _from, %{messages: nil} = state) do
-    {:reply, nil, state}
-  end
-
-  def handle_call({:take_message_ids, n}, _from, state) do
-    {ids, state} = allocate_ids(state, n)
-    {:reply, ids, state}
-  end
-
-  def handle_call({:emit_runtime, _envelopes}, _from, %{messages: nil} = state) do
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:emit_runtime, envelopes}, _from, state) do
-    {:reply, :ok, state |> ensure_run_started() |> append_envelopes(envelopes)}
-  end
-
-  def handle_call({:finish_test_case, _id, _status, _retried}, _from, %{messages: nil} = state) do
-    {:reply, :ok, state}
-  end
-
-  def handle_call(
-        {:finish_test_case, case_started_id, skip_status, will_be_retried},
-        _from,
-        state
-      ) do
-    {:reply, :ok, close_test_case(state, case_started_id, skip_status, will_be_retried)}
-  end
-
-  def handle_call({:skip_unfinished_steps, _id, _ids, _outcome}, _from, %{messages: nil} = state) do
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:skip_unfinished_steps, case_started_id, step_ids, outcome}, _from, state) do
-    {:reply, :ok, skip_unfinished(state, case_started_id, step_ids, outcome)}
-  end
-
-  def handle_call({:run_hook_started, ref}, _from, state) do
-    {started_id, state} = run_hook_started(state, ref)
-    {:reply, started_id, state}
-  end
-
-  def handle_call({:run_hook_finished, started_id, status, duration}, _from, state) do
-    {:reply, :ok, run_hook_finished(state, started_id, status, duration)}
-  end
-
-  def handle_call({:flush_messages, _suite_result}, _from, %{messages: nil} = state) do
-    {:reply, :ok, state}
+  def handle_call({:record_message, event}, _from, state) do
+    {reply, state} = record(state, event)
+    {:reply, reply, state}
   end
 
   def handle_call({:flush_messages, suite_result}, _from, state) do
-    state = ensure_run_started(state)
+    if Recorder.enabled?(state.recorder) do
+      {:ok, state} = record(state, {:finish_run, Map.get(suite_result, :failures, 0) == 0})
+      write_messages(state.messages_path, state.recorder)
+    end
 
-    state =
-      state.messages.open_cases
-      |> Map.keys()
-      |> Enum.reduce(state, &close_test_case(&2, &1, :unknown, false))
-
-    # A failed BeforeAll/AfterAll hook fails the run even when every test
-    # case passed (the AfterAll error surfaces after ExUnit counted results).
-    success = Map.get(suite_result, :failures, 0) == 0 and not state.messages.run_hook_failed
-    finished = Cucumber.Messages.test_run_finished(success, now(), state.messages.run_started_id)
-    state = append_envelopes(state, [finished])
-
-    write_messages(state.messages)
-    {:reply, :ok, %{state | messages: nil}}
+    {:reply, :ok, %{state | recorder: Recorder.disabled(), messages_path: nil}}
   end
 
   def handle_call(:attachments, _from, state) do
@@ -572,199 +419,24 @@ defmodule Cucumber.RunCoordinator do
     "BeforeAll hook#{label} #{detail}"
   end
 
-  # --- Message sink internals ---
-  #
-  # `state.messages` is nil when the sink is disabled, otherwise a map of
-  # the output path, the envelope list (reverse order), the id counter, the
-  # static id maps, and per-test-case tracking used for skipped-step
-  # synthesis and crash reconciliation.
-
-  defp now, do: Cucumber.Messages.timestamp(System.system_time(:nanosecond))
-
-  defp allocate_ids(state, n) do
-    next_id = state.messages.next_id
-    ids = Enum.map(next_id..(next_id + n - 1), &Integer.to_string/1)
-    {ids, put_in(state, [:messages, :next_id], next_id + n)}
+  defp record(state, event) do
+    {reply, recorder} = Recorder.record(state.recorder, event, System.system_time(:nanosecond))
+    {reply, %{state | recorder: recorder}}
   end
 
-  # Emits testRunStarted exactly once, after all static envelopes and before
-  # any run-time envelope.
-  defp ensure_run_started(%{messages: %{run_started_id: nil}} = state) do
-    {[id], state} = allocate_ids(state, 1)
-
-    state
-    |> put_in([:messages, :run_started_id], id)
-    |> append_envelopes([Cucumber.Messages.test_run_started(id, now())])
-  end
-
-  defp ensure_run_started(state), do: state
-
-  defp append_envelopes(state, envelopes) do
-    Enum.reduce(envelopes, state, fn envelope, state ->
-      state
-      |> track_envelope(envelope)
-      |> update_in([:messages, :envelopes], &[envelope | &1])
-    end)
-  end
-
-  # Tracks which planned test steps of each open test case have started and
-  # finished, so close_test_case/4 can synthesize events for the rest. Each
-  # planned step carries its match-derived status override: a step that
-  # never runs is reported UNDEFINED/AMBIGUOUS when that's *why* it can
-  # never pass, regardless of why the scenario stopped.
-  defp track_envelope(state, %{testCase: %{id: id, testSteps: test_steps}}) do
-    planned = Enum.map(test_steps, &{&1.id, match_status_override(&1)})
-    put_in(state, [:messages, :cases, id], planned)
-  end
-
-  defp track_envelope(state, %{testCaseStarted: %{id: id, testCaseId: test_case_id}}) do
-    tracking = %{test_case_id: test_case_id, started: MapSet.new(), finished: MapSet.new()}
-    put_in(state, [:messages, :open_cases, id], tracking)
-  end
-
-  defp track_envelope(state, %{testStepStarted: %{testCaseStartedId: id, testStepId: step_id}}) do
-    track_step(state, id, :started, step_id)
-  end
-
-  defp track_envelope(state, %{testStepFinished: %{testCaseStartedId: id, testStepId: step_id}}) do
-    track_step(state, id, :finished, step_id)
-  end
-
-  defp track_envelope(state, _envelope), do: state
-
-  defp track_step(state, case_started_id, key, step_id) do
-    case state.messages.open_cases do
-      %{^case_started_id => tracking} ->
-        tracking = Map.update!(tracking, key, &MapSet.put(&1, step_id))
-        put_in(state, [:messages, :open_cases, case_started_id], tracking)
-
-      _closed_or_unknown ->
-        state
-    end
-  end
-
-  # A pickle step with no matching definition can only ever be UNDEFINED,
-  # and one with several matches AMBIGUOUS — even when it is synthesized
-  # because the scenario stopped earlier. Hook steps have no override.
-  defp match_status_override(%{stepDefinitionIds: []}), do: :undefined
-  defp match_status_override(%{stepDefinitionIds: [_, _ | _]}), do: :ambiguous
-  defp match_status_override(_step), do: nil
-
-  # Synthesizes skip events for the given planned step ids that never ran
-  # (same synthesis close_test_case/4 uses, without closing the case).
-  # Match-status overrides apply only to failed-ish stops: a scenario that
-  # skipped itself reports everything after the skip as SKIPPED, even
-  # steps that could never have matched.
-  defp skip_unfinished(state, case_started_id, step_ids, outcome) do
-    case Map.fetch(state.messages.open_cases, case_started_id) do
-      :error ->
-        state
-
-      {:ok, tracking} ->
-        overrides =
-          case outcome do
-            :failedish -> Map.new(Map.get(state.messages.cases, tracking.test_case_id, []))
-            :skipped -> %{}
-          end
-
-        Enum.reduce(step_ids, state, fn step_id, state ->
-          status = Map.get(overrides, step_id) || :skipped
-          synthesize_step_events(state, case_started_id, step_id, tracking, status)
-        end)
-    end
-  end
-
-  # Flush-time crash reconciliation keeps its blanket UNKNOWN — a dead test
-  # process says nothing about why steps didn't run.
-  defp close_status(_override, :unknown), do: :unknown
-  defp close_status(override, skip_status), do: override || skip_status
-
-  defp close_test_case(state, case_started_id, skip_status, will_be_retried) do
-    case Map.fetch(state.messages.open_cases, case_started_id) do
-      :error ->
-        # Already closed — flush-time reconciliation after a normal finish
-        state
-
-      {:ok, tracking} ->
-        planned = Map.get(state.messages.cases, tracking.test_case_id, [])
-
-        # Match-status overrides apply here too (see close_status/2):
-        # failed-ish stops that never reach the runner's
-        # skip_unfinished_steps call (a failing before-scenario hook, a
-        # raising background step) close through this path alone.
-        # Deliberate skips are unaffected: their steps were already
-        # synthesized SKIPPED before the case closes.
-        state =
-          Enum.reduce(planned, state, fn {step_id, override}, state ->
-            status = close_status(override, skip_status)
-            synthesize_step_events(state, case_started_id, step_id, tracking, status)
-          end)
-
-        finished = Cucumber.Messages.test_case_finished(case_started_id, now(), will_be_retried)
-
-        state
-        |> append_envelopes([finished])
-        |> update_in([:messages, :open_cases], &Map.delete(&1, case_started_id))
-    end
-  end
-
-  # A planned step that never ran gets a started/finished pair with
-  # `skip_status`; a step that started but never finished (the test process
-  # died mid-step) gets an UNKNOWN finish.
-  defp synthesize_step_events(state, case_started_id, step_id, tracking, skip_status) do
-    cond do
-      MapSet.member?(tracking.finished, step_id) ->
-        state
-
-      MapSet.member?(tracking.started, step_id) ->
-        result = Cucumber.Messages.test_step_result(:unknown, 0)
-        finished = Cucumber.Messages.test_step_finished(case_started_id, step_id, result, now())
-        append_envelopes(state, [finished])
-
-      true ->
-        result = Cucumber.Messages.test_step_result(skip_status, 0)
-
-        append_envelopes(state, [
-          Cucumber.Messages.test_step_started(case_started_id, step_id, now()),
-          Cucumber.Messages.test_step_finished(case_started_id, step_id, result, now())
-        ])
-    end
-  end
-
-  defp run_hook_started(%{messages: nil} = state, _ref), do: {nil, state}
-
-  defp run_hook_started(state, ref) do
-    state = ensure_run_started(state)
-    {[id], state} = allocate_ids(state, 1)
-    hook_id = Map.get(state.messages.hook_ids, ref)
-    run_started_id = state.messages.run_started_id
-    envelope = Cucumber.Messages.test_run_hook_started(id, run_started_id, hook_id, now())
-    {id, append_envelopes(state, [envelope])}
-  end
-
-  defp run_hook_finished(state, nil, _status, _duration), do: state
-  defp run_hook_finished(%{messages: nil} = state, _id, _status, _duration), do: state
-
-  defp run_hook_finished(state, started_id, status, duration) do
-    result = Cucumber.Messages.test_step_result(status, duration)
-
-    state =
-      append_envelopes(state, [
-        Cucumber.Messages.test_run_hook_finished(started_id, result, now())
-      ])
-
-    if status == :failed,
-      do: put_in(state, [:messages, :run_hook_failed], true),
-      else: state
-  end
-
-  defp write_messages(%{path: path, envelopes: envelopes}) do
-    lines = envelopes |> Enum.reverse() |> Enum.map(&[Cucumber.Messages.encode!(&1), "\n"])
+  defp write_messages(path, recorder) do
     File.mkdir_p!(Path.dirname(path))
-    File.write!(path, lines)
+    File.write!(path, Recorder.to_ndjson(recorder))
   end
 
   defp initial_state(run_id) do
-    %{run_id: run_id, before_all: :not_run, after_all: [], attachments: [], messages: nil}
+    %{
+      run_id: run_id,
+      before_all: :not_run,
+      after_all: [],
+      attachments: [],
+      recorder: Recorder.disabled(),
+      messages_path: nil
+    }
   end
 end
