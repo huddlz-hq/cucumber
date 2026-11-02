@@ -1,0 +1,27 @@
+name: Resolve stable dependencies
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: erlef/setup-beam@v1.24.1
+        with:
+          otp-version: '29.1.2'
+          elixir-version: '1.20.5'
+      - run: mix local.hex --force
+      - run: mix local.rebar --force
+      - run: mix deps.update --all
+      - run: mix hex.outdated --all > dependency-outdated.txt || true
+      - run: mix hex.audit
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: resolved-dependencies
+          path: |
+            mix.lock
+            dependency-outdated.txt
