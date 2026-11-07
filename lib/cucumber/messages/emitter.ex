@@ -58,6 +58,9 @@ defmodule Cucumber.Messages.Emitter do
 
   @doc false
   # Called by Cucumber.Compiler. The registry carries the parameter types.
+  # Each compile_features!/1 call in a run adds its envelopes to the same
+  # stream; step definitions, hooks and parameter types another call
+  # already added are kept once.
   @spec configure(
           String.t(),
           [{map(), Gherkin.Pickles.Compilation.t()}],
@@ -76,49 +79,49 @@ defmodule Cucumber.Messages.Emitter do
         ]
       end)
 
-    {step_definition_envelopes, step_definition_ids, next_id} =
-      step_definition_envelopes(step_registry, next_id)
-
-    {hook_envelopes, hook_ids, next_id} = hook_envelopes(hooks, next_id)
+    {step_definitions, next_id} = step_definition_envelopes(step_registry, next_id)
+    {hook_envelopes, next_id} = hook_envelopes(hooks, next_id)
 
     {parameter_type_envelopes, next_id} =
       step_registry
       |> StepRegistry.parameter_types()
       |> parameter_type_envelopes(next_id)
 
-    envelopes =
-      [Messages.meta() | feature_envelopes] ++
-        step_definition_envelopes ++ hook_envelopes ++ parameter_type_envelopes
-
     RunCoordinator.configure_messages(%{
       path: path,
-      envelopes: envelopes,
-      next_id: next_id,
-      step_definition_ids: step_definition_ids,
-      hook_ids: hook_ids
+      meta: Messages.meta(),
+      features: feature_envelopes,
+      step_definitions: step_definitions,
+      hooks: hook_envelopes,
+      parameter_types: parameter_type_envelopes,
+      next_id: next_id
     })
   end
 
+  @doc false
+  # How many message ids configure/5 uses beyond the pickles' own.
+  @spec static_id_count(StepRegistry.t(), [tuple()]) :: non_neg_integer()
+  def static_id_count(step_registry, hooks) do
+    length(StepRegistry.definitions(step_registry)) + length(hooks) +
+      map_size(StepRegistry.parameter_types(step_registry))
+  end
+
   # Definitions arrive in a stable (file, line) order, so their ids are
-  # deterministic across runs. Ids are keyed by the definition's position.
+  # deterministic across runs. Each is keyed by its step function, which
+  # identifies it across step registries.
   defp step_definition_envelopes(step_registry, next_id) do
-    definitions = StepRegistry.definitions(step_registry)
-    count = length(definitions)
-    ids = Enum.map(next_id..(next_id + count - 1)//1, &Integer.to_string/1)
-
-    envelopes = Enum.zip_with(ids, definitions, &Messages.step_definition/2)
-    ids_by_position = Map.new(Enum.zip(Enum.map(definitions, & &1.position), ids))
-
-    {envelopes, ids_by_position, next_id + count}
+    step_registry
+    |> StepRegistry.definitions()
+    |> Enum.map_reduce(next_id, fn definition, id ->
+      envelope = Messages.step_definition(Integer.to_string(id), definition)
+      {{{definition.module, definition.function}, envelope}, id + 1}
+    end)
   end
 
   defp hook_envelopes(hooks, next_id) do
-    hooks
-    |> Enum.reduce({[], %{}, next_id}, fn {type, tag, name, ref}, {envelopes, ids, id} ->
-      envelope = Messages.hook(Integer.to_string(id), type, tag, name, hook_source(ref))
-      {[envelope | envelopes], Map.put(ids, ref, Integer.to_string(id)), id + 1}
+    Enum.map_reduce(hooks, next_id, fn {type, tag, name, ref}, id ->
+      {{ref, Messages.hook(Integer.to_string(id), type, tag, name, hook_source(ref))}, id + 1}
     end)
-    |> then(fn {envelopes, ids, id} -> {Enum.reverse(envelopes), ids, id} end)
   end
 
   # Hook macros don't record their definition line; the module's compile
@@ -133,8 +136,8 @@ defmodule Cucumber.Messages.Emitter do
   defp parameter_type_envelopes(parameter_types, next_id) do
     parameter_types
     |> Enum.sort_by(fn {name, _definition} -> name end)
-    |> Enum.map_reduce(next_id, fn {_name, definition}, id ->
-      {Messages.parameter_type(Integer.to_string(id), definition), id + 1}
+    |> Enum.map_reduce(next_id, fn {name, definition}, id ->
+      {{name, Messages.parameter_type(Integer.to_string(id), definition)}, id + 1}
     end)
   end
 
