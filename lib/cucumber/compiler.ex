@@ -53,6 +53,7 @@ defmodule Cucumber.Compiler do
   @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
           [module()]
   def compile_all!(features, step_registry, hook_modules, messages_path) do
+    register_after_suite_callback()
     reject_module_name_collisions!(features)
 
     {compilations, next_id} = compile_pickles(features, 0)
@@ -208,23 +209,26 @@ defmodule Cucumber.Compiler do
 
   def warn_on_empty_feature(_feature), do: :ok
 
-  defp register_after_suite_callback do
-    unless :persistent_term.get({Cucumber, :after_suite_registered}, false) do
-      # One callback for both run-level concerns so their order is fixed:
-      # after_all hooks run first (their testRunHook messages must land in
-      # the stream), then the message flush — which must happen even when an
-      # after_all hook raises (the raise still fails the run).
-      ExUnit.after_suite(fn suite_result ->
-        try do
-          Cucumber.RunCoordinator.run_after_all(suite_result)
-        after
-          Cucumber.RunCoordinator.flush_messages(suite_result)
-          Cucumber.RunCoordinator.end_run()
-        end
-      end)
+  @after_suite_key {Cucumber, :after_suite_registered}
 
-      :persistent_term.put({Cucumber, :after_suite_registered}, true)
+  defp register_after_suite_callback do
+    unless :persistent_term.get(@after_suite_key, false) do
+      :global.trans({@after_suite_key, self()}, &install_after_suite_callback/0, [node()])
     end
+  end
+
+  defp install_after_suite_callback do
+    unless :persistent_term.get(@after_suite_key, false) do
+      ExUnit.after_suite(&finish_run/1)
+      :persistent_term.put(@after_suite_key, true)
+    end
+  end
+
+  defp finish_run(suite_result) do
+    Cucumber.RunCoordinator.run_after_all(suite_result)
+  after
+    Cucumber.RunCoordinator.flush_messages(suite_result)
+    Cucumber.RunCoordinator.end_run()
   end
 
   # Two feature files can generate the same test module — `checkout.feature`

@@ -34,6 +34,11 @@ ExUnit.start()
 Cucumber.compile_features!()
 ```
 
+To run features only when their test file is selected, keep `ExUnit.start()` in
+the helper and move `Cucumber.compile_features!()` into a file such as
+`test/features_test.exs`. Multiple test files can select separate feature
+paths and share step definitions and support files.
+
 To suppress ExUnit warnings about step definition and support files not matching the `*_test.exs` pattern, add this to your `mix.exs`:
 
 ```elixir

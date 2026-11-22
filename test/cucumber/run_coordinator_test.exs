@@ -84,6 +84,14 @@ defmodule Cucumber.RunCoordinatorTest do
         :ok
       end
 
+      def setup(_context), do: %{resource: make_ref()}
+      def fail_setup(_context), do: {:error, "setup failed"}
+
+      def release(context) do
+        send(self(), {:released, context.resource})
+        :ok
+      end
+
       def explode(_context), do: raise("cleanup went wrong")
     end
 
@@ -98,6 +106,27 @@ defmodule Cucumber.RunCoordinatorTest do
       # Already claimed: nothing runs the second time
       assert :ok = RunCoordinator.run_after_all(suite_result)
       refute_receive {:after_all_ran, _}
+    end
+
+    test "a failed setup preserves its resources for cleanup and leaves other groups runnable" do
+      RunCoordinator.ensure_started()
+      setup = {:before_all, nil, nil, {AfterAllProbe, :setup}}
+      fail = {:before_all, nil, nil, {AfterAllProbe, :fail_setup}}
+      teardown = {:after_all, nil, nil, {AfterAllProbe, :release}}
+      failed = [setup, fail, teardown]
+      passed = [setup, teardown]
+
+      for group <- [failed, passed, passed], do: RunCoordinator.register_after_all(group)
+      assert {:error, error} = RunCoordinator.before_all_context(failed)
+      assert {:error, ^error} = RunCoordinator.before_all_context(failed)
+      assert {:ok, %{resource: resource}} = RunCoordinator.before_all_context(passed)
+      assert {:ok, %{resource: ^resource}} = RunCoordinator.before_all_context(passed)
+
+      assert :ok = RunCoordinator.run_after_all(%{total: 2, failures: 1})
+      assert_receive {:released, ^resource}
+      assert_receive {:released, other}
+      refute resource == other
+      refute_received {:released, _}
     end
 
     test "a raising after_all hook fails the run with its own error" do

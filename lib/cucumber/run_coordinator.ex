@@ -13,8 +13,8 @@ defmodule Cucumber.RunCoordinator do
     * **BeforeAll once-guard** — `before_all_context/1` runs the run's
       `before_all` hooks exactly once and caches the merged context (or the
       first error) for every subsequent scenario. Each distinct set of
-      `before_all` hooks (one per `compile_features!` call's support
-      modules) is guarded separately. The hooks execute in the
+      ordered run-level hooks (setup and teardown together) is guarded
+      separately. The hooks execute in the
       first caller's process — never inside the coordinator, so a hook may
       call back into it (e.g. `Cucumber.attach/4`). The coordinator only
       grants that caller the run; concurrent callers (`@async` feature
@@ -96,34 +96,20 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Runs the run's before_all hooks exactly once and returns the resulting
-  # context map (or the first error). `hooks` is the full hook list; only
-  # :before_all entries matter, and only the first caller's are executed —
-  # every module compiled by one compile_features! call carries the same
-  # list, and each distinct list runs once per run.
-  #
-  # CCK semantics: when a before_all hook fails, the *remaining* before_all
-  # hooks still run (to set up as much as possible for cleanup), but the run
-  # is failed — every scenario receives the first error.
+  # Each distinct ordered group of run-level hooks owns its setup context.
   @spec before_all_context([Cucumber.Hooks.hook()]) :: {:ok, map()} | {:error, term()}
   def before_all_context(hooks) do
-    case for {:before_all, _tag, name, ref} <- hooks, do: {name, ref} do
-      [] ->
+    case run_hooks(hooks) do
+      {[], _after_hooks} ->
         {:ok, %{}}
 
-      before_all_hooks ->
+      {before_hooks, _after_hooks} = group ->
         ensure_process()
 
-        case GenServer.call(__MODULE__, {:claim_before_all, before_all_hooks}, :infinity) do
+        case GenServer.call(__MODULE__, {:claim_before_all, group}, :infinity) do
           :run ->
-            result = execute_before_all(before_all_hooks)
-
-            GenServer.call(
-              __MODULE__,
-              {:finish_before_all, before_all_hooks, result},
-              :infinity
-            )
-
+            {result, context} = execute_before_all(before_hooks)
+            GenServer.call(__MODULE__, {:finish_before_all, group, result, context}, :infinity)
             result
 
           {:done, result} ->
@@ -133,17 +119,22 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Adds after_all hooks to the run's, for the after_suite callback to claim.
   @spec register_after_all([Cucumber.Hooks.hook()]) :: :ok
   def register_after_all(hooks) do
-    after_all_hooks = for {:after_all, _tag, name, ref} <- hooks, do: {name, ref}
+    case run_hooks(hooks) do
+      {_before_hooks, []} ->
+        :ok
 
-    if after_all_hooks != [] do
-      ensure_process()
-      GenServer.call(__MODULE__, {:register_after_all, after_all_hooks})
+      group ->
+        ensure_process()
+        GenServer.call(__MODULE__, {:register_after_all, group})
     end
+  end
 
-    :ok
+  defp run_hooks(hooks) do
+    before_hooks = for {:before_all, _tag, name, ref} <- hooks, do: {name, ref}
+    after_hooks = for {:after_all, _tag, name, ref} <- hooks, do: {name, ref}
+    {before_hooks, after_hooks}
   end
 
   @doc false
@@ -221,24 +212,18 @@ defmodule Cucumber.RunCoordinator do
   # the first error is then reraised so the suite run fails.
   @spec run_after_all(map()) :: :ok
   def run_after_all(suite_result) do
-    case take_after_all() do
-      {[], _context} ->
+    results =
+      for {hook, setup_context} <- take_after_all() do
+        context = Map.put(setup_context, :suite_result, suite_result)
+        bracket_run_hook(hook, context, &run_after_all_hook/2)
+      end
+
+    case Enum.find(results, &match?({:error, _}, &1)) do
+      nil ->
         :ok
 
-      {after_all_hooks, before_all_context} ->
-        context = Map.put(before_all_context, :suite_result, suite_result)
-
-        results =
-          for hook <- Enum.reverse(after_all_hooks),
-              do: bracket_run_hook(hook, context, &run_after_all_hook/2)
-
-        case Enum.find(results, &match?({:error, _}, &1)) do
-          nil ->
-            :ok
-
-          {:error, %{kind: kind, reason: reason, stacktrace: stacktrace}} ->
-            :erlang.raise(kind, reason, stacktrace)
-        end
+      {:error, %{kind: kind, reason: reason, stacktrace: stacktrace}} ->
+        :erlang.raise(kind, reason, stacktrace)
     end
   end
 
@@ -312,7 +297,7 @@ defmodule Cucumber.RunCoordinator do
     if Process.whereis(__MODULE__) do
       GenServer.call(__MODULE__, :take_after_all)
     else
-      {[], %{}}
+      []
     end
   end
 
@@ -363,16 +348,16 @@ defmodule Cucumber.RunCoordinator do
         running = %{running | waiters: [from | running.waiters]}
         {:noreply, put_in(state.before_all[key], {:running, running})}
 
-      result ->
+      {:done, result, _context} ->
         {:reply, {:done, result}, state}
     end
   end
 
-  def handle_call({:finish_before_all, key, result}, {pid, _tag}, state) do
+  def handle_call({:finish_before_all, key, result, context}, {pid, _tag}, state) do
     case Map.get(state.before_all, key) do
       {:running, %{pid: ^pid} = running} ->
         Process.demonitor(running.monitor, [:flush])
-        {:reply, :ok, complete_before_all(state, key, running, result)}
+        {:reply, :ok, complete_before_all(state, key, running, result, context)}
 
       # A stale finish (the run was reset while the hooks ran) is ignored.
       _other ->
@@ -380,8 +365,9 @@ defmodule Cucumber.RunCoordinator do
     end
   end
 
-  def handle_call({:register_after_all, hooks}, _from, state) do
-    {:reply, :ok, %{state | after_all: Enum.uniq(state.after_all ++ hooks)}}
+  def handle_call({:register_after_all, group}, _from, state) do
+    groups = if group in state.after_all, do: state.after_all, else: [group | state.after_all]
+    {:reply, :ok, %{state | after_all: groups}}
   end
 
   def handle_call({:record_attachment, attachment, message_ref}, _from, state) do
@@ -420,12 +406,19 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call(:take_after_all, _from, state) do
-    before_all_context =
-      for {_key, {:ok, context}} <- state.before_all, reduce: %{} do
-        merged -> Map.merge(merged, context)
+    hooks =
+      for {_before_hooks, after_hooks} = group <- state.after_all,
+          hook <- Enum.reverse(after_hooks) do
+        context =
+          case Map.get(state.before_all, group) do
+            {:done, _result, context} -> context
+            _unsettled -> %{}
+          end
+
+        {hook, context}
       end
 
-    {:reply, {state.after_all, before_all_context}, %{state | after_all: []}}
+    {:reply, hooks, %{state | after_all: []}}
   end
 
   @impl true
@@ -439,7 +432,7 @@ defmodule Cucumber.RunCoordinator do
     case running do
       {key, {:running, running}} ->
         error = before_all_error(nil, "process exited: #{Exception.format_exit(reason)}")
-        {:noreply, complete_before_all(state, key, running, {:error, error})}
+        {:noreply, complete_before_all(state, key, running, {:error, error}, %{})}
 
       nil ->
         {:noreply, state}
@@ -448,9 +441,9 @@ defmodule Cucumber.RunCoordinator do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp complete_before_all(state, key, running, result) do
+  defp complete_before_all(state, key, running, result, context) do
     Enum.each(running.waiters, &GenServer.reply(&1, {:done, result}))
-    put_in(state.before_all[key], result)
+    put_in(state.before_all[key], {:done, result, context})
   end
 
   # Runs every before_all hook in definition order — even after one fails —
@@ -466,7 +459,8 @@ defmodule Cucumber.RunCoordinator do
         end
       end)
 
-    if first_error, do: {:error, first_error}, else: {:ok, context}
+    result = if first_error, do: {:error, first_error}, else: {:ok, context}
+    {result, context}
   end
 
   defp run_before_all_hook({name, {module, func_name}}, context) do

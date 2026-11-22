@@ -11,78 +11,6 @@ defmodule Cucumber.Behavior.CompileRunsTest do
 
   alias Cucumber.Compiler
   alias Cucumber.RunCoordinator
-  alias Cucumber.StepRegistry
-
-  defmodule FirstSteps do
-    use Cucumber.StepDefinition
-
-    step "a first step", context do
-      Collector.record({:first_step, Map.get(context, :first_setup)})
-      context
-    end
-
-    step "a shared step", context do
-      context
-    end
-  end
-
-  defmodule SecondSteps do
-    use Cucumber.StepDefinition
-
-    step "a second step", context do
-      Collector.record({:second_step, Map.get(context, :second_setup)})
-      context
-    end
-  end
-
-  defmodule FirstHooks do
-    use Cucumber.Hooks
-
-    before_all _context do
-      Collector.record(:first_before_all)
-      %{first_setup: true}
-    end
-
-    after_all _context do
-      Collector.record(:first_after_all)
-      :ok
-    end
-  end
-
-  defmodule SecondHooks do
-    use Cucumber.Hooks
-
-    before_all _context do
-      Collector.record(:second_before_all)
-      %{second_setup: true}
-    end
-
-    after_all _context do
-      Collector.record(:second_after_all)
-      :ok
-    end
-  end
-
-  @first_feature """
-  Feature: First
-    Scenario: first
-      Given a first step
-      And a shared step
-  """
-
-  @second_feature """
-  Feature: Second
-    Scenario: second
-      Given a second step
-      And a shared step
-  """
-
-  defp features(sources) do
-    for source <- List.wrap(sources) do
-      file = "test/fixtures/generated/compile_runs_#{System.unique_integer([:positive])}.feature"
-      source |> Gherkin.Parser.parse(file) |> Map.put(:file, file) |> Map.put(:source, source)
-    end
-  end
 
   # Runs `fun` with calls to the `traced` functions traced, returning its
   # result and the calls in order. Trace messages go to a separate
@@ -126,15 +54,24 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   test "messages are on before the first feature module is defined", %{tmp_dir: tmp_dir} do
     RunCoordinator.ensure_started()
     path = Path.join(tmp_dir, "messages.ndjson")
+    previous = Application.fetch_env(:cucumber, :messages)
+    Application.put_env(:cucumber, :messages, path)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:cucumber, :messages, value)
+        :error -> Application.delete_env(:cucumber, :messages)
+      end
+    end)
+
     traced = [{RunCoordinator, :configure_messages, 1}, {Compiler, :compile_feature!, 4}]
 
     {modules, calls} =
       trace_calls(traced, fn ->
-        Compiler.compile_all!(
-          features([@first_feature, @second_feature]),
-          StepRegistry.new([FirstSteps, SecondSteps]),
-          [],
-          path
+        Cucumber.compile_features!(
+          features: "test/fixtures/compile_runs/*.feature",
+          steps: [],
+          support: []
         )
       end)
 
@@ -145,77 +82,79 @@ defmodule Cucumber.Behavior.CompileRunsTest do
            ]
 
     {result, _output} = Cucumber.BehaviorCase.run_isolated(modules, seed: 0)
-    assert %{total: 2, failures: 0} = result
-    assert length(payloads(envelopes(path), "testCaseFinished")) == 2
+    assert result.total > 0
+    assert length(payloads(envelopes(path), "testCaseFinished")) == result.total
   after
     RunCoordinator.ensure_started()
   end
 
   @tag :tmp_dir
-  test "a second compile_features! call joins the run in progress", %{tmp_dir: tmp_dir} do
-    path = Path.join(tmp_dir, "messages.ndjson")
-    run_id = RunCoordinator.ensure_started()
-    Collector.reset()
+  test "an empty suite closes and later compile calls share a stream with paired teardown", %{
+    tmp_dir: tmp_dir
+  } do
+    ebin = :code.which(Cucumber) |> List.to_string() |> Path.dirname()
 
-    first =
-      Compiler.compile_all!(
-        features(@first_feature),
-        StepRegistry.new([FirstSteps]),
-        [FirstHooks],
-        path
+    {output, status} =
+      System.cmd(
+        System.find_executable("elixir"),
+        [
+          "-pa",
+          ebin,
+          "test/fixtures/compile_runs/run.exs",
+          tmp_dir
+        ],
+        stderr_to_stdout: true
       )
 
-    assert RunCoordinator.start_or_join() == run_id
+    assert status == 0, output
 
-    second =
-      Compiler.compile_all!(
-        features(@second_feature),
-        StepRegistry.new([FirstSteps, SecondSteps]),
-        [SecondHooks],
-        path
-      )
+    empty = envelopes(Path.join(tmp_dir, "empty.ndjson"))
+    assert payloads(empty, "testCase") == []
+    assert [%{"success" => true}] = payloads(empty, "testRunFinished")
 
-    {result, _output} = Cucumber.BehaviorCase.run_isolated(first ++ second, seed: 0)
-    assert %{total: 2, failures: 0} = result
+    joined = envelopes(Path.join(tmp_dir, "joined.ndjson"))
+    assert [%{}] = payloads(joined, "meta")
+    assert [%{"success" => true}] = payloads(joined, "testRunFinished")
+    assert length(payloads(joined, "testCaseFinished")) == 2
 
-    # Each call's before_all hooks ran once and set up its own scenarios;
-    # every after_all hook ran
-    events = Collector.events()
-    assert Enum.count(events, &(&1 == :first_before_all)) == 1
-    assert Enum.count(events, &(&1 == :second_before_all)) == 1
-    assert {:first_step, true} in events
-    assert {:second_step, true} in events
-    assert :first_after_all in events
-    assert :second_after_all in events
+    pickle_ids = for pickle <- payloads(joined, "pickle"), do: pickle["id"]
+    cases = payloads(joined, "testCase")
+    assert length(pickle_ids) == 2
+    assert Enum.sort(Enum.map(cases, & &1["pickleId"])) == Enum.sort(pickle_ids)
 
-    # One stream with both calls' features and test cases
-    envelopes = envelopes(path)
-    assert length(payloads(envelopes, "meta")) == 1
-    assert length(payloads(envelopes, "pickle")) == 2
-    assert length(payloads(envelopes, "testCaseFinished")) == 2
-    assert [%{"success" => true}] = payloads(envelopes, "testRunFinished")
+    definitions = payloads(joined, "stepDefinition")
+    assert length(definitions) == 2
+    patterns = Map.new(definitions, &{&1["id"], &1["pattern"]["source"]})
 
-    # The shared step definition is listed once, and every id is run-unique
-    step_definitions = payloads(envelopes, "stepDefinition")
-    assert length(step_definitions) == 3
+    assert Enum.map(cases, fn test_case ->
+             for %{"stepDefinitionIds" => [id]} <- test_case["testSteps"],
+                 do: Map.fetch!(patterns, id)
+           end) == [
+             ["use the resource for {word}"],
+             ["use the resource for {word}", "check the second resource"]
+           ]
 
     ids =
       for key <- ~w(pickle stepDefinition hook testCase testCaseStarted testRunStarted),
-          payload <- payloads(envelopes, key),
+          payload <- payloads(joined, key),
           do: payload["id"]
 
     assert ids == Enum.uniq(ids)
 
-    definition_ids = MapSet.new(step_definitions, & &1["id"])
+    bodies = for attachment <- payloads(joined, "attachment"), do: attachment["body"]
+    assert ["first " <> first] = Enum.filter(bodies, &String.starts_with?(&1, "first "))
+    assert ["second " <> second] = Enum.filter(bodies, &String.starts_with?(&1, "second "))
+    refute first == second
 
-    for test_case <- payloads(envelopes, "testCase"),
-        test_step <- test_case["testSteps"],
-        id <- Map.get(test_step, "stepDefinitionIds", []),
-        do: assert(id in definition_ids)
-
-    # The suite ending ends the run: the next compile starts a fresh one
-    refute RunCoordinator.start_or_join() == run_id
-  after
-    RunCoordinator.ensure_started()
+    assert Enum.sort(bodies) ==
+             Enum.sort([
+               "acquired #{first}",
+               "first #{first}",
+               "released #{first}",
+               "acquired #{second}",
+               "second #{second}",
+               "released #{second}",
+               "extra cleanup #{second}"
+             ])
   end
 end

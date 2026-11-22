@@ -5,7 +5,7 @@ defmodule Cucumber.Hooks do
   Four levels of hooks are supported, mirroring reference Cucumber
   implementations:
 
-    * `before_all`/`after_all` — run once per test run (see below)
+    * `before_all`/`after_all` — run once per group of run-level hooks (see below)
     * `before_scenario`/`after_scenario` — run around each scenario
     * `before_step`/`after_step` — run around each step (including
       background steps)
@@ -61,17 +61,20 @@ defmodule Cucumber.Hooks do
 
   ## Run-level hooks
 
-  `before_all` hooks run lazily, exactly once per run, before the first
-  scenario that executes. They run in that scenario's test process;
+  Calls to `Cucumber.compile_features!/1` with the same ordered lists of
+  `before_all` and `after_all` hooks share a setup context. Different lists
+  form separate groups. A hook shared by two groups runs once in each.
+
+  `before_all` hooks run lazily, before the first scenario in their group. They run in that scenario's test process;
   `Cucumber.RunCoordinator` guarantees they run only once, and `@async`
   features that reach them concurrently wait for the result. They may
   attach via `Cucumber.attach/4` and friends. Their accumulated context map is
-  merged into every scenario's context. If a `before_all` hook fails, the
+  merged into each scenario's context in that group. If a `before_all` hook fails, the
   remaining `before_all` hooks still run (to set up as much as possible for
-  cleanup), but every scenario in the run fails with the original error.
+  cleanup), but every scenario in that group fails with the original error.
 
   `after_all` hooks run once after the whole suite via `ExUnit.after_suite/1`,
-  in reverse definition order, receiving the `before_all` context plus the
+  in reverse definition order, receiving their group's accumulated setup context plus the
   ExUnit suite summary under `:suite_result`. A failing `after_all` hook
   fails the run; the remaining `after_all` hooks still run.
 
@@ -205,13 +208,12 @@ defmodule Cucumber.Hooks do
   end
 
   @doc """
-  Defines a before_all hook that runs once per test run, before the first
-  scenario that executes.
+  Defines a before_all hook that runs before the first scenario in its run-level hook group.
 
   The hook receives the accumulated before_all context (starting from an
   empty map) and may return `:ok`, a map, a keyword list, `{:ok, map}`, or
-  `{:error, reason}`. The final context map is merged into every scenario's
-  context. Cannot be tagged; can be given a `name:`.
+  `{:error, reason}`. The final context map is merged into each scenario's
+  context in that group. Cannot be tagged; can be given a `name:`.
   """
   defmacro before_all(context_var, do: block) do
     build_hook_ast(__CALLER__.module, :before_all, nil, nil, context_var, block)
@@ -222,10 +224,10 @@ defmodule Cucumber.Hooks do
   end
 
   @doc """
-  Defines an after_all hook that runs once after the whole test run, in
+  Defines an after_all hook that runs once per run-level hook group after the suite, in
   reverse definition order.
 
-  The hook receives the before_all context with the ExUnit suite summary
+  The hook receives its group's accumulated setup context with the ExUnit suite summary
   merged under `:suite_result`. A raise or `{:error, reason}` fails the
   run, but the remaining after_all hooks still run. Cannot be tagged; can
   be given a `name:`.

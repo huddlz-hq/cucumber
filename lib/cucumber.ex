@@ -80,8 +80,8 @@ defmodule Cucumber do
   focused `mix test` runs skip the features. Each call compiles the
   features its options select; calling it more than once in a run (say,
   once for API features and once for browser features) adds them all to
-  the same run, with one `before_all` pass per call's support files and
-  one Cucumber Messages stream.
+  one Messages stream. Calls with the same ordered run-level hooks share
+  setup and teardown. Each distinct group manages its own setup context.
 
   ## Options
 
