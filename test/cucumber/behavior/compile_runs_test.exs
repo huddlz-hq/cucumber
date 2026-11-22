@@ -92,7 +92,7 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   test "an empty suite closes and later compile calls share a stream with paired teardown", %{
     tmp_dir: tmp_dir
   } do
-    ebin = :code.which(Cucumber) |> List.to_string() |> Path.dirname()
+    ebin = Application.app_dir(:cucumber, "ebin")
 
     {output, status} =
       System.cmd(

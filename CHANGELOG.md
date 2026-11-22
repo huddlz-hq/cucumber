@@ -5,7 +5,7 @@
 ### Fixed
 
 - With Cucumber Messages enabled, scenarios no longer go missing from the stream when `Cucumber.compile_features!/1` is called from a test file (#71). ExUnit starts an `@async` feature as soon as its module is defined, and messages only turned on after every feature was compiled, so the first features' scenarios could run unrecorded. Messages now turn on before any feature module is defined.
-- Calling `Cucumber.compile_features!/1` more than once in a run no longer resets the run (#71). A later call joins the run in progress: its `before_all` hooks run once for its own scenarios, its `after_all` hooks run alongside the earlier calls', attachments recorded so far are kept, and with Cucumber Messages enabled its features and step definitions join the same stream with run-unique ids. A step definition, hook or parameter type that several calls share is listed once. Envelopes for a call made after scenarios started land after `testRunStarted`.
+- Calling `Cucumber.compile_features!/1` more than once in a run preserves earlier attachments and adds features to the same Cucumber Messages stream with run-unique ids (#71). Calls with the same ordered `before_all` and `after_all` hook lists share one setup. Each distinct group runs teardown with its own setup context. A step definition, hook or parameter type that several calls share is listed once. Envelopes for a call made after scenarios started land after `testRunStarted`.
 
 ### Changed
 
