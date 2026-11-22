@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- With Cucumber Messages enabled, scenarios no longer go missing from the stream when `Cucumber.compile_features!/1` is called from a test file (#71). ExUnit starts an `@async` feature as soon as its module is defined, and messages only turned on after every feature was compiled, so the first features' scenarios could run unrecorded. Messages now turn on before any feature module is defined.
+- Calling `Cucumber.compile_features!/1` more than once in a run preserves earlier attachments and adds features to the same Cucumber Messages stream with run-unique ids (#71). Calls with the same ordered `before_all` and `after_all` hook lists share one setup. Each distinct group runs teardown with its own setup context. A step definition, hook or parameter type that several calls share is listed once. Envelopes for a call made after scenarios started land after `testRunStarted`.
+
 ### Changed
 
 - The Cucumber Messages stream is built by a pure message recorder that `Cucumber.RunCoordinator` holds. The stream is unchanged. The undocumented (`@doc false`) `Cucumber.RunCoordinator.record_message/1` replaces `message_context/0`, `take_message_ids/1`, `emit_runtime/1`, `finish_test_case/3` and `skip_unfinished_steps/3`.
+- Undocumented (`@doc false`) run coordination functions changed: `Cucumber.RunCoordinator.configure_messages/1` takes each call's static envelopes grouped by kind, and the new `start_or_join/0`, `end_run/0` and `reserve_message_ids/1` manage a run that spans several `compile_features!/1` calls.
 
 ## v1.1.1 (2026-10-25)
 

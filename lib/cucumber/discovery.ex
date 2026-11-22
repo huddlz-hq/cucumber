@@ -106,12 +106,16 @@ defmodule Cucumber.Discovery do
   defp loaded_modules(path) do
     cache_key = {__MODULE__, :modules, Path.expand(path)}
 
+    # Parallel test files can discover the same path. Publish its module names
+    # before another caller can observe that the file was already required.
+    :global.trans({cache_key, self()}, fn -> require_modules(path, cache_key) end, [node()])
+  end
+
+  defp require_modules(path, cache_key) do
     case Code.require_file(path) do
       nil ->
         # nil with no cache entry means someone other than discovery loaded
-        # the file, so its modules are unknowable here. (A concurrent
-        # discovery pass racing this one would land here too — loudly,
-        # rather than silently building an empty registry.)
+        # the file, so its modules are unknowable here.
         case :persistent_term.get(cache_key, :missing) do
           :missing ->
             raise "#{path} was already loaded before Cucumber discovery ran, " <>

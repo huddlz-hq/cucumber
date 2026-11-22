@@ -30,8 +30,9 @@ defmodule Cucumber.Compiler do
       hook_modules: hook_modules
     } = Discovery.discover(opts)
 
-    # Start (or reset) the run-wide coordinator before any test executes
-    Cucumber.RunCoordinator.ensure_started()
+    # Start the run-wide coordinator before any test executes, or join the
+    # run in progress when another compile_features! call started it
+    Cucumber.RunCoordinator.start_or_join()
 
     compile_all!(
       features,
@@ -52,29 +53,55 @@ defmodule Cucumber.Compiler do
   @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
           [module()]
   def compile_all!(features, step_registry, hook_modules, messages_path) do
+    register_after_suite_callback()
     reject_module_name_collisions!(features)
 
-    {compiled, next_id} =
-      Enum.map_reduce(features, 0, fn feature, start_id ->
-        compilation = Gherkin.Pickles.compile(feature, start_id)
+    {compilations, next_id} = compile_pickles(features, 0)
 
-        module =
-          compile_feature!(feature, step_registry, hook_modules, compilation: compilation)
+    # Messages must be on before the first feature module is defined:
+    # ExUnit starts an async module as soon as it is defined when
+    # compile_features!/1 runs from a test file, so scenarios can run
+    # before this function returns.
+    compilations =
+      if messages_path do
+        hooks = Cucumber.Hooks.collect_hooks(hook_modules)
+        id_count = next_id + Emitter.static_id_count(step_registry, hooks)
 
-        {{module, feature, compilation}, compilation.next_id}
-      end)
+        # Another compile_features!/1 call in this run (or a running
+        # scenario) may already have used ids; take a run-unique block
+        start_id = Cucumber.RunCoordinator.reserve_message_ids(id_count)
 
-    if messages_path do
-      Emitter.configure(
-        messages_path,
-        Enum.map(compiled, fn {_module, feature, compilation} -> {feature, compilation} end),
-        step_registry,
-        Cucumber.Hooks.collect_hooks(hook_modules),
-        next_id
-      )
-    end
+        {compilations, next_id} =
+          if start_id == 0, do: {compilations, next_id}, else: compile_pickles(features, start_id)
 
-    Enum.map(compiled, fn {module, _feature, _compilation} -> module end)
+        Emitter.configure(
+          messages_path,
+          Enum.zip(features, compilations),
+          step_registry,
+          hooks,
+          next_id
+        )
+
+        compilations
+      else
+        compilations
+      end
+
+    features
+    |> Enum.zip(compilations)
+    |> Enum.map(fn {feature, compilation} ->
+      compile_feature!(feature, step_registry, hook_modules, compilation: compilation)
+    end)
+  end
+
+  # Expands each feature into pickles, threading ids from `start_id` so they
+  # are unique across the features — the message stream references them
+  # run-wide. Returns the compilations and the next unused id.
+  defp compile_pickles(features, start_id) do
+    Enum.map_reduce(features, start_id, fn feature, id ->
+      compilation = Gherkin.Pickles.compile(feature, id)
+      {compilation, compilation.next_id}
+    end)
   end
 
   @doc false
@@ -182,22 +209,26 @@ defmodule Cucumber.Compiler do
 
   def warn_on_empty_feature(_feature), do: :ok
 
-  defp register_after_suite_callback do
-    unless :persistent_term.get({Cucumber, :after_suite_registered}, false) do
-      # One callback for both run-level concerns so their order is fixed:
-      # after_all hooks run first (their testRunHook messages must land in
-      # the stream), then the message flush — which must happen even when an
-      # after_all hook raises (the raise still fails the run).
-      ExUnit.after_suite(fn suite_result ->
-        try do
-          Cucumber.RunCoordinator.run_after_all(suite_result)
-        after
-          Cucumber.RunCoordinator.flush_messages(suite_result)
-        end
-      end)
+  @after_suite_key {Cucumber, :after_suite_registered}
 
-      :persistent_term.put({Cucumber, :after_suite_registered}, true)
+  defp register_after_suite_callback do
+    unless :persistent_term.get(@after_suite_key, false) do
+      :global.trans({@after_suite_key, self()}, &install_after_suite_callback/0, [node()])
     end
+  end
+
+  defp install_after_suite_callback do
+    unless :persistent_term.get(@after_suite_key, false) do
+      ExUnit.after_suite(&finish_run/1)
+      :persistent_term.put(@after_suite_key, true)
+    end
+  end
+
+  defp finish_run(suite_result) do
+    Cucumber.RunCoordinator.run_after_all(suite_result)
+  after
+    Cucumber.RunCoordinator.flush_messages(suite_result)
+    Cucumber.RunCoordinator.end_run()
   end
 
   # Two feature files can generate the same test module — `checkout.feature`

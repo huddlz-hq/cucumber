@@ -76,7 +76,12 @@ defmodule Cucumber do
   @doc """
   Discovers and compiles all cucumber features into ExUnit tests.
 
-  This function should be called in your `test_helper.exs` file.
+  Call it from your `test_helper.exs`, or from a test file so that
+  focused `mix test` runs skip the features. Each call compiles the
+  features its options select; calling it more than once in a run (say,
+  once for API features and once for browser features) adds them all to
+  one Messages stream. Calls with the same ordered run-level hooks share
+  setup and teardown. Each distinct group manages its own setup context.
 
   ## Options
 

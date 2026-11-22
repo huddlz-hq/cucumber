@@ -81,18 +81,23 @@ end
 
 ### Run-Level Hooks (BeforeAll/AfterAll)
 
-`before_all` hooks run lazily, exactly once per test run, before the first
-scenario that executes. They run in that scenario's test process; a run
+Calls to `Cucumber.compile_features!/1` that discover the same ordered lists of
+`before_all` and `after_all` hooks share a setup context. Different lists form
+separate groups. For example, if API and browser features each add their own
+hooks to a common support file, the common setup and teardown run once for
+each group, and each teardown receives its own group's context.
+
+`before_all` hooks run lazily, before the first scenario in their group. They run in that scenario's test process; a run
 coordinator guarantees they run only once, and any `@async` features that
 reach them concurrently wait for the result. Because they run in a test
 process, they can attach (`Cucumber.attach/4`, `Cucumber.log/2`,
 `Cucumber.link/2`) like any other hook. Their accumulated context map is
-merged into every scenario's context. If a `before_all` hook fails, the
+merged into every scenario in the group. If a `before_all` hook fails, the
 remaining `before_all` hooks still run (to set up as much as possible for
-cleanup), but every scenario in the run fails with the original error.
+cleanup), but every scenario in that group fails with the original error.
 
-`after_all` hooks run once after the whole suite, in reverse definition
-order, receiving the `before_all` context with the ExUnit suite summary
+`after_all` hooks run once per group after the whole suite, in reverse definition
+order, receiving their group's accumulated setup context with the ExUnit suite summary
 merged under `:suite_result`. A failing `after_all` hook fails the run; the
 remaining `after_all` hooks still run. `after_all` hooks can attach too; with
 Cucumber Messages output enabled, attachments from either run-level hook are
@@ -174,11 +179,11 @@ Return values from after hooks are ignored, so an after hook returning
 
 ## Hook Execution Order
 
-1. `before_all` hooks run once, in definition order, before the first scenario
+1. `before_all` hooks run once per group, in definition order, before its first scenario
 2. Before hooks run in the order they are defined
 3. `before_step`/`after_step` hooks bracket each step (after-step in reverse order)
 4. After hooks run in reverse order (last defined runs first)
-5. `after_all` hooks run once, in reverse order, after the whole suite
+5. `after_all` hooks run once per group, in reverse order, after the whole suite
 6. Tagged hooks only run for scenarios with matching tags
 7. Global hooks run for all scenarios
 

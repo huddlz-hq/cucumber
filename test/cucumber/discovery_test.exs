@@ -448,6 +448,43 @@ defmodule Cucumber.DiscoveryTest do
     end
 
     @tag :tmp_dir
+    test "parallel callers discover the same step and support modules", %{tmp_dir: tmp_dir} do
+      file = Path.join(tmp_dir, "shared.exs")
+
+      File.write!(file, """
+      defmodule ConcurrentDiscoverySupport do
+        use Cucumber.StepDefinition
+        use Cucumber.Hooks
+
+        step "a shared step", context do
+          context
+        end
+
+        before_all _context do
+          :ok
+        end
+      end
+      """)
+
+      results =
+        Task.async_stream(
+          1..8,
+          fn _ ->
+            Discovery.discover(steps: file, support: file, features: [])
+          end,
+          max_concurrency: 8
+        )
+
+      for result <- results do
+        assert {:ok, discovered} = result
+        assert discovered.hook_modules == [ConcurrentDiscoverySupport]
+
+        assert {:ok, %Definition{module: ConcurrentDiscoverySupport}, []} =
+                 StepRegistry.match(discovered.step_registry, "a shared step")
+      end
+    end
+
+    @tag :tmp_dir
     test "serves the cache when a later pass spells the path differently", %{tmp_dir: tmp_dir} do
       step_dir = Path.join(tmp_dir, "steps")
       File.mkdir_p!(step_dir)

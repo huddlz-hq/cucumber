@@ -22,7 +22,8 @@ defmodule Cucumber.MixProject do
       # Ignore Cucumber feature files (not *_test.exs pattern)
       test_ignore_filters: [
         ~r/features\/step_definitions/,
-        ~r/features\/support/
+        ~r/features\/support/,
+        ~r/fixtures\/compile_runs/
       ]
     ]
   end
