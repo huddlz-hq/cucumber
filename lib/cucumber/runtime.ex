@@ -156,7 +156,7 @@ defmodule Cucumber.Runtime do
   # indistinguishable.
   defp max_attempts(scenario) do
     retries =
-      tag_retry_limit(Map.get(scenario, :scenario_tags, [])) ||
+      tag_retry_limit(scenario.scenario_tags) ||
         tag_retry_limit(scenario.feature_tags) ||
         config_retry_limit()
 

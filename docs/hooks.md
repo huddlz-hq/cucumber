@@ -161,7 +161,7 @@ end
 
 ## Return Values
 
-Hooks support the same return values as step definitions:
+Before-scenario and before-step hooks accept the following return values:
 
 - `:ok` - Keeps the context unchanged
 - `{:ok, map}` - Merges the map into the context
