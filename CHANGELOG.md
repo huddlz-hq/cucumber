@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Discovery registers every step-definition module in a matching file, including modules after the first definition.
 - Before hooks merge `{:ok, map}` into the existing context, as documented. This preserves earlier setup, scenario metadata, and attachment attribution when a hook returns a partial map. Omitting a key from the returned map keeps its previous value.
 - Hook selection and `context.scenario_tags` use Gherkin tags. Generated ExUnit filter tags such as `:cucumber` only select hooks when explicitly present in the feature source.
 - With Cucumber Messages enabled, scenarios no longer go missing from the stream when `Cucumber.compile_features!/1` is called from a test file (#71). ExUnit starts an `@async` feature as soon as its module is defined, and messages only turned on after every feature was compiled, so the first features' scenarios could run unrecorded. Messages now turn on before any feature module is defined.

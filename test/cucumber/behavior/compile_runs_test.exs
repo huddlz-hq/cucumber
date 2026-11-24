@@ -51,6 +51,40 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   defp payloads(envelopes, key), do: for(%{^key => payload} <- envelopes, do: payload)
 
   @tag :tmp_dir
+  test "uses every step definition module in the same file", %{tmp_dir: dir} do
+    feature = dir |> Path.join("shared.feature") |> Path.relative_to_cwd()
+    steps = Path.join(dir, "shared.exs")
+
+    File.write!(feature, """
+    Feature: shared file
+      Scenario: first module
+        Given the first definition
+      Scenario: second module
+        Given the second definition
+    """)
+
+    File.write!(steps, """
+    defmodule SharedFile.First do
+      use Cucumber.StepDefinition
+      step "the first definition", _ctx do
+        :ok
+      end
+    end
+
+    defmodule SharedFile.Second do
+      use Cucumber.StepDefinition
+      step "the second definition", _ctx do
+        :ok
+      end
+    end
+    """)
+
+    modules = Cucumber.compile_features!(features: feature, steps: steps, support: [])
+    {result, output} = Cucumber.BehaviorCase.run_isolated(modules)
+    assert %{total: 2, failures: 0} = result, output
+  end
+
+  @tag :tmp_dir
   test "messages are on before the first feature module is defined", %{tmp_dir: tmp_dir} do
     RunCoordinator.ensure_started()
     path = Path.join(tmp_dir, "messages.ndjson")

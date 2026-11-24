@@ -113,7 +113,10 @@ defmodule Cucumber.RunnerLifecycleTest do
         Feature: setup
           Scenario: partial maps
             Given inspect setup
-        """, steps: [ContextStep], hooks: [PartialSetup])
+        """,
+        steps: [ContextStep],
+        hooks: [PartialSetup]
+      )
 
     assert run.passed == 1
     assert run.events == [{1, 2, 3, 4, "partial maps"}]
