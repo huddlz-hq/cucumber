@@ -551,7 +551,11 @@ defmodule Cucumber.Runtime do
   defp current_stacktrace do
     {:current_stacktrace, trace} = Process.info(self(), :current_stacktrace)
     # Drop Process.info/2 and this function's own frames
-    Enum.reject(trace, &match?({Process, _, _, _}, &1))
+    Enum.drop_while(trace, fn
+      {Process, :info, _, _} -> true
+      {__MODULE__, :current_stacktrace, _, _} -> true
+      _frame -> false
+    end)
   end
 
   defp prepare_context(context, args, step) do
