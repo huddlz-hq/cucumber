@@ -85,6 +85,8 @@ defmodule Cucumber.Behavior.CompileRunsTest do
     assert status == 0, output
     events = dir |> Path.join("events") |> File.read!() |> String.split("\n", trim: true)
 
+    assert length(events) == 9
+
     ids =
       for ["acquire " <> id, used, released] <- Enum.chunk_every(events, 3) do
         assert used == "use " <> id

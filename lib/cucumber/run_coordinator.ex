@@ -340,7 +340,7 @@ defmodule Cucumber.RunCoordinator do
   def handle_call({:end_run, result}, _from, state) do
     remaining = state.remaining_repeats || Application.get_env(:ex_unit, :repeat_until_failure, 0)
 
-    if state.live and remaining > 0 and
+    if state.live and is_integer(remaining) and remaining > 0 and
          match?(%{failures: 0, total: total} when total > 0, result) do
       # ExUnit restores the compiled modules between repetitions. Replay only
       # registration, so each repetition gets fresh setup, teardown and NDJSON.
