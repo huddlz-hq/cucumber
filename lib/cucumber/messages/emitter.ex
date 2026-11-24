@@ -36,6 +36,8 @@ defmodule Cucumber.Messages.Emitter do
   @doc false
   # ExUnit may start running an async feature as soon as its module is defined.
   # Return compilations only once all their static envelopes are registered.
+  @spec prepare_features([map()], StepRegistry.t(), [Cucumber.Hooks.hook()], String.t() | nil) ::
+          [{map(), Gherkin.Pickles.Compilation.t()}]
   def prepare_features(features, registry, hooks, path) do
     prefix = if path, do: RunCoordinator.next_message_prefix(), else: ""
 

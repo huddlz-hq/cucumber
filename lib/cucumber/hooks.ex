@@ -442,7 +442,7 @@ defmodule Cucumber.Hooks do
 
       other ->
         raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
-                "Expected :ok, {:ok, context}, a map, a keyword list, {:error, reason}, " <>
+                "Expected :ok, {:ok, map}, a map, a keyword list, {:error, reason}, " <>
                 ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
     end
   end
