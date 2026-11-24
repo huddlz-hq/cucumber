@@ -12,6 +12,7 @@
 
 ### Changed
 
+- Test cases select step hooks once. Pickle steps and scenario hooks now share the same Cucumber Messages start and finish handling, including attachment attribution and crash reporting.
 - Each compile call expands its pickles once. Static Cucumber Messages IDs have a per-call prefix so other compile calls and running scenarios can allocate IDs concurrently.
 - The Cucumber Messages stream is built by a pure message recorder that `Cucumber.RunCoordinator` holds. The stream is unchanged. The undocumented (`@doc false`) `Cucumber.RunCoordinator.record_message/1` replaces `message_context/0`, `take_message_ids/1`, `emit_runtime/1`, `finish_test_case/3` and `skip_unfinished_steps/3`.
 - Undocumented (`@doc false`) run coordination functions changed: `Cucumber.RunCoordinator.configure_messages/1` takes each call's static envelopes grouped by kind, and the new `start_or_join/0` and `end_run/0` manage a run that spans several `compile_features!/1` calls.

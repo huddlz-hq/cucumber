@@ -49,9 +49,11 @@ defmodule Cucumber.TestCase do
   end
 
   @enforce_keys [:pickle_id, :before_hooks, :pickle_test_steps, :after_hooks]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [before_step_hooks: [], after_step_hooks: []]
 
   @type t :: %__MODULE__{
+          before_step_hooks: [{String.t() | nil, {module(), atom()}}],
+          after_step_hooks: [{String.t() | nil, {module(), atom()}}],
           pickle_id: String.t() | nil,
           before_hooks: [HookStep.t()],
           pickle_test_steps: [PickleTestStep.t()],
@@ -74,6 +76,8 @@ defmodule Cucumber.TestCase do
     %__MODULE__{
       pickle_id: Map.get(scenario, :pickle_id),
       before_hooks: before_hooks,
+      before_step_hooks: Cucumber.Hooks.filter_hooks(hooks, :before_step, tags),
+      after_step_hooks: hooks |> Cucumber.Hooks.filter_hooks(:after_step, tags) |> Enum.reverse(),
       pickle_test_steps: pickle_test_steps,
       after_hooks: after_hooks
     }
