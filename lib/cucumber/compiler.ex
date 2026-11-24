@@ -120,7 +120,7 @@ defmodule Cucumber.Compiler do
 
           @doc false
           def __cucumber_runtime__ do
-            Cucumber.RunCoordinator.runtime_data!(unquote(runtime_key))
+            Cucumber.RunCoordinator.runtime_data!(unquote(Macro.escape(runtime_key)))
           end
 
           # One test per pickle (outlines and rules expanded by Gherkin.Pickles)
@@ -176,15 +176,17 @@ defmodule Cucumber.Compiler do
   end
 
   defp finish_run(suite_result) do
-    Cucumber.RunCoordinator.run_after_all(suite_result)
-  after
-    flush_and_end_run(suite_result)
-  end
+    try do
+      Cucumber.RunCoordinator.run_after_all(suite_result)
+    after
+      Cucumber.RunCoordinator.flush_messages(suite_result)
+    end
 
-  defp flush_and_end_run(suite_result) do
-    Cucumber.RunCoordinator.flush_messages(suite_result)
-  after
-    Cucumber.RunCoordinator.end_run()
+    Cucumber.RunCoordinator.end_run(suite_result)
+  catch
+    kind, reason ->
+      Cucumber.RunCoordinator.end_run()
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   # Two feature files can generate the same test module — `checkout.feature`

@@ -15,6 +15,91 @@ defmodule Cucumber.Behavior.CompileRunsTest do
 
   defp payloads(envelopes, key), do: for(%{^key => payload} <- envelopes, do: payload)
 
+  @tag :tmp_dir
+  test "mix test repetitions reuse compiled modules with fresh hooks and Messages", %{
+    tmp_dir: dir
+  } do
+    File.mkdir_p!(Path.join(dir, "test"))
+
+    File.write!(Path.join(dir, "mix.exs"), """
+    defmodule RepeatFixture.MixProject do
+      use Mix.Project
+      def project, do: [app: :repeat_fixture, version: "0.1.0", prune_code_paths: false]
+    end
+    """)
+
+    File.write!(Path.join(dir, "test/test_helper.exs"), """
+    ExUnit.start()
+    Application.put_env(:cucumber, :messages, "repeat.ndjson")
+    Cucumber.compile_features!(features: "repeat.feature", steps: "steps.exs", support: "steps.exs")
+    """)
+
+    File.write!(
+      Path.join(dir, "test/repeat_test.exs"),
+      "# Tests are generated from repeat.feature.\n"
+    )
+
+    File.write!(
+      Path.join(dir, "repeat.feature"),
+      "Feature: repeat\n  Scenario: one\n    Given use the resource\n"
+    )
+
+    File.write!(Path.join(dir, "steps.exs"), """
+    defmodule RepeatFixture.Steps do
+      use Cucumber.StepDefinition
+      use Cucumber.Hooks
+
+      before_all _ctx do
+        id = Integer.to_string(System.unique_integer([:positive]))
+        File.write!("events", "acquire " <> id <> "\\n", [:append])
+        %{resource: id}
+      end
+
+      step "use the resource", ctx do
+        File.write!("events", "use " <> ctx.resource <> "\\n", [:append])
+        Cucumber.log(ctx, ctx.resource)
+      end
+
+      after_all ctx do
+        File.write!("events", "release " <> ctx.resource <> "\\n", [:append])
+      end
+    end
+    """)
+
+    {output, status} =
+      System.cmd(
+        System.find_executable("elixir"),
+        [
+          "-pa",
+          Application.app_dir(:cucumber, "ebin"),
+          "-S",
+          "mix",
+          "test",
+          "--repeat-until-failure",
+          "2"
+        ],
+        cd: dir,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    events = dir |> Path.join("events") |> File.read!() |> String.split("\n", trim: true)
+
+    ids =
+      for ["acquire " <> id, used, released] <- Enum.chunk_every(events, 3) do
+        assert used == "use " <> id
+        assert released == "release " <> id
+        id
+      end
+
+    assert length(ids) == 3
+    assert ids == Enum.uniq(ids)
+    stream = envelopes(Path.join(dir, "repeat.ndjson"))
+    assert :ok = Cucumber.CckStream.assert_valid(stream)
+    assert [%{"body" => last}] = payloads(stream, "attachment")
+    assert last == List.last(ids)
+  end
+
   defmodule LifetimeSteps do
     use Cucumber.StepDefinition
 

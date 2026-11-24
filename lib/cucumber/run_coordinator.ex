@@ -80,12 +80,9 @@ defmodule Cucumber.RunCoordinator do
   @doc false
   # Ends the run: the next start_or_join/0 starts a fresh one. Called by the
   # after_suite callback once the run's after_all hooks and messages are done.
-  @spec end_run() :: :ok
-  def end_run do
-    if Process.whereis(__MODULE__) do
-      GenServer.call(__MODULE__, :end_run)
-    end
-
+  @spec end_run(map()) :: :ok
+  def end_run(result \\ %{}) do
+    if Process.whereis(__MODULE__), do: GenServer.call(__MODULE__, {:end_run, result}, :infinity)
     :ok
   end
 
@@ -96,14 +93,17 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  def runtime_data!(key) do
-    case Process.whereis(__MODULE__) && GenServer.call(__MODULE__, {:runtime_data, key}) do
-      %{} = data ->
-        data
-
-      nil ->
-        raise "This Cucumber feature's run has ended. Call Cucumber.compile_features!/1 again before rerunning it."
+  def runtime_data!({table, key}) do
+    case :ets.lookup(table, key) do
+      [{^key, data}] -> data
+      [] -> expired!()
     end
+  rescue
+    ArgumentError -> expired!()
+  end
+
+  defp expired! do
+    raise "This Cucumber feature's run has ended. Call Cucumber.compile_features!/1 again before rerunning it."
   end
 
   @doc "Returns the current run id."
@@ -326,35 +326,55 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @impl true
-  def init(run_id) do
-    {:ok, initial_state(run_id)}
+  def init(run_id) when is_integer(run_id), do: init({run_id, __MODULE__})
+
+  def init({run_id, table}) do
+    :ets.new(table, [:named_table, :protected, read_concurrency: true])
+    {:ok, initial_state(run_id, table)}
   end
 
   @impl true
-  def handle_call({:reset, run_id}, _from, _state) do
-    {:reply, run_id, initial_state(run_id)}
+  def handle_call({:reset, run_id}, _from, state) do
+    :ets.delete_all_objects(state.table)
+    {:reply, run_id, initial_state(run_id, state.table)}
   end
 
   def handle_call({:join, _run_id}, _from, %{live: true} = state) do
     {:reply, state.run_id, state}
   end
 
-  def handle_call({:join, run_id}, _from, _state) do
-    {:reply, run_id, initial_state(run_id)}
+  def handle_call({:join, run_id}, _from, state) do
+    :ets.delete_all_objects(state.table)
+    {:reply, run_id, initial_state(run_id, state.table)}
   end
 
-  def handle_call(:end_run, _from, state) do
-    {:reply, :ok, %{state | live: false, compilations: %{}}}
+  def handle_call({:end_run, result}, _from, state) do
+    remaining = state.remaining_repeats || Application.get_env(:ex_unit, :repeat_until_failure, 0)
+
+    if state.live and remaining > 0 and
+         match?(%{failures: 0, total: total} when total > 0, result) do
+      # ExUnit restores the compiled modules between repetitions. Replay only
+      # registration, so each repetition gets fresh setup, teardown and NDJSON.
+      fresh = initial_state(System.unique_integer([:positive]), state.table)
+
+      fresh = %{
+        fresh
+        | remaining_repeats: remaining - 1,
+          next_batch: state.next_batch,
+          registrations: state.registrations
+      }
+
+      {:reply, :ok, Enum.reduce(Enum.reverse(state.registrations), fresh, &apply_registration/2)}
+    else
+      :ets.delete_all_objects(state.table)
+      {:reply, :ok, %{state | live: false, registrations: [], before_all: %{}, after_all: []}}
+    end
   end
 
   def handle_call({:register_compilation, registry, hooks}, _from, state) do
     key = System.unique_integer([:positive])
-    data = %{step_registry: registry, hooks: hooks}
-    {:reply, key, put_in(state.compilations[key], data)}
-  end
-
-  def handle_call({:runtime_data, key}, _from, state) do
-    {:reply, Map.get(state.compilations, key), state}
+    :ets.insert(state.table, {key, %{step_registry: registry, hooks: hooks}})
+    {:reply, {state.table, key}, state}
   end
 
   def handle_call(:run_id, _from, state) do
@@ -392,8 +412,7 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call({:register_after_all, group}, _from, state) do
-    groups = if group in state.after_all, do: state.after_all, else: [group | state.after_all]
-    {:reply, :ok, %{state | after_all: groups}}
+    {:reply, :ok, register({:hooks, group}, state)}
   end
 
   def handle_call({:record_attachment, attachment, message_ref}, _from, state) do
@@ -406,10 +425,7 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call({:configure_messages, config}, _from, state) do
-    recorder = state |> messages_on() |> Recorder.add_static(Map.delete(config, :path))
-
-    {:reply, :ok,
-     %{state | recorder: recorder, messages_path: state.messages_path || config.path}}
+    {:reply, :ok, register({:messages, config}, state)}
   end
 
   def handle_call({:record_message, event}, _from, state) do
@@ -507,6 +523,22 @@ defmodule Cucumber.RunCoordinator do
     "BeforeAll hook#{label} #{detail}"
   end
 
+  defp register(entry, state) do
+    entry
+    |> apply_registration(state)
+    |> Map.put(:registrations, [entry | state.registrations])
+  end
+
+  defp apply_registration({:hooks, group}, state) do
+    groups = if group in state.after_all, do: state.after_all, else: [group | state.after_all]
+    %{state | after_all: groups}
+  end
+
+  defp apply_registration({:messages, config}, state) do
+    recorder = state |> messages_on() |> Recorder.add_static(Map.delete(config, :path))
+    %{state | recorder: recorder, messages_path: state.messages_path || config.path}
+  end
+
   defp messages_on(%{recorder: recorder}) do
     if Recorder.enabled?(recorder), do: recorder, else: Recorder.new()
   end
@@ -521,12 +553,14 @@ defmodule Cucumber.RunCoordinator do
     File.write!(path, Recorder.to_ndjson(recorder))
   end
 
-  defp initial_state(run_id) do
+  defp initial_state(run_id, table) do
     %{
       run_id: run_id,
       live: true,
       next_batch: 0,
-      compilations: %{},
+      table: table,
+      registrations: [],
+      remaining_repeats: nil,
       before_all: %{},
       after_all: [],
       attachments: [],

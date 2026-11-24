@@ -34,7 +34,7 @@ ExUnit.start()
 Cucumber.compile_features!()
 ```
 
-Generated ExUnit modules can run until suite teardown finishes. To execute a feature again in the same VM after that point, call `Cucumber.compile_features!/1` to register fresh hooks, step definitions, and Messages for the new run.
+Generated ExUnit modules can run through the final suite teardown. Mix’s `--repeat-until-failure` starts fresh Cucumber hooks and Messages for each repetition. To execute a feature again in the same VM after that point, call `Cucumber.compile_features!/1` to register fresh hooks, step definitions, and Messages for the new run.
 
 To run features only when their test file is selected, keep `ExUnit.start()` in
 the helper and move `Cucumber.compile_features!()` into a file such as

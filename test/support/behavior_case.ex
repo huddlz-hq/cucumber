@@ -103,9 +103,12 @@ defmodule Cucumber.BehaviorCase do
     outer = Process.whereis(name)
     if outer, do: Process.unregister(name)
 
+    {:ok, inner} =
+      GenServer.start(name, {System.unique_integer([:positive]), __MODULE__}, name: name)
+
     ExUnit.Callbacks.on_exit(fn ->
-      if inner = Process.whereis(name), do: GenServer.stop(inner)
-      if outer, do: Process.register(outer, name)
+      if Process.alive?(inner), do: GenServer.stop(inner)
+      if outer && Process.alive?(outer), do: Process.register(outer, name)
     end)
 
     :ok
@@ -249,7 +252,12 @@ defmodule Cucumber.BehaviorCase do
     try do
       # Colors off so captured output is plain text regardless of whether
       # the outer run is on a TTY — assertions parse this output
-      ExUnit.configure(include: [], exclude: [], colors: [enabled: false])
+      ExUnit.configure(
+        include: [],
+        exclude: [],
+        colors: [enabled: false],
+        repeat_until_failure: 0
+      )
 
       case Keyword.fetch(opts, :seed) do
         {:ok, seed} -> ExUnit.configure(seed: seed)
@@ -267,6 +275,7 @@ defmodule Cucumber.BehaviorCase do
         include: config[:include],
         exclude: config[:exclude],
         seed: config[:seed],
+        repeat_until_failure: config[:repeat_until_failure],
         colors: config[:colors]
       )
     end

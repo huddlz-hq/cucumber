@@ -12,7 +12,7 @@
 
 ### Changed
 
-- Compiled feature modules share their registry and hooks for the duration of the Cucumber run. After suite teardown, call `Cucumber.compile_features!/1` again before rerunning a feature. An explicit ExUnit rerun of an expired module now fails with that instruction.
+- Compiled feature modules share their registry and hooks for the duration of the Cucumber run. Mix’s `--repeat-until-failure` reuses the compiled modules with fresh hook setup and Messages on each repetition. After the final suite teardown, call `Cucumber.compile_features!/1` again before rerunning a feature. An explicit ExUnit rerun of an expired module now fails with that instruction.
 - Errors raised by the runner store `{status, step}` pairs in `StepError.step_history`, omitting the scenario context from each entry. Only the final occurrence of a repeated step is labeled failed. Existing error constructors still accept history entries with context.
 - Test cases select step hooks once. Pickle steps and scenario hooks now share the same Cucumber Messages start and finish handling, including attachment attribution and crash reporting.
 - Each compile call expands its pickles once. Static Cucumber Messages IDs have a per-call prefix so other compile calls and running scenarios can allocate IDs concurrently.
