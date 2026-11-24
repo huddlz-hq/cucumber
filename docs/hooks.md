@@ -161,18 +161,19 @@ end
 
 ## Return Values
 
-Before-scenario and before-step hooks accept the following return values:
+A `before_all`, `before_scenario`, or `before_step` hook can return `:ok` to
+keep its context. A map, `{:ok, map}`, or a keyword list merges updates into
+the current context.
 
-- `:ok` - Keeps the context unchanged
-- `{:ok, map}` - Merges the map into the context
-- `%{} = map` - Merges the map into the context
-- `{:error, reason}` - Fails the scenario before it starts (steps and after
-  hooks don't run)
-- `:skipped` or `{:skipped, reason}` (before hooks only) - Skips the whole
-  scenario without failing it: remaining before hooks and all steps are
-  skipped, after hooks still run
-- `:pending` or `{:pending, message}` (before hooks only) - Like `:skipped`,
-  but the scenario fails with `Cucumber.PendingStepError`
+A hook returning `{:error, reason}` fails setup. A `before_all` error affects
+every scenario sharing that setup. A `before_scenario` error prevents the
+scenario's steps and after hooks from running. A `before_step` error stops
+the remaining steps, and the scenario's after hooks still run.
+
+A `before_scenario` or `before_step` hook can also return `:skipped` or
+`{:skipped, reason}` to skip the remaining steps. Returning `:pending` or
+`{:pending, message}` fails the scenario with `Cucumber.PendingStepError`.
+After-scenario hooks run in both cases.
 
 Return values from after hooks are ignored, so an after hook returning
 `:skipped` only marks itself — subsequent after hooks still run.
