@@ -19,8 +19,6 @@ defmodule Cucumber.Messages.EmitterTest do
 
   setup do
     Cucumber.BehaviorCase.isolate_coordinator()
-    RunCoordinator.ensure_started()
-    on_exit(fn -> RunCoordinator.ensure_started() end)
   end
 
   describe "configure/6 (deprecated)" do

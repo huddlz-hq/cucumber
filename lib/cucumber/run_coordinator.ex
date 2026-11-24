@@ -10,6 +10,10 @@ defmodule Cucumber.RunCoordinator do
 
   Current run-scoped concerns:
 
+    * **Compiled scenarios** — the coordinator owns a protected ETS table.
+      Features from one compilation share a registry and hook set. Scenarios
+      read the table directly. Mix repetitions keep the definitions and start
+      fresh hooks and Messages. Final teardown releases the definitions.
     * **BeforeAll once-guard** — `before_all_context/1` runs the run's
       `before_all` hooks exactly once and caches the merged context (or the
       first error) for every subsequent scenario. Each distinct set of
@@ -34,13 +38,9 @@ defmodule Cucumber.RunCoordinator do
       recorder (`lib/cucumber/messages/recorder.ex`) and feeds it one event
       at a time, which is what keeps the stream ordered under `@async`
       features. The `after_suite` callback writes the NDJSON
-      file (`flush_messages/1`). Note that `ExUnit.after_suite/1`
-      callbacks fire on *every* `ExUnit.run/1` — the stream is written
-      (and messages turn off) when the first run in the VM completes, so a
-      project that invokes a nested `ExUnit.run/1` mid-suite with messages
-      enabled gets the stream truncated at that point
-      (`Cucumber.BehaviorCase` relies on exactly this per-run firing to
-      capture streams in tests).
+      file (`flush_messages/1`). A nested `ExUnit.run/1` fires the same
+      suite callbacks and ends the current Cucumber run. Test harnesses that
+      need independent suites must isolate their run state.
   """
 
   use GenServer
@@ -87,12 +87,17 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
+  @spec register_compilation(Cucumber.StepRegistry.t(), [Cucumber.Hooks.hook()]) ::
+          {atom(), pos_integer()}
   def register_compilation(registry, hooks) do
-    ensure_process()
     GenServer.call(__MODULE__, {:register_compilation, registry, hooks})
   end
 
   @doc false
+  @spec runtime_data!({atom(), pos_integer()}) :: %{
+          step_registry: Cucumber.StepRegistry.t(),
+          hooks: [Cucumber.Hooks.hook()]
+        }
   def runtime_data!({table, key}) do
     case :ets.lookup(table, key) do
       [{^key, data}] -> data

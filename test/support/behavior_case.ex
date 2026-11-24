@@ -107,8 +107,11 @@ defmodule Cucumber.BehaviorCase do
       GenServer.start(name, {System.unique_integer([:positive]), __MODULE__}, name: name)
 
     ExUnit.Callbacks.on_exit(fn ->
-      if Process.alive?(inner), do: GenServer.stop(inner)
-      if outer && Process.alive?(outer), do: Process.register(outer, name)
+      try do
+        if Process.alive?(inner), do: GenServer.stop(inner)
+      after
+        if outer && Process.alive?(outer), do: Process.register(outer, name)
+      end
     end)
 
     :ok

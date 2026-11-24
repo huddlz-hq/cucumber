@@ -30,10 +30,6 @@ defmodule Cucumber.Compiler do
       hook_modules: hook_modules
     } = Discovery.discover(opts)
 
-    # Start the run-wide coordinator before any test executes, or join the
-    # run in progress when another compile_features! call started it
-    Cucumber.RunCoordinator.start_or_join()
-
     compile_all!(
       features,
       step_registry,
@@ -53,6 +49,7 @@ defmodule Cucumber.Compiler do
   @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
           [module()]
   def compile_all!(features, step_registry, hook_modules, messages_path) do
+    Cucumber.RunCoordinator.start_or_join()
     register_after_suite_callback()
     reject_module_name_collisions!(features)
 
@@ -82,6 +79,7 @@ defmodule Cucumber.Compiler do
     compilation =
       Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
+    Cucumber.RunCoordinator.start_or_join()
     register_after_suite_callback()
     runtime_key = register_compilation(step_registry, Cucumber.Hooks.collect_hooks(hook_modules))
     define_feature!(feature, runtime_key, compilation)
