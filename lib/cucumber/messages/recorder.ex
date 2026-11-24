@@ -9,7 +9,7 @@ defmodule Cucumber.Messages.Recorder do
   #
   # It owns every rule about the stream's shape:
   #
-  #   * run-unique, sequential message ids
+  #   * sequential numeric IDs for run-time events
   #   * testRunStarted, emitted once before the first run-time envelope
   #   * which test steps of each attempt have started and finished
   #   * the status of a test step that never ran: SKIPPED, or UNDEFINED /
@@ -81,7 +81,8 @@ defmodule Cucumber.Messages.Recorder do
   # Adds one compile_features!/1 call's static envelopes: its sources,
   # documents and pickles, then the step definitions, hooks and parameter
   # types the stream doesn't have yet. The meta envelope opens the stream
-  # once. Ids continue after `static.next_id`. A later call's envelopes
+  # once. Numeric runtime IDs start at or above `static.next_id` for
+  # callers using numeric static IDs. Prefixed batches set it to zero. Later envelopes
   # land after testRunStarted when scenarios are already running.
   @spec add_static(t(), static()) :: t()
   def add_static(recorder, static) do

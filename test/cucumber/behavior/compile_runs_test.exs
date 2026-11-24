@@ -57,7 +57,12 @@ defmodule Cucumber.Behavior.CompileRunsTest do
 
     stream = envelopes(path)
     assert length(payloads(stream, "testCaseFinished")) == 2
-    assert Enum.any?(payloads(stream, "attachment"), &String.starts_with?(&1["body"], "first "))
+    assert :ok = Cucumber.CckStream.assert_valid(stream)
+
+    assert Enum.any?(payloads(stream, "attachment"), fn attachment ->
+             String.starts_with?(attachment["body"], "first ") and
+               is_binary(attachment["testCaseStartedId"]) and is_binary(attachment["testStepId"])
+           end)
   end
 
   defp run_fixture(script, argument) do
