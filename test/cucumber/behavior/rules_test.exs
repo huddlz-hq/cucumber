@@ -120,6 +120,11 @@ defmodule Cucumber.RulesBehaviorTest do
     assert {"tagged", ["cucumber"]} in run.events
     assert {:authored, "tagged"} in run.events
     refute {:authored, "plain"} in run.events
+
+    plain = Enum.find(run.module.__ex_unit__().tests, &(&1.name == :"test plain"))
+
+    assert %{cucumber: true, inherited: true, feature_hook_tags: true, scenario_plain: true} =
+             plain.tags
   end
 
   describe "CCK: rules" do
