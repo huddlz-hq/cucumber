@@ -466,7 +466,7 @@ defmodule Cucumber.RunCoordinator do
   defp run_before_all_hook({name, {module, func_name}}, context) do
     case apply(module, func_name, [context]) do
       :ok -> {:ok, context}
-      {:ok, %{} = new_context} -> {:ok, new_context}
+      {:ok, %{} = updates} -> {:ok, Map.merge(context, updates)}
       %{} = new_context -> {:ok, Map.merge(context, new_context)}
       keyword when is_list(keyword) -> {:ok, Map.merge(context, Map.new(keyword))}
       {:error, reason} -> {:error, before_all_error(name, "failed: #{inspect(reason)}")}

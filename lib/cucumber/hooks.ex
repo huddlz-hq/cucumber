@@ -429,8 +429,8 @@ defmodule Cucumber.Hooks do
       :ok ->
         {:ok, context}
 
-      {:ok, new_context} ->
-        {:ok, new_context}
+      {:ok, %{} = updates} ->
+        {:ok, Map.merge(context, updates)}
 
       %{} = new_context ->
         {:ok, Map.merge(context, new_context)}

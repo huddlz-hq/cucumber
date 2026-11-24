@@ -110,7 +110,10 @@ defmodule Cucumber.RulesBehaviorTest do
           @cucumber
           Scenario: tagged
             Given an action
-        """, steps: [OrderSteps], hooks: [TagHooks])
+        """,
+        steps: [OrderSteps],
+        hooks: [TagHooks]
+      )
 
     assert run.passed == 2
     assert {"plain", []} in run.events
