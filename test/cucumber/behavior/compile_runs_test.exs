@@ -9,41 +9,6 @@ defmodule Cucumber.Behavior.CompileRunsTest do
 
   use Cucumber.BehaviorCase
 
-  alias Cucumber.Compiler
-  alias Cucumber.RunCoordinator
-
-  # Runs `fun` with calls to the `traced` functions traced, returning its
-  # result and the calls in order. Trace messages go to a separate
-  # collector process.
-  defp trace_calls(traced, fun) do
-    collector = spawn_link(fn -> collect_traced_calls([]) end)
-    Enum.each(traced, &:erlang.trace_pattern(&1, true, [:local]))
-    :erlang.trace(self(), true, [:call, {:tracer, collector}])
-
-    result =
-      try do
-        fun.()
-      after
-        :erlang.trace(self(), false, [:call])
-        Enum.each(traced, &:erlang.trace_pattern(&1, false, [:local]))
-      end
-
-    ref = :erlang.trace_delivered(self())
-    receive do: ({:trace_delivered, _pid, ^ref} -> :ok)
-    send(collector, {:calls, self()})
-    receive do: ({:traced_calls, calls} -> {result, calls})
-  end
-
-  defp collect_traced_calls(calls) do
-    receive do
-      {:trace, _pid, :call, {module, function, _args}} ->
-        collect_traced_calls([{module, function} | calls])
-
-      {:calls, from} ->
-        send(from, {:traced_calls, Enum.reverse(calls)})
-    end
-  end
-
   defp envelopes(path) do
     path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&JSON.decode!/1)
   end
@@ -85,61 +50,34 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   end
 
   @tag :tmp_dir
-  test "messages are on before the first feature module is defined", %{tmp_dir: tmp_dir} do
-    RunCoordinator.ensure_started()
-    path = Path.join(tmp_dir, "messages.ndjson")
-    previous = Application.fetch_env(:cucumber, :messages)
-    Application.put_env(:cucumber, :messages, path)
+  test "an async scenario records messages before its compile call returns", %{tmp_dir: dir} do
+    path = Path.join(dir, "during.ndjson")
+    {output, status} = run_fixture("during_compile.exs", path)
+    assert status == 0, output
 
-    on_exit(fn ->
-      case previous do
-        {:ok, value} -> Application.put_env(:cucumber, :messages, value)
-        :error -> Application.delete_env(:cucumber, :messages)
-      end
-    end)
+    stream = envelopes(path)
+    assert length(payloads(stream, "testCaseFinished")) == 2
+    assert Enum.any?(payloads(stream, "attachment"), &String.starts_with?(&1["body"], "first "))
+  end
 
-    traced = [{RunCoordinator, :configure_messages, 1}, {Compiler, :compile_feature!, 4}]
-
-    {modules, calls} =
-      trace_calls(traced, fn ->
-        Cucumber.compile_features!(
-          features: "test/fixtures/compile_runs/*.feature",
-          steps: [],
-          support: []
-        )
-      end)
-
-    assert calls == [
-             {RunCoordinator, :configure_messages},
-             {Compiler, :compile_feature!},
-             {Compiler, :compile_feature!}
-           ]
-
-    {result, _output} = Cucumber.BehaviorCase.run_isolated(modules, seed: 0)
-    assert result.total > 0
-    assert length(payloads(envelopes(path), "testCaseFinished")) == result.total
-  after
-    RunCoordinator.ensure_started()
+  defp run_fixture(script, argument) do
+    System.cmd(
+      System.find_executable("elixir"),
+      [
+        "-pa",
+        Application.app_dir(:cucumber, "ebin"),
+        Path.join("test/fixtures/compile_runs", script),
+        argument
+      ],
+      stderr_to_stdout: true
+    )
   end
 
   @tag :tmp_dir
   test "an empty suite closes and later compile calls share a stream with paired teardown", %{
     tmp_dir: tmp_dir
   } do
-    ebin = Application.app_dir(:cucumber, "ebin")
-
-    {output, status} =
-      System.cmd(
-        System.find_executable("elixir"),
-        [
-          "-pa",
-          ebin,
-          "test/fixtures/compile_runs/run.exs",
-          tmp_dir
-        ],
-        stderr_to_stdout: true
-      )
-
+    {output, status} = run_fixture("run.exs", tmp_dir)
     assert status == 0, output
 
     empty = envelopes(Path.join(tmp_dir, "empty.ndjson"))

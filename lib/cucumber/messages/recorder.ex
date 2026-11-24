@@ -78,14 +78,6 @@ defmodule Cucumber.Messages.Recorder do
   def new, do: %__MODULE__{enabled: true}
 
   @doc false
-  # Takes `n` run-unique ids for a caller to assign itself (pickles, step
-  # definitions...), returning the first.
-  @spec reserve_ids(t(), non_neg_integer()) :: {non_neg_integer(), t()}
-  def reserve_ids(recorder, n) do
-    {recorder.next_id, %{recorder | next_id: recorder.next_id + n}}
-  end
-
-  @doc false
   # Adds one compile_features!/1 call's static envelopes: its sources,
   # documents and pickles, then the step definitions, hooks and parameter
   # types the stream doesn't have yet. The meta envelope opens the stream

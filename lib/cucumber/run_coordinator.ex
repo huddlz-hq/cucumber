@@ -26,8 +26,8 @@ defmodule Cucumber.RunCoordinator do
       `Cucumber.Attachment` structs (see `Cucumber.attach/4`) in run order;
       `attachments/0` returns them.
     * **Cucumber Messages** — when `config :cucumber, messages: path` is
-      set, each `compile_features!` call reserves message ids
-      (`reserve_message_ids/1`) and hands the coordinator its static
+      set, each `compile_features!` call receives a static ID prefix
+      (`next_message_prefix/0`) and hands the coordinator its static
       envelopes (`configure_messages/1`) before defining any test module,
       and the runner reports each run-time event as it happens
       (`record_message/1`). The coordinator holds the stream in a message
@@ -150,13 +150,12 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  # Turns messages on for this run and takes `n` run-unique message ids for
-  # a compile_features! call to assign its pickles, step definitions, hooks
-  # and parameter types. Returns the first.
-  @spec reserve_message_ids(non_neg_integer()) :: non_neg_integer()
-  def reserve_message_ids(n) do
+  # Each compile call gets disjoint static IDs while the recorder assigns
+  # numeric runtime IDs. Failed compilations only consume a prefix.
+  @spec next_message_prefix() :: String.t()
+  def next_message_prefix do
     ensure_process()
-    GenServer.call(__MODULE__, {:reserve_message_ids, n})
+    GenServer.call(__MODULE__, :next_message_prefix)
   end
 
   @doc false
@@ -375,9 +374,8 @@ defmodule Cucumber.RunCoordinator do
     {:reply, :ok, %{state | attachments: [attachment | state.attachments]}}
   end
 
-  def handle_call({:reserve_message_ids, n}, _from, state) do
-    {start_id, recorder} = state |> messages_on() |> Recorder.reserve_ids(n)
-    {:reply, start_id, %{state | recorder: recorder}}
+  def handle_call(:next_message_prefix, _from, state) do
+    {:reply, "c#{state.next_batch}-", %{state | next_batch: state.next_batch + 1}}
   end
 
   def handle_call({:configure_messages, config}, _from, state) do
@@ -500,6 +498,7 @@ defmodule Cucumber.RunCoordinator do
     %{
       run_id: run_id,
       live: true,
+      next_batch: 0,
       before_all: %{},
       after_all: [],
       attachments: [],

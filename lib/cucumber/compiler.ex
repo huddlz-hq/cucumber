@@ -56,51 +56,12 @@ defmodule Cucumber.Compiler do
     register_after_suite_callback()
     reject_module_name_collisions!(features)
 
-    {compilations, next_id} = compile_pickles(features, 0)
-
-    # Messages must be on before the first feature module is defined:
-    # ExUnit starts an async module as soon as it is defined when
-    # compile_features!/1 runs from a test file, so scenarios can run
-    # before this function returns.
-    compilations =
-      if messages_path do
-        hooks = Cucumber.Hooks.collect_hooks(hook_modules)
-        id_count = next_id + Emitter.static_id_count(step_registry, hooks)
-
-        # Another compile_features!/1 call in this run (or a running
-        # scenario) may already have used ids; take a run-unique block
-        start_id = Cucumber.RunCoordinator.reserve_message_ids(id_count)
-
-        {compilations, next_id} =
-          if start_id == 0, do: {compilations, next_id}, else: compile_pickles(features, start_id)
-
-        Emitter.configure(
-          messages_path,
-          Enum.zip(features, compilations),
-          step_registry,
-          hooks,
-          next_id
-        )
-
-        compilations
-      else
-        compilations
-      end
+    hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
     features
-    |> Enum.zip(compilations)
+    |> Emitter.prepare_features(step_registry, hooks, messages_path)
     |> Enum.map(fn {feature, compilation} ->
-      compile_feature!(feature, step_registry, hook_modules, compilation: compilation)
-    end)
-  end
-
-  # Expands each feature into pickles, threading ids from `start_id` so they
-  # are unique across the features — the message stream references them
-  # run-wide. Returns the compilations and the next unused id.
-  defp compile_pickles(features, start_id) do
-    Enum.map_reduce(features, start_id, fn feature, id ->
-      compilation = Gherkin.Pickles.compile(feature, id)
-      {compilation, compilation.next_id}
+      define_feature!(feature, step_registry, hooks, compilation)
     end)
   end
 
@@ -112,19 +73,25 @@ defmodule Cucumber.Compiler do
   # by compile_features!/1 to thread run-unique pickle ids across features).
   @spec compile_feature!(map(), Cucumber.StepRegistry.t(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
-    warn_on_empty_feature(feature)
-
     compilation =
       Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
+
+    define_feature!(
+      feature,
+      step_registry,
+      Cucumber.Hooks.collect_hooks(hook_modules),
+      compilation
+    )
+  end
+
+  defp define_feature!(feature, step_registry, all_hooks, compilation) do
+    warn_on_empty_feature(feature)
 
     # Generate module name from feature file path
     module_name = generate_module_name(feature.file)
 
     # Check if feature has @async tag
     async = "async" in feature.tags
-
-    # Collect all hooks
-    all_hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
     # Run-level teardown: hand the after_all hooks to the coordinator and
     # make sure the after_suite callback that claims them is registered.
