@@ -442,8 +442,8 @@ defmodule Cucumber.Runtime do
 
       error =
         Cucumber.StepError.execution_failure(
-          context,
           step,
+          context,
           Definition.display_pattern(definition),
           {kind, reason, trace},
           Cucumber.RunCoordinator.attachments()
