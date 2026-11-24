@@ -35,6 +35,7 @@ defmodule Cucumber.StepError do
         }
 
   @doc false
+  @spec undefined(Gherkin.Step.t(), map()) :: t()
   def undefined(step, context) do
     missing_error(
       step,
@@ -46,7 +47,14 @@ defmodule Cucumber.StepError do
   end
 
   @doc false
-  def execution_failure(context, step, pattern, {kind, reason, trace}, attachments) do
+  @spec execution_failure(
+          Gherkin.Step.t(),
+          map(),
+          String.t(),
+          {Exception.kind(), term(), Exception.stacktrace()},
+          [Cucumber.Attachment.t()]
+        ) :: t()
+  def execution_failure(step, context, pattern, {kind, reason, trace}, attachments) do
     step
     |> execution_error(
       pattern,
@@ -62,7 +70,9 @@ defmodule Cucumber.StepError do
   defp recent_history(context) do
     # The runtime appends the current step before execution. Only that final
     # entry failed, even when a previous step has the same text and location.
-    case context |> Map.get(:step_history, []) |> Enum.take(-10) |> List.pop_at(-1) do
+    history = context[:step_history] || []
+
+    case history |> Enum.take(-10) |> List.pop_at(-1) do
       {nil, []} -> []
       {failed, earlier} -> Enum.map(earlier, &{:passed, &1}) ++ [{:failed, failed}]
     end

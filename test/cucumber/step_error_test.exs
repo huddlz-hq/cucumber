@@ -17,7 +17,7 @@ defmodule Cucumber.StepErrorTest do
     reason = %ExUnit.AssertionError{message: "Found these elements\n<button>Save</button>"}
 
     error =
-      Cucumber.StepError.execution_failure(context, step, "submit", {:error, reason, []}, [])
+      Cucumber.StepError.execution_failure(step, context, "submit", {:error, reason, []}, [])
 
     assert error.message =~ "form.feature:3"
     assert error.message =~ "  <button>Save</button>"

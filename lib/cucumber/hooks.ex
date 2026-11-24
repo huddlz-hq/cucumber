@@ -442,7 +442,7 @@ defmodule Cucumber.Hooks do
 
       other ->
         raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
-                "Expected :ok, {:ok, context}, a map, a keyword list, {:error, reason}, " <>
+                "Expected :ok, {:ok, map}, a map, a keyword list, {:error, reason}, " <>
                 ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
     end
   end
@@ -464,8 +464,8 @@ defmodule Cucumber.Hooks do
   end
 
   @doc false
-  # Runs after_step hooks in reverse order with :step_status set in the
-  # context. Return values are ignored.
+  # The test case supplies after_step hooks in execution order. Each hook
+  # receives :step_status in the context.
   @spec run_after_step_hooks([{String.t() | nil, {module(), atom()}}], map(), atom()) :: :ok
   def run_after_step_hooks(hooks, context, status) do
     context = Map.put(context, :step_status, status)
