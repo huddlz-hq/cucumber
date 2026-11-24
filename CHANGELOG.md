@@ -12,6 +12,7 @@
 
 ### Changed
 
+- Errors raised by the runner store `{status, step}` pairs in `StepError.step_history`, omitting the scenario context from each entry. Only the final occurrence of a repeated step is labeled failed. Existing error constructors still accept history entries with context.
 - Test cases select step hooks once. Pickle steps and scenario hooks now share the same Cucumber Messages start and finish handling, including attachment attribution and crash reporting.
 - Each compile call expands its pickles once. Static Cucumber Messages IDs have a per-call prefix so other compile calls and running scenarios can allocate IDs concurrently.
 - The Cucumber Messages stream is built by a pure message recorder that `Cucumber.RunCoordinator` holds. The undocumented (`@doc false`) `Cucumber.RunCoordinator.record_message/1` replaces `message_context/0`, `take_message_ids/1`, `emit_runtime/1`, `finish_test_case/3` and `skip_unfinished_steps/3`.
