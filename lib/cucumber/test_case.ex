@@ -63,7 +63,7 @@ defmodule Cucumber.TestCase do
   @doc false
   # `scenario` needs `:pickle_id` and `:pickle_steps` (Gherkin.PickleStep
   # structs, as Gherkin.Pickles compiles them); `tags` are the scenario's
-  # and feature's tags combined, which select the scenario hooks.
+  # and feature's tags combined, which select the scenario and step hooks.
   @spec new(map(), StepRegistry.t(), [Cucumber.Hooks.hook()], [String.t()]) :: t()
   def new(scenario, step_registry, hooks, tags) do
     before_hooks = Cucumber.Hooks.filter_hooks(hooks, :before_scenario, tags)
