@@ -136,12 +136,7 @@ defmodule Cucumber.Behavior.CompileRunsTest do
              ["use the resource for {word}", "check the second resource"]
            ]
 
-    ids =
-      for key <- ~w(pickle stepDefinition hook testCase testCaseStarted testRunStarted),
-          payload <- payloads(joined, key),
-          do: payload["id"]
-
-    assert ids == Enum.uniq(ids)
+    assert :ok = Cucumber.CckStream.assert_valid(joined)
 
     bodies = for attachment <- payloads(joined, "attachment"), do: attachment["body"]
     assert ["first " <> first] = Enum.filter(bodies, &String.starts_with?(&1, "first "))
