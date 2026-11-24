@@ -58,11 +58,17 @@ defmodule Cucumber.Compiler do
 
     hooks = Cucumber.Hooks.collect_hooks(hook_modules)
 
-    features
-    |> Emitter.prepare_features(step_registry, hooks, messages_path)
-    |> Enum.map(fn {feature, compilation} ->
-      define_feature!(feature, step_registry, hooks, compilation)
-    end)
+    case Emitter.prepare_features(features, step_registry, hooks, messages_path) do
+      [] ->
+        []
+
+      pairs ->
+        runtime_key = register_compilation(step_registry, hooks)
+
+        Enum.map(pairs, fn {feature, compilation} ->
+          define_feature!(feature, runtime_key, compilation)
+        end)
+    end
   end
 
   @doc false
@@ -76,15 +82,17 @@ defmodule Cucumber.Compiler do
     compilation =
       Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
-    define_feature!(
-      feature,
-      step_registry,
-      Cucumber.Hooks.collect_hooks(hook_modules),
-      compilation
-    )
+    register_after_suite_callback()
+    runtime_key = register_compilation(step_registry, Cucumber.Hooks.collect_hooks(hook_modules))
+    define_feature!(feature, runtime_key, compilation)
   end
 
-  defp define_feature!(feature, step_registry, all_hooks, compilation) do
+  defp register_compilation(registry, hooks) do
+    Cucumber.RunCoordinator.register_after_all(hooks)
+    Cucumber.RunCoordinator.register_compilation(registry, hooks)
+  end
+
+  defp define_feature!(feature, runtime_key, compilation) do
     warn_on_empty_feature(feature)
 
     # Generate module name from feature file path
@@ -92,24 +100,6 @@ defmodule Cucumber.Compiler do
 
     # Check if feature has @async tag
     async = "async" in feature.tags
-
-    # Run-level teardown: hand the after_all hooks to the coordinator and
-    # make sure the after_suite callback that claims them is registered.
-    # The callback is registered once per VM because ExUnit.after_suite
-    # callbacks accumulate in config and fire on every ExUnit.run.
-    Cucumber.RunCoordinator.register_after_all(all_hooks)
-    register_after_suite_callback()
-
-    # The registry and hook list live in :persistent_term rather than being
-    # Macro.escape'd into every generated module (which bloats each module's
-    # AST with a full copy). Keys are unique per compilation, so repeated
-    # compiles (mix test.watch, test harnesses) can't see stale data.
-    runtime_key = {Cucumber, :runtime_data, :erlang.unique_integer([:positive])}
-
-    :persistent_term.put(runtime_key, %{
-      step_registry: step_registry,
-      hooks: all_hooks
-    })
 
     # Generate test module AST
     ast =
@@ -128,15 +118,9 @@ defmodule Cucumber.Compiler do
             end
           )
 
-          # Runtime data accessors (registry and hooks live in :persistent_term)
-          @doc false
-          def __cucumber_feature_hooks__ do
-            :persistent_term.get(unquote(Macro.escape(runtime_key))).hooks
-          end
-
           @doc false
           def __cucumber_runtime__ do
-            :persistent_term.get(unquote(Macro.escape(runtime_key)))
+            Cucumber.RunCoordinator.runtime_data!(unquote(runtime_key))
           end
 
           # One test per pickle (outlines and rules expanded by Gherkin.Pickles)
@@ -194,7 +178,12 @@ defmodule Cucumber.Compiler do
   defp finish_run(suite_result) do
     Cucumber.RunCoordinator.run_after_all(suite_result)
   after
+    flush_and_end_run(suite_result)
+  end
+
+  defp flush_and_end_run(suite_result) do
     Cucumber.RunCoordinator.flush_messages(suite_result)
+  after
     Cucumber.RunCoordinator.end_run()
   end
 

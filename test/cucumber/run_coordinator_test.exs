@@ -5,6 +5,10 @@ defmodule Cucumber.RunCoordinatorTest do
 
   alias Cucumber.RunCoordinator
 
+  setup do
+    Cucumber.BehaviorCase.isolate_coordinator()
+  end
+
   test "ensure_started starts the coordinator and returns a run id" do
     run_id = RunCoordinator.ensure_started()
 

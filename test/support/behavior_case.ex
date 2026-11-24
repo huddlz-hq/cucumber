@@ -94,10 +94,28 @@ defmodule Cucumber.BehaviorCase do
     def events, do: Agent.get(__MODULE__, &Enum.reverse/1)
   end
 
+  @doc false
+  # Nested ExUnit suites share the VM with the generated tests of the outer
+  # suite. Give synchronous tests a separate coordinator for their whole
+  # lifetime, including failures and on_exit callbacks.
+  def isolate_coordinator do
+    name = Cucumber.RunCoordinator
+    outer = Process.whereis(name)
+    if outer, do: Process.unregister(name)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if inner = Process.whereis(name), do: GenServer.stop(inner)
+      if outer, do: Process.register(outer, name)
+    end)
+
+    :ok
+  end
+
   # Tests that drive Cucumber.Runtime directly (bypassing run_feature/2)
   # still need the Collector running; without this, whether it exists
   # depends on which test the seed ordered first.
   setup do
+    isolate_coordinator()
     Collector.reset()
     :ok
   end

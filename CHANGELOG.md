@@ -12,6 +12,7 @@
 
 ### Changed
 
+- Compiled feature modules share their registry and hooks for the duration of the Cucumber run. After suite teardown, call `Cucumber.compile_features!/1` again before rerunning a feature. An explicit ExUnit rerun of an expired module now fails with that instruction.
 - Test cases select step hooks once. Pickle steps and scenario hooks now share the same Cucumber Messages start and finish handling, including attachment attribution and crash reporting.
 - Each compile call expands its pickles once. Static Cucumber Messages IDs have a per-call prefix so other compile calls and running scenarios can allocate IDs concurrently.
 - The Cucumber Messages stream is built by a pure message recorder that `Cucumber.RunCoordinator` holds. The stream is unchanged. The undocumented (`@doc false`) `Cucumber.RunCoordinator.record_message/1` replaces `message_context/0`, `take_message_ids/1`, `emit_runtime/1`, `finish_test_case/3` and `skip_unfinished_steps/3`.

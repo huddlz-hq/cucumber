@@ -89,6 +89,23 @@ defmodule Cucumber.RunCoordinator do
     :ok
   end
 
+  @doc false
+  def register_compilation(registry, hooks) do
+    ensure_process()
+    GenServer.call(__MODULE__, {:register_compilation, registry, hooks})
+  end
+
+  @doc false
+  def runtime_data!(key) do
+    case Process.whereis(__MODULE__) && GenServer.call(__MODULE__, {:runtime_data, key}) do
+      %{} = data ->
+        data
+
+      nil ->
+        raise "This Cucumber feature's run has ended. Call Cucumber.compile_features!/1 again before rerunning it."
+    end
+  end
+
   @doc "Returns the current run id."
   @spec run_id() :: integer()
   def run_id do
@@ -327,7 +344,17 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call(:end_run, _from, state) do
-    {:reply, :ok, %{state | live: false}}
+    {:reply, :ok, %{state | live: false, compilations: %{}}}
+  end
+
+  def handle_call({:register_compilation, registry, hooks}, _from, state) do
+    key = System.unique_integer([:positive])
+    data = %{step_registry: registry, hooks: hooks}
+    {:reply, key, put_in(state.compilations[key], data)}
+  end
+
+  def handle_call({:runtime_data, key}, _from, state) do
+    {:reply, Map.get(state.compilations, key), state}
   end
 
   def handle_call(:run_id, _from, state) do
@@ -499,6 +526,7 @@ defmodule Cucumber.RunCoordinator do
       run_id: run_id,
       live: true,
       next_batch: 0,
+      compilations: %{},
       before_all: %{},
       after_all: [],
       attachments: [],

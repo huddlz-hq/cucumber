@@ -15,6 +15,36 @@ defmodule Cucumber.Behavior.CompileRunsTest do
 
   defp payloads(envelopes, key), do: for(%{^key => payload} <- envelopes, do: payload)
 
+  defmodule LifetimeSteps do
+    use Cucumber.StepDefinition
+
+    step "use this run", _context do
+      Collector.record(:ran)
+      :ok
+    end
+  end
+
+  test "a compiled module expires after teardown and recompiling permits a fresh run" do
+    source = """
+    Feature: resources
+      Scenario: lifetime
+        Given use this run
+    """
+
+    first = run_feature(source, steps: [LifetimeSteps])
+    assert first.passed == 1
+    assert first.events == [:ran]
+
+    {expired, output} = Cucumber.BehaviorCase.run_isolated(first.modules)
+    assert %{total: 1, failures: 1} = expired
+    assert output =~ "Call Cucumber.compile_features!/1 again"
+    assert Collector.events() == [:ran]
+
+    fresh = run_feature(source, steps: [LifetimeSteps])
+    assert fresh.passed == 1
+    assert fresh.events == [:ran]
+  end
+
   @tag :tmp_dir
   test "uses every step definition module in the same file", %{tmp_dir: dir} do
     feature = dir |> Path.join("shared.feature") |> Path.relative_to_cwd()
