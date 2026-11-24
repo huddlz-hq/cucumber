@@ -84,6 +84,41 @@ defmodule Cucumber.RulesBehaviorTest do
     end
   end
 
+  defmodule TagHooks do
+    use Cucumber.Hooks
+
+    before_scenario "@cucumber", ctx do
+      Collector.record({:authored, ctx.scenario_name})
+      :ok
+    end
+
+    before_scenario "@inherited", ctx do
+      Collector.record({ctx.scenario_name, ctx.scenario_tags})
+      :ok
+    end
+  end
+
+  test "hook selection and scenario tags use the tags from the feature source" do
+    run =
+      run_feature(
+        """
+        @inherited
+        Feature: hook tags
+          Scenario: plain
+            Given an action
+
+          @cucumber
+          Scenario: tagged
+            Given an action
+        """, steps: [OrderSteps], hooks: [TagHooks])
+
+    assert run.passed == 2
+    assert {"plain", []} in run.events
+    assert {"tagged", ["cucumber"]} in run.events
+    assert {:authored, "tagged"} in run.events
+    refute {:authored, "plain"} in run.events
+  end
+
   describe "CCK: rules" do
     test "scenarios in rules execute with reference outcomes" do
       run = run_feature(fixture("rules"), steps: [ChocolateSteps])
