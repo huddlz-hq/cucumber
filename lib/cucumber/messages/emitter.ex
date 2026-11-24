@@ -189,54 +189,45 @@ defmodule Cucumber.Messages.Emitter do
     :ok
   end
 
-  @doc false
-  # A test step owns its attachment reference from its start through its last
-  # after-step hook. Recoverable failures finish here; a killed process leaves
-  # the recorder to reconcile the open step at suite end.
   @typep action ::
            {:return, term()} | {:raise, :error | :exit | :throw, term(), Exception.stacktrace()}
-  @spec report_step(map() | nil, TestCase.HookStep.t() | TestCase.PickleTestStep.t(), (map() ->
-                                                                                         {Messages.status(),
-                                                                                          String.t()
-                                                                                          | nil,
-                                                                                          action()})) ::
-          term()
+  @typep execute_step :: (map() -> {Messages.status(), String.t() | nil, action()})
+
+  @doc false
+  # A test step owns its attachment reference from its start through its last
+  # after-step hook. A killed process leaves reconciliation to the recorder.
+  @spec report_step(
+          map() | nil,
+          TestCase.HookStep.t() | TestCase.PickleTestStep.t(),
+          execute_step()
+        ) :: term()
+  def report_step(nil, _test_step, run) do
+    {_status, _detail, action} = run.(%{})
+    complete_step(action)
+  end
+
   def report_step(session, test_step, run) do
-    ref =
-      if session do
-        %{
-          test_case_started_id: session.case_started_id,
-          test_step_id: Map.fetch!(session.step_ids, test_step.position)
-        }
-      end
-
-    started_at = if ref, do: System.monotonic_time(:nanosecond)
-
-    if ref,
-      do:
-        RunCoordinator.record_message({:step_started, ref.test_case_started_id, ref.test_step_id})
+    attempt = session.case_started_id
+    id = Map.fetch!(session.step_ids, test_step.position)
+    ref = %{test_case_started_id: attempt, test_step_id: id}
+    started_at = System.monotonic_time(:nanosecond)
+    RunCoordinator.record_message({:step_started, attempt, id})
 
     {status, detail, action} =
       try do
-        run.(if ref, do: %{cucumber_message_ref: ref}, else: %{})
+        run.(%{cucumber_message_ref: ref})
       catch
         kind, reason ->
           {:failed, Exception.format_banner(kind, reason), {:raise, kind, reason, __STACKTRACE__}}
       end
 
-    if ref do
-      duration = System.monotonic_time(:nanosecond) - started_at
-
-      RunCoordinator.record_message(
-        {:step_finished, ref.test_case_started_id, ref.test_step_id, status, duration, detail}
-      )
-    end
-
-    case action do
-      {:return, value} -> value
-      {:raise, kind, reason, trace} -> :erlang.raise(kind, reason, trace)
-    end
+    duration = System.monotonic_time(:nanosecond) - started_at
+    RunCoordinator.record_message({:step_finished, attempt, id, status, duration, detail})
+    complete_step(action)
   end
+
+  defp complete_step({:return, value}), do: value
+  defp complete_step({:raise, kind, reason, trace}), do: :erlang.raise(kind, reason, trace)
 
   @doc false
   @spec hook_around(map() | nil) :: Cucumber.Hooks.around() | nil

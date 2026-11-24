@@ -398,16 +398,7 @@ defmodule Cucumber.Hooks do
   end
 
   defp invoke_halting_hook(around, %{name: name, ref: {module, func_name}} = hook, context) do
-    run = fn overrides ->
-      case apply_before_hook(module, func_name, Map.merge(context, overrides)) do
-        {:ok, updated} when map_size(overrides) > 0 ->
-          keys = Map.keys(overrides)
-          {:ok, Map.merge(Map.drop(updated, keys), Map.take(context, keys))}
-
-        result ->
-          result
-      end
-    end
+    run = fn overrides -> apply_before_hook(module, func_name, Map.merge(context, overrides)) end
 
     case around.(hook, run) do
       {:error, reason} -> {:error, reason, name}
