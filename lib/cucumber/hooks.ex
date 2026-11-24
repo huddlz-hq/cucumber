@@ -101,7 +101,7 @@ defmodule Cucumber.Hooks do
   Can optionally be filtered by tag and/or given a `name:`. The hook
   receives the test context and must return one of:
 
-  - `{:ok, context}`
+  - `{:ok, map}` (merged into context)
   - `:ok` (keeps context unchanged)
   - map (merged into context)
   - keyword list (merged into context)
