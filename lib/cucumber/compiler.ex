@@ -118,7 +118,7 @@ defmodule Cucumber.Compiler do
 
           @doc false
           def __cucumber_runtime__ do
-            Cucumber.RunCoordinator.runtime_data!(unquote(Macro.escape(runtime_key)))
+            Cucumber.CompiledRuntime.fetch!(unquote(Macro.escape(runtime_key)))
           end
 
           # One test per pickle (outlines and rules expanded by Gherkin.Pickles)

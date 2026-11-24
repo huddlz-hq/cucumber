@@ -24,6 +24,30 @@ defmodule Cucumber.RunCoordinatorTest do
     assert RunCoordinator.run_id() == second
   end
 
+  test "teardown releases every joined compilation and reused slots reject stale handles" do
+    registry = Cucumber.StepRegistry.new([])
+    first = RunCoordinator.register_compilation(registry, [])
+    second = RunCoordinator.register_compilation(registry, [])
+    assert first != second
+    assert Cucumber.CompiledRuntime.fetch!(first) == Cucumber.CompiledRuntime.fetch!(second)
+
+    RunCoordinator.end_run()
+
+    for {slot, _generation} <- [first, second] do
+      assert :persistent_term.get(slot, :absent) == :absent
+    end
+
+    RunCoordinator.start_or_join()
+    fresh = RunCoordinator.register_compilation(registry, [])
+    assert %{step_registry: ^registry} = Cucumber.CompiledRuntime.fetch!(fresh)
+
+    for stale <- [first, second] do
+      assert_raise RuntimeError, ~r/compile_features!/, fn ->
+        Cucumber.CompiledRuntime.fetch!(stale)
+      end
+    end
+  end
+
   defmodule BeforeAllProbe do
     def increment(context) do
       count = Agent.get_and_update(__MODULE__.Counter, &{&1 + 1, &1 + 1})
