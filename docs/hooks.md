@@ -213,10 +213,10 @@ Scenario and step hooks receive the following context:
 
 - `:feature_tags` - Tags on the Feature, as strings without the leading `@`.
 - `:scenario_tags` - Tags on the Scenario or Scenario Outline, plus tags inherited from its Rule or Examples block. These also omit the leading `@`.
-- `:scenario_name` - The name of the current scenario
-- `:async` - Whether the feature is running in async mode
-- `:step_history` - List of steps executed (empty in before hooks)
-- Any data added by previous hooks or steps
+- `:scenario_name` - The name of the current scenario.
+- `:async` - Whether the feature is running in async mode.
+- `:step_history` - Empty in `before_scenario`. In a `before_step` hook, the history already includes the current step.
+- Any data added by previous hooks or steps.
 
 Tagged hooks match either list. For example, a hook tagged `@database` runs for every scenario in a feature tagged `@database`, even if a scenario's own tag list is empty.
 
