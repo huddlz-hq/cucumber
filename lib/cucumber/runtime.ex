@@ -29,22 +29,6 @@ defmodule Cucumber.Runtime do
   alias Cucumber.StepRegistry.Definition
   alias Cucumber.TestCase
 
-  # Standard ExUnit context keys — everything else in the test context is a
-  # scenario tag (ExUnit puts @tag values directly in the context as keys).
-  @exunit_context_keys [
-    :async,
-    :line,
-    :module,
-    :registered,
-    :file,
-    :test,
-    :describe,
-    :describe_line,
-    :test_type,
-    :test_pid,
-    :test_group
-  ]
-
   @doc """
   Runs a complete scenario inside the test process: before hooks, background
   steps, scenario steps, and after hooks.
@@ -83,15 +67,7 @@ defmodule Cucumber.Runtime do
   def run_scenario(exunit_context, scenario, runtime_data) do
     %{step_registry: step_registry, hooks: hooks} = runtime_data
 
-    scenario_tags =
-      exunit_context
-      |> Map.keys()
-      |> Enum.filter(&is_atom/1)
-      |> Enum.reject(&(&1 in @exunit_context_keys))
-      |> Enum.map(&to_string/1)
-
-    # Combine feature tags + scenario tags for hook matching
-    all_tags = Enum.uniq(scenario.feature_tags ++ scenario_tags)
+    all_tags = Enum.uniq(scenario.feature_tags ++ scenario.scenario_tags)
 
     # Hook selection and step matching happen once, here; every attempt
     # and the message session share the result. Step arguments are
@@ -102,8 +78,7 @@ defmodule Cucumber.Runtime do
     exec = %{
       test_case: test_case,
       hooks: hooks,
-      tags: all_tags,
-      scenario_tags: scenario_tags
+      tags: all_tags
     }
 
     # Run-level setup happens lazily before the first scenario of the run —
@@ -181,7 +156,7 @@ defmodule Cucumber.Runtime do
   # indistinguishable.
   defp max_attempts(scenario) do
     retries =
-      tag_retry_limit(Map.get(scenario, :scenario_tags, [])) ||
+      tag_retry_limit(scenario.scenario_tags) ||
         tag_retry_limit(scenario.feature_tags) ||
         config_retry_limit()
 
@@ -221,7 +196,7 @@ defmodule Cucumber.Runtime do
         step_history: [],
         feature_file: scenario.feature_file,
         feature_tags: scenario.feature_tags,
-        scenario_tags: exec.scenario_tags,
+        scenario_tags: scenario.scenario_tags,
         async: scenario.async,
         scenario_name: scenario.scenario_name,
         scenario_line: scenario.scenario_line,

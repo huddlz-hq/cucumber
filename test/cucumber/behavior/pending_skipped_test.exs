@@ -397,6 +397,7 @@ defmodule Cucumber.PendingSkippedTest do
       scenario = %{
         feature_file: "skipped_steps.feature",
         feature_tags: [],
+        scenario_tags: [],
         async: false,
         scenario_name: "skip tail",
         scenario_line: 2,
