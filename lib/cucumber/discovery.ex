@@ -138,14 +138,8 @@ defmodule Cucumber.Discovery do
   defp load_step_definitions(patterns) do
     patterns
     |> expand_patterns()
-    |> Enum.map(&load_step_module/1)
-    |> Enum.filter(& &1)
-  end
-
-  defp load_step_module(path) do
-    path
-    |> loaded_modules()
-    |> Enum.find(&function_exported?(&1, :__cucumber_steps__, 0))
+    |> Enum.flat_map(&loaded_modules/1)
+    |> Enum.filter(&function_exported?(&1, :__cucumber_steps__, 0))
   end
 
   defp discover_features(patterns) do
