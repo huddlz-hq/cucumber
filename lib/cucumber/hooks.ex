@@ -101,7 +101,7 @@ defmodule Cucumber.Hooks do
   Can optionally be filtered by tag and/or given a `name:`. The hook
   receives the test context and must return one of:
 
-  - `{:ok, context}`
+  - `{:ok, map}` (merged into context)
   - `:ok` (keeps context unchanged)
   - map (merged into context)
   - keyword list (merged into context)
@@ -429,8 +429,8 @@ defmodule Cucumber.Hooks do
       :ok ->
         {:ok, context}
 
-      {:ok, new_context} ->
-        {:ok, new_context}
+      {:ok, %{} = updates} ->
+        {:ok, Map.merge(context, updates)}
 
       %{} = new_context ->
         {:ok, Map.merge(context, new_context)}
@@ -443,7 +443,7 @@ defmodule Cucumber.Hooks do
 
       other ->
         raise "Invalid hook return value from #{inspect(module)}.#{func_name}/1: #{inspect(other)}. " <>
-                "Expected :ok, {:ok, context}, a map, a keyword list, {:error, reason}, " <>
+                "Expected :ok, {:ok, map}, a map, a keyword list, {:error, reason}, " <>
                 ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
     end
   end

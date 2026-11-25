@@ -77,6 +77,51 @@ defmodule Cucumber.RunnerLifecycleTest do
     end
   end
 
+  defmodule PartialSetup do
+    use Cucumber.Hooks
+
+    before_all _ctx do
+      {:ok, %{first: 1}}
+    end
+
+    before_all _ctx, name: "more setup" do
+      {:ok, %{second: 2}}
+    end
+
+    before_scenario _ctx do
+      {:ok, %{third: 3}}
+    end
+
+    before_step _ctx do
+      {:ok, %{fourth: 4}}
+    end
+  end
+
+  defmodule ContextStep do
+    use Cucumber.StepDefinition
+
+    step "inspect setup", ctx do
+      Collector.record({ctx.first, ctx.second, ctx.third, ctx.fourth, ctx.scenario_name})
+      :ok
+    end
+  end
+
+  test "partial maps from successive before hooks preserve scenario and setup data" do
+    run =
+      run_feature(
+        """
+        Feature: setup
+          Scenario: partial maps
+            Given inspect setup
+        """,
+        steps: [ContextStep],
+        hooks: [PartialSetup]
+      )
+
+    assert run.passed == 1
+    assert run.events == [{1, 2, 3, 4, "partial maps"}]
+  end
+
   describe "hook ordering" do
     test "before hooks run in definition order, after hooks in reverse" do
       run =
