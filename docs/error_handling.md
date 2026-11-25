@@ -271,7 +271,9 @@ with `start_supervised!` are still running (a retry starting the same
 named process will see `:already_started`), and the process dictionary
 persists. Steps in retried scenarios should tolerate re-entry — or
 reset shared state in a `before_scenario` hook, which runs at the top
-of every attempt.
+of every attempt. With a case template, the template's `setup` (e.g. a
+sandbox owner) is shared across attempts, so per-attempt setup belongs in
+`before_scenario`.
 
 ### Step-Level Techniques
 
