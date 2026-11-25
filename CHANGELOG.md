@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `config :cucumber, step_wrapper: {module, function}` (or the `:step_wrapper` option of `Cucumber.compile_features!/1`) calls `module.function(step, context, run)` around every executed step, background steps included, e.g. to run each Gherkin step inside a tracer's or test framework's own step. `run` returns the updated context, or `{:halted, :pending | :skipped, reason, context}`, and a failing step raises out of it. The wrapper must call `run` exactly once, in its own process; its return value is ignored. A wrapper that breaks this, or raises before `run` or after `run` returned, fails the step with `Cucumber.StepWrapperError`. A contract break (no `run`, `run` twice or from another process) is never retried; a raise, exit or throw from the wrapper is retried like its cause would be. A retried scenario calls the wrapper once per step per attempt. See "Step Wrapper" in the Hooks guide.
+
 ## v1.2.0 (2026-11-24)
 
 ### Fixed

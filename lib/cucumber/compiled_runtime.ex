@@ -2,7 +2,11 @@ defmodule Cucumber.CompiledRuntime do
   @moduledoc false
 
   @type key :: {{module(), atom(), pos_integer()}, pos_integer()}
-  @type data :: %{step_registry: Cucumber.StepRegistry.t(), hooks: [Cucumber.Hooks.hook()]}
+  @type data :: %{
+          step_registry: Cucumber.StepRegistry.t(),
+          hooks: [Cucumber.Hooks.hook()],
+          step_wrapper: term()
+        }
 
   # Only the coordinator for this scope writes. Give each compilation a
   # separate slot so joining a run never replaces a snapshot in active use.

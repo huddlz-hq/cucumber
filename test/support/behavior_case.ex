@@ -142,6 +142,8 @@ defmodule Cucumber.BehaviorCase do
     * `:messages` - a path enabling the Cucumber Messages sink for this run
       (mirroring `config :cucumber, messages: path`); the NDJSON file is
       flushed when the nested run finishes
+    * `:step_wrapper` - the step wrapper (mirroring the
+      `Cucumber.compile_features!/1` option; the app env is the fallback)
     * `:seed` - seed for the nested run (`0` runs scenarios in definition
       order — required when asserting on cross-scenario ordering, e.g.
       comparing message streams); defaults to the outer suite's seed
@@ -206,7 +208,11 @@ defmodule Cucumber.BehaviorCase do
         features,
         registry,
         hook_modules,
-        opts[:messages]
+        opts[:messages],
+        step_wrapper:
+          Keyword.get_lazy(opts, :step_wrapper, fn ->
+            Application.get_env(:cucumber, :step_wrapper)
+          end)
       )
 
     {result, output} = run_isolated(modules, Keyword.take(opts, [:seed]))

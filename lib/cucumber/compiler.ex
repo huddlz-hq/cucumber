@@ -34,7 +34,11 @@ defmodule Cucumber.Compiler do
       features,
       step_registry,
       hook_modules,
-      Application.get_env(:cucumber, :messages)
+      Application.get_env(:cucumber, :messages),
+      step_wrapper:
+        Keyword.get_lazy(opts, :step_wrapper, fn ->
+          Application.get_env(:cucumber, :step_wrapper)
+        end)
     )
   end
 
@@ -44,12 +48,18 @@ defmodule Cucumber.Compiler do
   # ids are unique across the whole run — the messages stream references
   # them run-wide. When `messages_path` is set, builds the run's static
   # envelopes and turns on the coordinator's message recorder; the runner and the
-  # after_suite flush do the rest. Shared by compile_features!/1 and
+  # after_suite flush do the rest. `:step_wrapper` is carried to the
+  # generated tests' scenarios. Shared by compile_features!/1 and
   # Cucumber.BehaviorCase.
-  @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
-          [module()]
-  def compile_all!(features, step_registry, hook_modules, messages_path) do
-    compile_modules!(features, step_registry, hook_modules, fn hooks ->
+  @spec compile_all!(
+          [map()],
+          Cucumber.StepRegistry.t(),
+          [module()],
+          String.t() | nil,
+          keyword()
+        ) :: [module()]
+  def compile_all!(features, step_registry, hook_modules, messages_path, opts \\ []) do
+    compile_modules!(features, step_registry, hook_modules, opts[:step_wrapper], fn hooks ->
       Emitter.prepare_features(features, step_registry, hooks, messages_path)
     end)
   end
@@ -60,10 +70,16 @@ defmodule Cucumber.Compiler do
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
   # `:compilation` accepts a precomputed `Gherkin.Pickles.Compilation` (used
   # by compile_features!/1 to thread run-unique pickle ids across features).
+  # `:step_wrapper` is as for compile_all!/5.
   @spec compile_feature!(map(), Cucumber.StepRegistry.t(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
+    step_wrapper =
+      Keyword.get_lazy(opts, :step_wrapper, fn ->
+        Application.get_env(:cucumber, :step_wrapper)
+      end)
+
     [module] =
-      compile_modules!([feature], step_registry, hook_modules, fn _hooks ->
+      compile_modules!([feature], step_registry, hook_modules, step_wrapper, fn _hooks ->
         compilation =
           Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
@@ -73,7 +89,7 @@ defmodule Cucumber.Compiler do
     module
   end
 
-  defp compile_modules!(features, registry, hook_modules, prepare) do
+  defp compile_modules!(features, registry, hook_modules, step_wrapper, prepare) do
     register_after_suite_callback()
     hooks = Cucumber.Hooks.collect_hooks(hook_modules)
     names = Enum.map(features, &{generate_module_name(&1.file), &1.file})
@@ -87,7 +103,7 @@ defmodule Cucumber.Compiler do
 
           pairs ->
             Cucumber.RunCoordinator.register_after_all(hooks)
-            {pairs, Cucumber.RunCoordinator.register_compilation(registry, hooks)}
+            {pairs, Cucumber.RunCoordinator.register_compilation(registry, hooks, step_wrapper)}
         end
       end)
 
