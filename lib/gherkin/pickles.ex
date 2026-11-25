@@ -147,10 +147,21 @@ defmodule Gherkin.Pickles do
   """
   @spec compile(map(), non_neg_integer()) :: Compilation.t()
   def compile(feature, start_id \\ 0) do
+    compile(feature, start_id, "")
+  end
+
+  @doc false
+  @spec compile(map(), non_neg_integer(), String.t()) :: Compilation.t()
+  def compile(feature, start_id, prefix) do
     uri = Map.get(feature, :file)
 
     {feature_tags, ids} =
-      build_tags(feature.tags, Map.get(feature, :tag_lines), Map.get(feature, :line), start_id)
+      build_tags(
+        feature.tags,
+        Map.get(feature, :tag_lines),
+        Map.get(feature, :line),
+        {prefix, start_id}
+      )
 
     {background_children, background_source, ids} =
       build_background_child(feature.background, ids)
@@ -177,7 +188,7 @@ defmodule Gherkin.Pickles do
           Enum.map(sources, &Map.put(&1, :rule, rule))
         end)
 
-    {pickles, next_id} =
+    {pickles, {^prefix, next_id}} =
       build_pickles(sources, background_source, feature_tags, uri, ids)
 
     comments =
@@ -201,7 +212,7 @@ defmodule Gherkin.Pickles do
   def location(nil), do: %{line: 1}
   def location(line), do: %{line: line + 1}
 
-  defp next(ids), do: {Integer.to_string(ids), ids + 1}
+  defp next({prefix, id}), do: {prefix <> Integer.to_string(id), {prefix, id + 1}}
 
   # Tags get ids (pickle tags reference them). Parsed features record each
   # tag's own line (`tag_lines`, parallel to `tags`); hand-built ASTs fall

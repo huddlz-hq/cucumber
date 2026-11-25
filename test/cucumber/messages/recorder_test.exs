@@ -192,19 +192,6 @@ defmodule Cucumber.Messages.RecorderTest do
     end
   end
 
-  describe "reserve_ids/2" do
-    test "takes a block of run-unique ids that later allocation skips", %{recorder: recorder} do
-      {first, recorder} = Recorder.reserve_ids(recorder, 25)
-      assert first == 10
-
-      {[%{test_case_id: test_case_id}], _recorder} =
-        record(recorder, [{:open_test_case, test_case()}])
-
-      # 35 is testRunStarted
-      assert test_case_id == "36"
-    end
-  end
-
   describe "{:open_test_case, test_case}" do
     test "allocates ids for the test case and each test step by position", %{recorder: recorder} do
       {[reply], _recorder} = record(recorder, [{:open_test_case, test_case()}])
