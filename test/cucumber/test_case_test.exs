@@ -62,7 +62,15 @@ defmodule Cucumber.TestCaseTest do
       :ok
     end
 
-    before_step _context do
+    after_step _context, name: "global cleanup" do
+      :ok
+    end
+
+    after_step "@database", _context, name: "database cleanup" do
+      :ok
+    end
+
+    before_step "@database", _context, name: "database setup" do
       :ok
     end
   end
@@ -126,6 +134,11 @@ defmodule Cucumber.TestCaseTest do
       test_case = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, ["database"])
 
       refs = Enum.map(test_case.before_hooks ++ test_case.after_hooks, & &1.ref)
+      assert [{"database setup", _}] = test_case.before_step_hooks
+      assert [{"database cleanup", _}, {"global cleanup", _}] = test_case.after_step_hooks
+      untagged = TestCase.new(ctx.scenario, ctx.registry, ctx.hooks, [])
+      assert untagged.before_step_hooks == []
+      assert [{"global cleanup", _}] = untagged.after_step_hooks
       assert length(refs) == 4
       assert Enum.all?(refs, fn {Hooks, _function} -> true end)
     end

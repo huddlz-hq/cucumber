@@ -776,6 +776,33 @@ defmodule Cucumber.Behavior.MessagesEmissionTest do
            ]
   end
 
+  defmodule ThrowingAfterStep do
+    use Cucumber.Hooks
+
+    after_step context do
+      Cucumber.log(context, "inside the hook")
+      throw(:hook_stopped)
+    end
+  end
+
+  test "a throwing after-step hook attaches evidence before its single failed finish" do
+    run =
+      run_messages(
+        """
+        Feature: throwing hook
+          Scenario: record evidence
+            Given a passing step
+        """,
+        steps: [Steps],
+        hooks: [ThrowingAfterStep]
+      )
+
+    assert run.failures == 1
+    assert finished_steps(run.messages) == [{"a passing step", "FAILED"}]
+    assert [%{"body" => "inside the hook"}] = payloads(run.messages, "attachment")
+    assert :ok = Cucumber.CckStream.assert_valid(run.messages)
+  end
+
   test "an after_step hook raising reports the step FAILED, not UNKNOWN" do
     run =
       run_messages(

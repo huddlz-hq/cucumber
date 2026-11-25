@@ -369,14 +369,13 @@ defmodule Cucumber.Hooks do
 
   @doc false
   # Same contract as run_before_hooks/3, for before_step hooks, which are
-  # selected here by tag (they are not test steps).
-  @spec run_before_step_hooks([hook()], map(), [String.t()]) ::
+  # already selected by tag (they are not test steps).
+  @spec run_before_step_hooks([{String.t() | nil, {module(), atom()}}], map()) ::
           {:ok, map()}
           | {:error, term(), String.t() | nil}
           | {:halted, :pending | :skipped, String.t() | nil}
-  def run_before_step_hooks(hooks, context, tags) do
+  def run_before_step_hooks(hooks, context) do
     hooks
-    |> filter_hooks(:before_step, tags)
     |> Enum.map(fn {name, ref} -> %{name: name, ref: ref} end)
     |> run_halting_hooks(context, &unwrapped/2)
   end
@@ -465,15 +464,12 @@ defmodule Cucumber.Hooks do
   end
 
   @doc false
-  # Runs after_step hooks in reverse order with :step_status set in the
-  # context. Return values are ignored.
-  @spec run_after_step_hooks([hook()], map(), [String.t()], atom()) :: :ok
-  def run_after_step_hooks(hooks, context, tags, status) do
+  # The test case supplies after_step hooks in execution order. Each hook
+  # receives :step_status in the context.
+  @spec run_after_step_hooks([{String.t() | nil, {module(), atom()}}], map(), atom()) :: :ok
+  def run_after_step_hooks(hooks, context, status) do
     context = Map.put(context, :step_status, status)
 
-    hooks
-    |> filter_hooks(:after_step, tags)
-    |> Enum.reverse()
-    |> Enum.each(fn {_name, {module, func_name}} -> apply(module, func_name, [context]) end)
+    Enum.each(hooks, fn {_name, {module, func_name}} -> apply(module, func_name, [context]) end)
   end
 end

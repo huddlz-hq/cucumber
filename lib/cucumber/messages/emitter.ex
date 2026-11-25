@@ -191,83 +191,58 @@ defmodule Cucumber.Messages.Emitter do
     :ok
   end
 
-  @doc false
-  # Builds the per-step message reference the runner threads into a test
-  # step's execution: ids plus the monotonic start time for duration.
-  @spec step_message(map() | nil, TestCase.HookStep.t() | TestCase.PickleTestStep.t()) ::
-          map() | nil
-  def step_message(nil, _test_step), do: nil
+  @typep action ::
+           {:return, term()} | {:raise, :error | :exit | :throw, term(), Exception.stacktrace()}
+  @typep execute_step :: (map() -> {Messages.status(), String.t() | nil, action()})
 
-  def step_message(session, test_step) do
-    %{
-      test_case_started_id: session.case_started_id,
-      test_step_id: Map.fetch!(session.step_ids, test_step.position),
-      started_at: System.monotonic_time(:nanosecond)
-    }
+  @doc false
+  # A test step owns its attachment reference from its start through its last
+  # after-step hook. A killed process leaves reconciliation to the recorder.
+  @spec report_step(
+          map() | nil,
+          TestCase.HookStep.t() | TestCase.PickleTestStep.t(),
+          execute_step()
+        ) :: term()
+  def report_step(nil, _test_step, run) do
+    {_status, _detail, action} = run.(%{})
+    complete_step(action)
   end
 
-  @doc false
-  @spec step_started(map() | nil) :: :ok
-  def step_started(nil), do: :ok
+  def report_step(session, test_step, run) do
+    attempt = session.case_started_id
+    id = Map.fetch!(session.step_ids, test_step.position)
+    ref = %{test_case_started_id: attempt, test_step_id: id}
+    started_at = System.monotonic_time(:nanosecond)
+    RunCoordinator.record_message({:step_started, attempt, id})
 
-  def step_started(message) do
-    RunCoordinator.record_message(
-      {:step_started, message.test_case_started_id, message.test_step_id}
-    )
+    {status, detail, action} =
+      try do
+        run.(%{cucumber_message_ref: ref})
+      catch
+        kind, reason ->
+          {:failed, Exception.format_banner(kind, reason), {:raise, kind, reason, __STACKTRACE__}}
+      end
 
-    :ok
+    duration = System.monotonic_time(:nanosecond) - started_at
+    RunCoordinator.record_message({:step_finished, attempt, id, status, duration, detail})
+    complete_step(action)
   end
 
-  @doc false
-  @spec step_finished(map() | nil, Messages.status(), String.t() | nil) :: :ok
-  def step_finished(message, status, error_message \\ nil)
-
-  def step_finished(nil, _status, _error_message), do: :ok
-
-  def step_finished(message, status, error_message) do
-    duration = System.monotonic_time(:nanosecond) - message.started_at
-
-    RunCoordinator.record_message(
-      {:step_finished, message.test_case_started_id, message.test_step_id, status, duration,
-       error_message}
-    )
-
-    :ok
-  end
+  defp complete_step({:return, value}), do: value
+  defp complete_step({:raise, kind, reason, trace}), do: :erlang.raise(kind, reason, trace)
 
   @doc false
-  # Builds the around-callback `Cucumber.Hooks` uses to bracket each
-  # scenario hook with testStepStarted/testStepFinished events, injecting
-  # the hook's own message reference so attachments recorded inside it land
-  # on the hook's test step. Returns nil (hooks then run unbracketed) when
-  # the session is nil.
   @spec hook_around(map() | nil) :: Cucumber.Hooks.around() | nil
   def hook_around(nil), do: nil
 
   def hook_around(session) do
-    fn hook_step, hook_fun ->
-      message = step_message(session, hook_step)
-      step_started(message)
-      run_bracketed_hook(message, hook_fun)
+    fn hook, invoke ->
+      report_step(session, hook, fn overrides ->
+        result = invoke.(overrides)
+        {status, detail} = hook_result(result)
+        {status, detail, {:return, result}}
+      end)
     end
-  end
-
-  defp run_bracketed_hook(message, hook_fun) do
-    overrides = %{
-      cucumber_message_ref: %{
-        test_case_started_id: message.test_case_started_id,
-        test_step_id: message.test_step_id
-      }
-    }
-
-    result = hook_fun.(overrides)
-    {status, status_message} = hook_result(result)
-    step_finished(message, status, status_message)
-    result
-  catch
-    kind, reason ->
-      step_finished(message, :failed, Exception.format_banner(kind, reason))
-      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   # Before-hook results arrive as control tuples ({:halted, ...} from the

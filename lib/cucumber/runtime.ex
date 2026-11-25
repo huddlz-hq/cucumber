@@ -75,11 +75,7 @@ defmodule Cucumber.Runtime do
     # code), so nothing in the test case runs user code.
     test_case = TestCase.new(scenario, step_registry, hooks, all_tags)
 
-    exec = %{
-      test_case: test_case,
-      hooks: hooks,
-      tags: all_tags
-    }
+    exec = %{test_case: test_case}
 
     # Run-level setup happens lazily before the first scenario of the run —
     # and before this scenario's message session opens, so testRunHook
@@ -373,7 +369,7 @@ defmodule Cucumber.Runtime do
     do_execute_step(
       context,
       TestCase.pickle_test_step(step, step_registry),
-      %{hooks: [], tags: [], msg: nil}
+      %{test_case: %{before_step_hooks: [], after_step_hooks: []}, msg: nil}
     )
   end
 
@@ -383,37 +379,17 @@ defmodule Cucumber.Runtime do
     context = update_in(context, [:step_history], &(&1 ++ [step]))
     context = Map.put(context, :cucumber_phase, :step)
 
-    # Message bookkeeping for this step (nil when messages are off)
-    msg = Emitter.step_message(exec.msg, pickle_test_step)
-    Emitter.step_started(msg)
-    context = put_step_message_ref(context, msg)
+    Emitter.report_step(exec.msg, pickle_test_step, fn overrides ->
+      run_pickle_step(pickle_test_step.match, step, Map.merge(context, overrides), exec.test_case)
+    end)
+  end
 
-    # The step was matched against the step registry when the test case
-    # was built; its arguments are converted now, so parameter type
-    # transforms run only for steps that run, once per attempt
-    case pickle_test_step.match do
+  defp run_pickle_step(match, step, context, test_case) do
+    case match do
       {:ok, definition} ->
-        # A raising transform fails this step
-        args = reporting_step_failure(msg, fn -> StepRegistry.args(definition, step.text) end)
-
-        # Prepare context with step arguments; :step is visible to step
-        # hooks and the step body alike
-        context =
-          context
-          |> prepare_context(args, step)
-          |> Map.put(:step, step)
-
-        outcome = run_matched_step(context, step, definition, exec, msg)
-
-        case outcome do
-          {:halted, status, reason, _ctx} ->
-            Emitter.step_finished(msg, status, reason)
-
-          _ctx ->
-            Emitter.step_finished(msg, :passed)
-        end
-
-        outcome
+        args = StepRegistry.args(definition, step.text)
+        context = context |> prepare_context(args, step) |> Map.put(:step, step)
+        run_matched_step(context, step, definition, test_case)
 
       {:ambiguous, definitions} ->
         feature_file = Map.get(context, :feature_file, "unknown")
@@ -426,8 +402,7 @@ defmodule Cucumber.Runtime do
           end
 
         error = Cucumber.AmbiguousStepError.new(step, listed, feature_file, scenario_name)
-        Emitter.step_finished(msg, :ambiguous, Exception.message(error))
-        :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
+        step_error(:ambiguous, error, scenario_stacktrace(context, step, current_stacktrace()))
 
       :undefined ->
         # Extract context info for better error
@@ -444,113 +419,61 @@ defmodule Cucumber.Runtime do
             format_step_history_with_status(step_history, step, context)
           )
 
-        Emitter.step_finished(msg, :undefined, Exception.message(error))
-        :erlang.raise(:error, error, scenario_stacktrace(context, step, current_stacktrace()))
+        step_error(:undefined, error, scenario_stacktrace(context, step, current_stacktrace()))
     end
   end
 
-  # Attachments recorded inside the step body reference this step's message
-  # ids (see Cucumber.attach/4).
-  defp put_step_message_ref(context, nil), do: context
-
-  defp put_step_message_ref(context, msg) do
-    Map.put(context, :cucumber_message_ref, %{
-      test_case_started_id: msg.test_case_started_id,
-      test_step_id: msg.test_step_id
-    })
+  defp step_error(status, error, trace) do
+    {status, Exception.message(error), {:raise, :error, error, trace}}
   end
 
-  # Brackets the matched step definition with before_step/after_step hooks.
-  # A {:error, reason} from a before_step hook fails the scenario without
-  # running the step body; a :pending/:skipped signal halts the scenario
-  # like the step itself returning it.
-  defp run_matched_step(context, step, definition, exec, msg) do
-    hook_result =
-      reporting_step_failure(msg, fn ->
-        Cucumber.Hooks.run_before_step_hooks(exec.hooks, context, exec.tags)
-      end)
-
-    case hook_result do
+  defp run_matched_step(context, step, definition, test_case) do
+    case Cucumber.Hooks.run_before_step_hooks(test_case.before_step_hooks, context) do
       {:error, reason, hook_name} ->
-        message = "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
-        Emitter.step_finished(msg, :failed, message)
-        raise message
+        error =
+          RuntimeError.exception(
+            "Before step hook#{hook_label(hook_name)} failed: #{inspect(reason)}"
+          )
+
+        step_error(:failed, error, current_stacktrace())
 
       {:halted, status, reason} ->
-        {:halted, status, reason, context}
+        {status, reason, {:return, {:halted, status, reason, context}}}
 
       {:ok, context} ->
-        invoke_step(context, step, definition, exec, msg)
+        invoke_step(context, step, definition, test_case.after_step_hooks)
     end
   end
 
-  defp invoke_step(context, step, definition, exec, msg) do
-    outcome =
-      try do
-        result = apply(definition.module, definition.function, [context])
-        process_step_result(result, context)
-      catch
-        # `catch` (not `rescue`) so exits and throws get the same step-level
-        # bookkeeping as raised exceptions: after-step hooks with :failed,
-        # and the enhanced error with step history and attachments
-        kind, reason ->
-          failure_description = describe_failure(kind, reason, __STACKTRACE__)
-
-          # After-step hooks see failing steps too (a hook raising here
-          # masks the step's own error — that's the hook author's bug).
-          # They run before the step's finished event, as on the passing
-          # path, so hook attachments land inside the step's event window
-          reporting_step_failure(msg, fn ->
-            Cucumber.Hooks.run_after_step_hooks(exec.hooks, context, exec.tags, :failed)
-          end)
-
-          Emitter.step_finished(msg, :failed, failure_description)
-
-          # Extract meaningful information from the error
-          feature_file = Map.get(context, :feature_file, "unknown")
-          scenario_name = Map.get(context, :scenario_name, "unknown scenario")
-          step_history = Map.get(context, :step_history, [])
-
-          # Create enhanced error with better formatting
-          enhanced_error =
-            Cucumber.StepError.failed_step(
-              step,
-              Definition.display_pattern(definition),
-              failure_description,
-              feature_file,
-              scenario_name,
-              format_step_history_with_status(step_history, step, context)
-            )
-
-          enhanced_error = append_attachments(enhanced_error, context)
-
-          reraise enhanced_error, scenario_stacktrace(context, step, __STACKTRACE__)
-      end
-
-    {status, hook_context} =
-      case outcome do
-        {:halted, status, _reason, ctx} -> {status, ctx}
-        ctx -> {:passed, ctx}
-      end
-
-    reporting_step_failure(msg, fn ->
-      Cucumber.Hooks.run_after_step_hooks(exec.hooks, hook_context, exec.tags, status)
-    end)
-
-    outcome
-  end
-
-  # A step hook raising fails the scenario; the step itself must still be
-  # reported FAILED in the message stream before the raise escapes —
-  # otherwise it would surface as UNKNOWN (the killed-process status) at
-  # reconciliation. When `fun` returns normally the step's own finished
-  # event follows from the regular emission points.
-  defp reporting_step_failure(msg, fun) do
-    fun.()
+  defp invoke_step(context, step, definition, after_hooks) do
+    result = apply(definition.module, definition.function, [context])
+    process_step_result(result, context)
   catch
     kind, reason ->
-      Emitter.step_finished(msg, :failed, Exception.format_banner(kind, reason))
-      :erlang.raise(kind, reason, __STACKTRACE__)
+      trace = __STACKTRACE__
+      detail = describe_failure(kind, reason, trace)
+      Cucumber.Hooks.run_after_step_hooks(after_hooks, context, :failed)
+
+      error =
+        Cucumber.StepError.failed_step(
+          step,
+          Definition.display_pattern(definition),
+          detail,
+          Map.get(context, :feature_file, "unknown"),
+          Map.get(context, :scenario_name, "unknown scenario"),
+          format_step_history_with_status(context.step_history, step, context)
+        )
+        |> append_attachments(context)
+
+      {:failed, detail, {:raise, :error, error, scenario_stacktrace(context, step, trace)}}
+  else
+    {:halted, status, reason, ctx} = outcome ->
+      Cucumber.Hooks.run_after_step_hooks(after_hooks, ctx, status)
+      {status, reason, {:return, outcome}}
+
+    ctx ->
+      Cucumber.Hooks.run_after_step_hooks(after_hooks, ctx, :passed)
+      {:passed, nil, {:return, ctx}}
   end
 
   defp hook_label(nil), do: ""
@@ -606,7 +529,7 @@ defmodule Cucumber.Runtime do
   end
 
   # The scenario-level attachment reference: hooks attach against the test
-  # case only (no step id); steps override this with put_step_message_ref/2.
+  # case only (no step id). Emitter supplies the active test step’s reference.
   defp message_ref(nil), do: nil
   defp message_ref(session), do: %{test_case_started_id: session.case_started_id}
 
@@ -628,7 +551,11 @@ defmodule Cucumber.Runtime do
   defp current_stacktrace do
     {:current_stacktrace, trace} = Process.info(self(), :current_stacktrace)
     # Drop Process.info/2 and this function's own frames
-    Enum.reject(trace, &match?({Process, _, _, _}, &1))
+    Enum.drop_while(trace, fn
+      {Process, :info, _, _} -> true
+      {__MODULE__, :current_stacktrace, _, _} -> true
+      _frame -> false
+    end)
   end
 
   defp prepare_context(context, args, step) do
