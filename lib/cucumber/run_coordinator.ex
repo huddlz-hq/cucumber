@@ -86,15 +86,15 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  @spec claim_feature_modules!([{module(), String.t()}]) :: :ok
+  @spec claim_feature_modules!([{module(), String.t()}]) :: integer()
   def claim_feature_modules!(names) do
     case GenServer.call(__MODULE__, {:claim_feature_modules, names}) do
-      :ok ->
-        :ok
+      {:ok, run_id} ->
+        run_id
 
       {:collision, module, file, file} ->
         raise ArgumentError,
-              "feature file #{file} was already registered as #{module} in this run"
+              "feature file #{file} was already registered as #{module} in this run. Check for overlapping feature paths."
 
       {:collision, module, previous, incoming} ->
         files = [previous, incoming] |> Enum.sort() |> Enum.join(" and ")
@@ -107,7 +107,7 @@ defmodule Cucumber.RunCoordinator do
   @doc false
   @spec release_feature_modules(integer(), [module()]) :: :ok
   def release_feature_modules(run_id, modules) do
-    GenServer.call(__MODULE__, {:release_feature_modules, run_id, modules})
+    GenServer.cast(__MODULE__, {:release_feature_modules, run_id, modules})
   end
 
   @doc false
@@ -179,7 +179,7 @@ defmodule Cucumber.RunCoordinator do
 
   @doc false
   # Each compile call gets disjoint static IDs while the recorder assigns
-  # numeric runtime IDs. Failed compilations only consume a prefix.
+  # numeric runtime IDs. A failure during pickle expansion only consumes a prefix.
   @spec next_message_prefix() :: String.t()
   def next_message_prefix do
     ensure_process()
@@ -406,17 +406,8 @@ defmodule Cucumber.RunCoordinator do
 
     case result do
       {:collision, _, _, _} = collision -> {:reply, collision, state}
-      known -> {:reply, :ok, %{state | feature_modules: known}}
+      known -> {:reply, {:ok, state.run_id}, %{state | feature_modules: known}}
     end
-  end
-
-  def handle_call({:release_feature_modules, run_id, modules}, _from, state) do
-    known =
-      if run_id == state.run_id,
-        do: Map.drop(state.feature_modules, modules),
-        else: state.feature_modules
-
-    {:reply, :ok, %{state | feature_modules: known}}
   end
 
   def handle_call({:register_compilation, registry, hooks}, _from, state) do
@@ -508,6 +499,13 @@ defmodule Cucumber.RunCoordinator do
 
     {:reply, hooks, %{state | after_all: []}}
   end
+
+  @impl true
+  def handle_cast({:release_feature_modules, run_id, modules}, %{run_id: run_id} = state) do
+    {:noreply, %{state | feature_modules: Map.drop(state.feature_modules, modules)}}
+  end
+
+  def handle_cast({:release_feature_modules, _ended_run, _modules}, state), do: {:noreply, state}
 
   @impl true
   def handle_info({:DOWN, monitor, :process, _pid, reason}, state) do

@@ -74,11 +74,11 @@ defmodule Cucumber.Compiler do
   end
 
   defp compile_modules!(features, registry, hook_modules, prepare) do
-    run_id = Cucumber.RunCoordinator.start_or_join()
+    Cucumber.RunCoordinator.start_or_join()
     register_after_suite_callback()
     hooks = Cucumber.Hooks.collect_hooks(hook_modules)
     names = Enum.map(features, &{generate_module_name(&1.file), &1.file})
-    Cucumber.RunCoordinator.claim_feature_modules!(names)
+    run_id = Cucumber.RunCoordinator.claim_feature_modules!(names)
 
     {pairs, key} =
       releasing_on_error(run_id, names, fn ->

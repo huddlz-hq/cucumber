@@ -180,6 +180,30 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   end
 
   @tag :tmp_dir
+  test "concurrent callers cannot both register the same feature", %{tmp_dir: dir} do
+    file = Path.join(dir, "shared.feature") |> Path.relative_to_cwd()
+    File.write!(file, "Feature: shared\n  Scenario: only once\n")
+
+    results =
+      1..4
+      |> Task.async_stream(fn _ ->
+        try do
+          Cucumber.compile_features!(features: file, steps: [], support: [])
+        rescue
+          error in ArgumentError -> Exception.message(error)
+        end
+      end)
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    {compiled, rejected} = Enum.split_with(results, &is_list/1)
+    assert [[module]] = compiled
+    assert length(rejected) == 3
+    assert Enum.all?(rejected, &String.contains?(&1, "already registered"))
+    {result, output} = Cucumber.BehaviorCase.run_isolated([module])
+    assert %{total: 1, failures: 0} = result, output
+  end
+
+  @tag :tmp_dir
   test "uses every step definition module in the same file", %{tmp_dir: dir} do
     feature = dir |> Path.join("shared.feature") |> Path.relative_to_cwd()
     steps = Path.join(dir, "shared.exs")
