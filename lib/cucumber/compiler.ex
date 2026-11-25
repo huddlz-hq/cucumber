@@ -49,23 +49,9 @@ defmodule Cucumber.Compiler do
   @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
           [module()]
   def compile_all!(features, step_registry, hook_modules, messages_path) do
-    Cucumber.RunCoordinator.start_or_join()
-    register_after_suite_callback()
-    reject_module_name_collisions!(features)
-
-    hooks = Cucumber.Hooks.collect_hooks(hook_modules)
-
-    case Emitter.prepare_features(features, step_registry, hooks, messages_path) do
-      [] ->
-        []
-
-      pairs ->
-        runtime_key = register_compilation(step_registry, hooks)
-
-        Enum.map(pairs, fn {feature, compilation} ->
-          define_feature!(feature, runtime_key, compilation)
-        end)
-    end
+    compile_modules!(features, step_registry, hook_modules, fn hooks ->
+      Emitter.prepare_features(features, step_registry, hooks, messages_path)
+    end)
   end
 
   @doc false
@@ -76,25 +62,64 @@ defmodule Cucumber.Compiler do
   # by compile_features!/1 to thread run-unique pickle ids across features).
   @spec compile_feature!(map(), Cucumber.StepRegistry.t(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
-    compilation =
-      Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
+    [module] =
+      compile_modules!([feature], step_registry, hook_modules, fn _hooks ->
+        compilation =
+          Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
-    Cucumber.RunCoordinator.start_or_join()
+        [{feature, compilation}]
+      end)
+
+    module
+  end
+
+  defp compile_modules!(features, registry, hook_modules, prepare) do
+    run_id = Cucumber.RunCoordinator.start_or_join()
     register_after_suite_callback()
-    runtime_key = register_compilation(step_registry, Cucumber.Hooks.collect_hooks(hook_modules))
-    define_feature!(feature, runtime_key, compilation)
+    hooks = Cucumber.Hooks.collect_hooks(hook_modules)
+    names = Enum.map(features, &{generate_module_name(&1.file), &1.file})
+    Cucumber.RunCoordinator.claim_feature_modules!(names)
+
+    {pairs, key} =
+      releasing_on_error(run_id, names, fn ->
+        case prepare.(hooks) do
+          [] ->
+            {[], nil}
+
+          pairs ->
+            Cucumber.RunCoordinator.register_after_all(hooks)
+            {pairs, Cucumber.RunCoordinator.register_compilation(registry, hooks)}
+        end
+      end)
+
+    define_claimed!(pairs, names, key, run_id)
   end
 
-  defp register_compilation(registry, hooks) do
-    Cucumber.RunCoordinator.register_after_all(hooks)
-    Cucumber.RunCoordinator.register_compilation(registry, hooks)
+  defp define_claimed!([], [], _key, _run_id), do: []
+
+  defp define_claimed!(
+         [{feature, compilation} | pairs],
+         [{module, _} | rest] = names,
+         key,
+         run_id
+       ) do
+    releasing_on_error(run_id, names, fn -> define_feature!(module, feature, key, compilation) end)
+
+    [module | define_claimed!(pairs, rest, key, run_id)]
   end
 
-  defp define_feature!(feature, runtime_key, compilation) do
+  # Successful definitions may already be running in ExUnit. On failure only
+  # release this call's unfinished names, so a corrected feature can be retried.
+  defp releasing_on_error(run_id, remaining, fun) do
+    fun.()
+  catch
+    kind, reason ->
+      Cucumber.RunCoordinator.release_feature_modules(run_id, Enum.map(remaining, &elem(&1, 0)))
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp define_feature!(module_name, feature, runtime_key, compilation) do
     warn_on_empty_feature(feature)
-
-    # Generate module name from feature file path
-    module_name = generate_module_name(feature.file)
 
     # Check if feature has @async tag
     async = "async" in feature.tags
@@ -185,27 +210,6 @@ defmodule Cucumber.Compiler do
     kind, reason ->
       Cucumber.RunCoordinator.end_run()
       :erlang.raise(kind, reason, __STACKTRACE__)
-  end
-
-  # Two feature files can generate the same test module — `checkout.feature`
-  # and `checkout.feature.md` in one directory both map to
-  # Test.Features.CheckoutTest. Compiling both would silently redefine the
-  # module, dropping the first file's scenarios from the run, so fail loudly
-  # instead (like discovery does for duplicate step definitions).
-  defp reject_module_name_collisions!(features) do
-    features
-    |> Enum.group_by(&generate_module_name(&1.file))
-    |> Enum.each(fn
-      {_module, [_feature]} ->
-        :ok
-
-      {module, features} ->
-        files = features |> Enum.map(& &1.file) |> Enum.sort() |> Enum.join(" and ")
-
-        raise ArgumentError,
-              "feature files #{files} would generate the same test module " <>
-                "#{module}. Rename one of them."
-    end)
   end
 
   defp generate_module_name(file_path) do

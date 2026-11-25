@@ -86,6 +86,31 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
+  @spec claim_feature_modules!([{module(), String.t()}]) :: :ok
+  def claim_feature_modules!(names) do
+    case GenServer.call(__MODULE__, {:claim_feature_modules, names}) do
+      :ok ->
+        :ok
+
+      {:collision, module, file, file} ->
+        raise ArgumentError,
+              "feature file #{file} was already registered as #{module} in this run"
+
+      {:collision, module, previous, incoming} ->
+        files = [previous, incoming] |> Enum.sort() |> Enum.join(" and ")
+
+        raise ArgumentError,
+              "feature files #{files} would generate the same test module #{module}. Rename one of them."
+    end
+  end
+
+  @doc false
+  @spec release_feature_modules(integer(), [module()]) :: :ok
+  def release_feature_modules(run_id, modules) do
+    GenServer.call(__MODULE__, {:release_feature_modules, run_id, modules})
+  end
+
+  @doc false
   @spec register_compilation(Cucumber.StepRegistry.t(), [Cucumber.Hooks.hook()]) ::
           Cucumber.CompiledRuntime.key()
   def register_compilation(registry, hooks) do
@@ -350,14 +375,48 @@ defmodule Cucumber.RunCoordinator do
         fresh
         | remaining_repeats: remaining - 1,
           next_batch: state.next_batch,
+          feature_modules: state.feature_modules,
           registrations: state.registrations
       }
 
       {:reply, :ok, Enum.reduce(Enum.reverse(state.registrations), fresh, &apply_registration/2)}
     else
       Cucumber.CompiledRuntime.release(state.scope)
-      {:reply, :ok, %{state | live: false, registrations: [], before_all: %{}, after_all: []}}
+
+      {:reply, :ok,
+       %{
+         state
+         | live: false,
+           feature_modules: %{},
+           registrations: [],
+           before_all: %{},
+           after_all: []
+       }}
     end
+  end
+
+  def handle_call({:claim_feature_modules, names}, _from, state) do
+    result =
+      Enum.reduce_while(names, state.feature_modules, fn {module, file}, known ->
+        case Map.fetch(known, module) do
+          {:ok, previous} -> {:halt, {:collision, module, previous, file}}
+          :error -> {:cont, Map.put(known, module, file)}
+        end
+      end)
+
+    case result do
+      {:collision, _, _, _} = collision -> {:reply, collision, state}
+      known -> {:reply, :ok, %{state | feature_modules: known}}
+    end
+  end
+
+  def handle_call({:release_feature_modules, run_id, modules}, _from, state) do
+    known =
+      if run_id == state.run_id,
+        do: Map.drop(state.feature_modules, modules),
+        else: state.feature_modules
+
+    {:reply, :ok, %{state | feature_modules: known}}
   end
 
   def handle_call({:register_compilation, registry, hooks}, _from, state) do
@@ -547,6 +606,7 @@ defmodule Cucumber.RunCoordinator do
       live: true,
       next_batch: 0,
       scope: scope,
+      feature_modules: %{},
       registrations: [],
       remaining_repeats: nil,
       before_all: %{},

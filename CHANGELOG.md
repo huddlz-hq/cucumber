@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Separate calls to `Cucumber.compile_features!/1` in one run now reject overlapping generated test module names. Previously ExUnit could run the second file twice and report success while skipping the first.
 - Discovery registers every step-definition module in a matching file, including modules after the first definition. Conflicting definitions in previously ignored modules now participate in duplicate and ambiguous step checks.
 - Before hooks merge `{:ok, map}` into the existing context, as documented. This preserves earlier setup, scenario metadata, and attachment attribution when a hook returns a partial map. Omitting a key from the returned map keeps its previous value.
 - Hooks match tags from the Gherkin source. Use `context.feature_tags` for feature-level tags and `context.scenario_tags` for scenario, rule, outline, and Examples tags. Generated ExUnit filter tags such as `:cucumber` only select hooks when explicitly authored.
