@@ -206,6 +206,17 @@ Features marked with `@async` will run concurrently with other async tests, impr
 
 Note: Database tests can safely run async when using Ecto's SQL sandbox in shared mode.
 
+## Case Templates
+
+Each feature compiles to a module that does `use ExUnit.Case`. To use your own case template instead, configure it:
+
+```elixir
+# config/test.exs
+config :cucumber, case_template: MyAppWeb.FeatureCase
+```
+
+Generated modules then `use MyAppWeb.FeatureCase, async: async`, where `async` is true for `@async` features. The template's `setup` callbacks (and the context they return) and its `test` macro apply to every scenario; step definition modules still import what they use. Generated tests call `test/3` (name, context, block), so a replacement must be `test/3`. It replaces ExUnit's once ExUnit's `test/3` is no longer imported, e.g. with `import ExUnit.Case, except: [test: 3]` in the template's `using` block (a library's `use` may already do this). Before-scenario hooks run inside the test, after the template's `setup` callbacks. With retries, the template's `setup` and `test` wrapper run once around all attempts, so put per-attempt setup in `before_scenario` hooks. You can also pass `case_template:` to `Cucumber.compile_features!/1`.
+
 ## Hooks
 
 Cucumber supports hooks that run before and after scenarios (plus run-level `before_all`/`after_all` and per-step hooks — see the [Hooks guide](https://hexdocs.pm/cucumber/hooks.html)). Before-scenario hooks run inside the test process, **before** background steps:

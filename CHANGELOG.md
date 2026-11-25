@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `config :cucumber, case_template: MyAppWeb.FeatureCase` (or the `:case_template` option of `Cucumber.compile_features!/1`) makes generated feature modules `use` that case template, with the feature's `async` flag, instead of `ExUnit.Case`. The template's `setup` callbacks and its `test` macro apply to every scenario; step definition modules still import what they use. A replacement `test` must be `test/3`, and replaces ExUnit's once ExUnit's `test/3` is no longer imported, e.g. with `import ExUnit.Case, except: [test: 3]` (a library's `use` may already do this). Before-scenario hooks run inside the test, after the template's `setup` callbacks. With retries, the template's `setup` and `test` wrapper run once around all attempts, so put per-attempt setup in `before_scenario` hooks.
+
+### Fixed
+
+- Generated tests register at their scenario's line instead of line 0, so ExUnit's failure output and the test's `:line` tag point at the scenario (`feature:4` rather than `feature:0`). Outline rows share the outline's line.
+
 ## v1.2.0 (2026-11-24)
 
 ### Fixed

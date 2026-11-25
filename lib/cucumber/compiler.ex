@@ -34,7 +34,11 @@ defmodule Cucumber.Compiler do
       features,
       step_registry,
       hook_modules,
-      Application.get_env(:cucumber, :messages)
+      Application.get_env(:cucumber, :messages),
+      case_template:
+        Keyword.get_lazy(opts, :case_template, fn ->
+          Application.get_env(:cucumber, :case_template)
+        end)
     )
   end
 
@@ -44,12 +48,18 @@ defmodule Cucumber.Compiler do
   # ids are unique across the whole run — the messages stream references
   # them run-wide. When `messages_path` is set, builds the run's static
   # envelopes and turns on the coordinator's message recorder; the runner and the
-  # after_suite flush do the rest. Shared by compile_features!/1 and
-  # Cucumber.BehaviorCase.
-  @spec compile_all!([map()], Cucumber.StepRegistry.t(), [module()], String.t() | nil) ::
-          [module()]
-  def compile_all!(features, step_registry, hook_modules, messages_path) do
-    compile_modules!(features, step_registry, hook_modules, fn hooks ->
+  # after_suite flush do the rest. `:case_template` names the module each
+  # generated test module `use`s instead of ExUnit.Case. Shared by
+  # compile_features!/1 and Cucumber.BehaviorCase.
+  @spec compile_all!(
+          [map()],
+          Cucumber.StepRegistry.t(),
+          [module()],
+          String.t() | nil,
+          keyword()
+        ) :: [module()]
+  def compile_all!(features, step_registry, hook_modules, messages_path, opts \\ []) do
+    compile_modules!(features, step_registry, hook_modules, opts[:case_template], fn hooks ->
       Emitter.prepare_features(features, step_registry, hooks, messages_path)
     end)
   end
@@ -60,10 +70,11 @@ defmodule Cucumber.Compiler do
   # The feature must carry a `:file` key (as set by Cucumber.Discovery).
   # `:compilation` accepts a precomputed `Gherkin.Pickles.Compilation` (used
   # by compile_features!/1 to thread run-unique pickle ids across features).
+  # `:case_template` is as for compile_all!/5.
   @spec compile_feature!(map(), Cucumber.StepRegistry.t(), [module()], keyword()) :: module()
   def compile_feature!(feature, step_registry, hook_modules, opts \\ []) do
     [module] =
-      compile_modules!([feature], step_registry, hook_modules, fn _hooks ->
+      compile_modules!([feature], step_registry, hook_modules, opts[:case_template], fn _hooks ->
         compilation =
           Keyword.get_lazy(opts, :compilation, fn -> Gherkin.Pickles.compile(feature) end)
 
@@ -73,7 +84,7 @@ defmodule Cucumber.Compiler do
     module
   end
 
-  defp compile_modules!(features, registry, hook_modules, prepare) do
+  defp compile_modules!(features, registry, hook_modules, case_template, prepare) do
     register_after_suite_callback()
     hooks = Cucumber.Hooks.collect_hooks(hook_modules)
     names = Enum.map(features, &{generate_module_name(&1.file), &1.file})
@@ -91,20 +102,23 @@ defmodule Cucumber.Compiler do
         end
       end)
 
-    define_claimed!(pairs, names, key, claim)
+    define_claimed!(pairs, names, key, case_template, claim)
   end
 
-  defp define_claimed!([], [], _key, _claim), do: []
+  defp define_claimed!([], [], _key, _case_template, _claim), do: []
 
   defp define_claimed!(
          [{feature, compilation} | pairs],
          [{module, _} | rest] = names,
          key,
+         case_template,
          claim
        ) do
-    releasing_on_error(claim, names, fn -> define_feature!(module, feature, key, compilation) end)
+    releasing_on_error(claim, names, fn ->
+      define_feature!(module, feature, key, case_template, compilation)
+    end)
 
-    [module | define_claimed!(pairs, rest, key, claim)]
+    [module | define_claimed!(pairs, rest, key, case_template, claim)]
   end
 
   # Successful definitions may already be running in ExUnit. On failure only
@@ -117,7 +131,7 @@ defmodule Cucumber.Compiler do
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
-  defp define_feature!(module_name, feature, runtime_key, compilation) do
+  defp define_feature!(module_name, feature, runtime_key, case_template, compilation) do
     warn_on_empty_feature(feature)
 
     # Check if feature has @async tag
@@ -127,7 +141,7 @@ defmodule Cucumber.Compiler do
     ast =
       quote do
         defmodule unquote(module_name) do
-          use ExUnit.Case, async: unquote(async)
+          use unquote(case_template || ExUnit.Case), async: unquote(async)
 
           # Tag with cucumber and feature name
           @moduletag :cucumber
@@ -245,6 +259,7 @@ defmodule Cucumber.Compiler do
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
     name = test_name(pickle)
+    line = (pickle.scenario_line || 0) + 1
 
     # The whole scenario lifecycle (before hooks, background, steps, after
     # hooks) runs inside the test body via the runtime — see
@@ -258,17 +273,19 @@ defmodule Cucumber.Compiler do
       scenario_tags: pickle.own_tags,
       async: async,
       scenario_name: name,
-      scenario_line: (pickle.scenario_line || 0) + 1,
+      scenario_line: line,
       # Gherkin.PickleStep structs (step, pickle step id, from_background):
       # Cucumber.TestCase turns them into the test case's pickle steps
       pickle_steps: pickle.steps,
       pickle_id: pickle.id
     }
 
-    quote do
+    # The scenario's line becomes the test's (ExUnit reads the `test`
+    # call's line), so its `:line` tag and failure output point at it
+    quote line: line do
       unquote_splicing(tags)
       @tag unquote(scenario_tag(name))
-      @tag scenario_line: unquote((pickle.scenario_line || 0) + 1)
+      @tag scenario_line: unquote(line)
 
       test unquote(name), exunit_context do
         Cucumber.Runtime.run_scenario(

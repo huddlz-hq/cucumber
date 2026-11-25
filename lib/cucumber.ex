@@ -39,6 +39,20 @@ defmodule Cucumber do
   [Cucumber Messages](https://github.com/cucumber/messages) NDJSON stream
   describing the run — see `Cucumber.Messages`.
 
+  Setting `case_template: MyAppWeb.FeatureCase` makes each generated test
+  module `use MyAppWeb.FeatureCase, async: async` (true for `@async`
+  features) instead of `use ExUnit.Case`, so the template's `setup`
+  callbacks (and the context they return) and its `test` macro apply to
+  every scenario; step definition modules still import what they use.
+  Generated tests call `test/3` (name, context, block), so a replacement
+  must be `test/3`. It replaces ExUnit's once ExUnit's `test/3` is no
+  longer imported, e.g. with `import ExUnit.Case, except: [test: 3]` in the
+  template's `using` block (a library's `use` may already do this).
+  Before-scenario hooks run inside the test, after the template's `setup`
+  callbacks. With retries, the template's `setup` and `test` wrapper run
+  once around all attempts, so put per-attempt setup in `before_scenario`
+  hooks.
+
   ## Step Definitions
 
   Create step definition modules using `Cucumber.StepDefinition`:
@@ -88,6 +102,10 @@ defmodule Cucumber do
     * `:features` - List of patterns for feature files
     * `:steps` - List of patterns for step definition files
     * `:support` - List of patterns for support files
+    * `:case_template` - Module each generated test module `use`s instead of
+      `ExUnit.Case` (see "Configuration" in the `Cucumber` module docs).
+      Overrides `config :cucumber, case_template: ...`; `nil` uses
+      `ExUnit.Case`
 
   ## Examples
 

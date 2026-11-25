@@ -59,7 +59,9 @@ defmodule Cucumber.Runtime do
       with a fresh context (carrying `:retry_attempt`, 1-based), and the
       scenario passes if any attempt passes. Undefined, ambiguous, and
       pending scenarios are never retried — they cannot succeed by
-      repetition — and neither is a cached `before_all` failure
+      repetition — and neither is a cached `before_all` failure. With a
+      case template, its `setup` (e.g. a sandbox owner) is shared across
+      attempts, so per-attempt setup belongs in `before_scenario` hooks
 
   Returns the final context.
   """
