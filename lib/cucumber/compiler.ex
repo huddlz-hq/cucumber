@@ -259,6 +259,7 @@ defmodule Cucumber.Compiler do
       |> Enum.map(fn tag -> quote do: @tag(unquote(tag)) end)
 
     name = test_name(pickle)
+    line = (pickle.scenario_line || 0) + 1
 
     # The whole scenario lifecycle (before hooks, background, steps, after
     # hooks) runs inside the test body via the runtime — see
@@ -272,17 +273,19 @@ defmodule Cucumber.Compiler do
       scenario_tags: pickle.own_tags,
       async: async,
       scenario_name: name,
-      scenario_line: (pickle.scenario_line || 0) + 1,
+      scenario_line: line,
       # Gherkin.PickleStep structs (step, pickle step id, from_background):
       # Cucumber.TestCase turns them into the test case's pickle steps
       pickle_steps: pickle.steps,
       pickle_id: pickle.id
     }
 
-    quote do
+    # The scenario's line becomes the test's (ExUnit reads the `test`
+    # call's line), so its `:line` tag and failure output point at it
+    quote line: line do
       unquote_splicing(tags)
       @tag unquote(scenario_tag(name))
-      @tag scenario_line: unquote((pickle.scenario_line || 0) + 1)
+      @tag scenario_line: unquote(line)
 
       test unquote(name), exunit_context do
         Cucumber.Runtime.run_scenario(

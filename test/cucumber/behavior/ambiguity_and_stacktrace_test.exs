@@ -148,9 +148,14 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       assert run.output =~
                ~s{in scenario "failing" (test/fixtures/generated/leading_blank_lines.feature:4)}
 
-      # The generated test is tagged with the scenario's true line too
+      # The generated test is tagged with the scenario's true line too, and
+      # registered at it, so ExUnit's failure header points there
       [test] = run.module.__ex_unit__().tests
       assert test.tags.scenario_line == 4
+      assert test.tags.line == 4
+
+      assert run.output =~
+               ~r{\) test failing \(.*\)\n\s+test/fixtures/generated/leading_blank_lines.feature:4\n}
 
       stacktrace_section = run.output |> String.split("stacktrace:") |> List.last()
       [first_frame | _] = stacktrace_section |> String.split("\n", trim: true)
@@ -163,6 +168,44 @@ defmodule Cucumber.AmbiguityAndStacktraceTest do
       [%{"scenario" => scenario}] = feature["children"]
       assert scenario["location"]["line"] == 4
       assert Enum.map(scenario["steps"], & &1["location"]["line"]) == [5, 6]
+    end
+  end
+
+  describe "generated tests register at their scenario's line" do
+    test "scenarios, outline rows and rule scenarios" do
+      run =
+        run_feature(
+          """
+          Feature: lines
+
+            Scenario: plain
+              Given a passing step
+
+            Scenario Outline: outline <n>
+              Given a passing step
+
+              Examples:
+                | n |
+                | 1 |
+                | 2 |
+
+            Rule: a rule
+              Scenario: in a rule
+                Given a passing step
+          """,
+          steps: [FailingSteps]
+        )
+
+      assert run.passed == 4
+
+      lines = Map.new(run.module.__ex_unit__().tests, &{&1.name, &1.tags.line})
+
+      assert lines == %{
+               :"test plain" => 3,
+               :"test outline <n> (row 1)" => 6,
+               :"test outline <n> (row 2)" => 6,
+               :"test a rule: in a rule" => 15
+             }
     end
   end
 
