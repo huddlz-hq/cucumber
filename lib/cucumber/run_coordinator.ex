@@ -10,6 +10,8 @@ defmodule Cucumber.RunCoordinator do
 
   Current run-scoped concerns:
 
+    * **Feature names** — a compile call joins the run and reserves its test
+      module names atomically. Only that call can release its unfinished names.
     * **Compiled scenarios** — features from one compilation share a registry and hook
       set in persistent storage. Scenarios read the snapshot directly. Mix repetitions keep the definitions and start
       fresh hooks and Messages. Final teardown releases the definitions.
@@ -68,12 +70,8 @@ defmodule Cucumber.RunCoordinator do
   # the moduledoc). Returns the run id.
   @spec start_or_join() :: integer()
   def start_or_join do
-    run_id = :erlang.unique_integer([:positive])
-
-    case GenServer.start(__MODULE__, run_id, name: __MODULE__) do
-      {:ok, _pid} -> run_id
-      {:error, {:already_started, _pid}} -> GenServer.call(__MODULE__, {:join, run_id})
-    end
+    ensure_process()
+    GenServer.call(__MODULE__, :join)
   end
 
   @doc false
@@ -83,6 +81,33 @@ defmodule Cucumber.RunCoordinator do
   def end_run(result \\ %{}) do
     if Process.whereis(__MODULE__), do: GenServer.call(__MODULE__, {:end_run, result}, :infinity)
     :ok
+  end
+
+  @doc false
+  @spec claim_feature_modules!([{module(), String.t()}]) :: reference()
+  def claim_feature_modules!(names) do
+    ensure_process()
+
+    case GenServer.call(__MODULE__, {:claim_feature_modules, names}) do
+      {:ok, claim} ->
+        claim
+
+      {:collision, module, file, file} ->
+        raise ArgumentError,
+              "feature file #{file} was already registered as #{module} in this run. Check for overlapping feature paths."
+
+      {:collision, module, previous, incoming} ->
+        files = [previous, incoming] |> Enum.sort() |> Enum.join(" and ")
+
+        raise ArgumentError,
+              "feature files #{files} would generate the same test module #{module}. Rename one of them."
+    end
+  end
+
+  @doc false
+  @spec release_feature_modules(reference(), [module()]) :: :ok
+  def release_feature_modules(claim, modules) do
+    GenServer.cast(__MODULE__, {:release_feature_modules, claim, modules})
   end
 
   @doc false
@@ -154,7 +179,7 @@ defmodule Cucumber.RunCoordinator do
 
   @doc false
   # Each compile call gets disjoint static IDs while the recorder assigns
-  # numeric runtime IDs. Failed compilations only consume a prefix.
+  # numeric runtime IDs. A failure during pickle expansion only consumes a prefix.
   @spec next_message_prefix() :: String.t()
   def next_message_prefix do
     ensure_process()
@@ -328,13 +353,9 @@ defmodule Cucumber.RunCoordinator do
     {:reply, run_id, initial_state(run_id, state.scope)}
   end
 
-  def handle_call({:join, _run_id}, _from, %{live: true} = state) do
+  def handle_call(:join, _from, state) do
+    state = join_live_run(state)
     {:reply, state.run_id, state}
-  end
-
-  def handle_call({:join, run_id}, _from, state) do
-    Cucumber.CompiledRuntime.release(state.scope)
-    {:reply, run_id, initial_state(run_id, state.scope)}
   end
 
   def handle_call({:end_run, result}, _from, state) do
@@ -350,13 +371,41 @@ defmodule Cucumber.RunCoordinator do
         fresh
         | remaining_repeats: remaining - 1,
           next_batch: state.next_batch,
+          feature_modules: state.feature_modules,
           registrations: state.registrations
       }
 
       {:reply, :ok, Enum.reduce(Enum.reverse(state.registrations), fresh, &apply_registration/2)}
     else
       Cucumber.CompiledRuntime.release(state.scope)
-      {:reply, :ok, %{state | live: false, registrations: [], before_all: %{}, after_all: []}}
+
+      {:reply, :ok,
+       %{
+         state
+         | live: false,
+           feature_modules: %{},
+           registrations: [],
+           before_all: %{},
+           after_all: []
+       }}
+    end
+  end
+
+  def handle_call({:claim_feature_modules, names}, _from, state) do
+    state = join_live_run(state)
+    claim = make_ref()
+
+    result =
+      Enum.reduce_while(names, state.feature_modules, fn {module, file}, known ->
+        case Map.fetch(known, module) do
+          {:ok, {previous, _claim}} -> {:halt, {:collision, module, previous, file}}
+          :error -> {:cont, Map.put(known, module, {file, claim})}
+        end
+      end)
+
+    case result do
+      {:collision, _, _, _} = collision -> {:reply, collision, state}
+      known -> {:reply, {:ok, claim}, %{state | feature_modules: known}}
     end
   end
 
@@ -451,6 +500,19 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @impl true
+  def handle_cast({:release_feature_modules, claim, modules}, state) do
+    remaining =
+      Enum.reduce(modules, state.feature_modules, fn module, known ->
+        case known do
+          %{^module => {_file, ^claim}} -> Map.delete(known, module)
+          _ -> known
+        end
+      end)
+
+    {:noreply, %{state | feature_modules: remaining}}
+  end
+
+  @impl true
   def handle_info({:DOWN, monitor, :process, _pid, reason}, state) do
     running =
       Enum.find(state.before_all, fn
@@ -541,12 +603,20 @@ defmodule Cucumber.RunCoordinator do
     File.write!(path, Recorder.to_ndjson(recorder))
   end
 
+  defp join_live_run(%{live: true} = state), do: state
+
+  defp join_live_run(state) do
+    Cucumber.CompiledRuntime.release(state.scope)
+    initial_state(System.unique_integer([:positive]), state.scope)
+  end
+
   defp initial_state(run_id, scope) do
     %{
       run_id: run_id,
       live: true,
       next_batch: 0,
       scope: scope,
+      feature_modules: %{},
       registrations: [],
       remaining_repeats: nil,
       before_all: %{},

@@ -48,6 +48,40 @@ defmodule Cucumber.RunCoordinatorTest do
     end
   end
 
+  test "a claim starts a live run and a late release cannot free a newer claim" do
+    names = [{Test.Checkout, "checkout.feature"}]
+    first = RunCoordinator.claim_feature_modules!(names)
+    RunCoordinator.end_run()
+    next = RunCoordinator.claim_feature_modules!(names)
+    assert next != first
+
+    RunCoordinator.start_or_join()
+    RunCoordinator.release_feature_modules(first, [Test.Checkout])
+
+    assert_raise ArgumentError, ~r/already registered/, fn ->
+      RunCoordinator.claim_feature_modules!(names)
+    end
+
+    RunCoordinator.release_feature_modules(next, [Test.Checkout])
+    assert is_reference(RunCoordinator.claim_feature_modules!(names))
+  end
+
+  test "a repeated suite keeps the owner of an unfinished name" do
+    previous = ExUnit.configuration()[:repeat_until_failure]
+    ExUnit.configure(repeat_until_failure: 1)
+    on_exit(fn -> ExUnit.configure(repeat_until_failure: previous) end)
+    names = [{Test.Checkout, "checkout.feature"}]
+    claim = RunCoordinator.claim_feature_modules!(names)
+    RunCoordinator.end_run(%{total: 1, failures: 0})
+
+    assert_raise ArgumentError, ~r/already registered/, fn ->
+      RunCoordinator.claim_feature_modules!(names)
+    end
+
+    RunCoordinator.release_feature_modules(claim, [Test.Checkout])
+    assert is_reference(RunCoordinator.claim_feature_modules!(names))
+  end
+
   defmodule BeforeAllProbe do
     def increment(context) do
       count = Agent.get_and_update(__MODULE__.Counter, &{&1 + 1, &1 + 1})

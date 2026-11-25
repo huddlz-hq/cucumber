@@ -133,6 +133,79 @@ defmodule Cucumber.Behavior.CompileRunsTest do
   end
 
   @tag :tmp_dir
+  test "joined compile calls cannot replace a previously registered feature", %{tmp_dir: dir} do
+    plain = Path.join(dir, "checkout.feature") |> Path.relative_to_cwd()
+    markdown = plain <> ".md"
+    File.write!(plain, "Feature: Checkout\n  Scenario: plain checkout\n")
+    File.write!(markdown, "# Feature: Checkout\n## Scenario: markdown checkout\n")
+    compile = fn path -> Cucumber.compile_features!(features: path, steps: [], support: []) end
+
+    [original] = compile.(plain)
+
+    error = assert_raise ArgumentError, fn -> compile.(markdown) end
+    assert error.message =~ plain
+    assert error.message =~ markdown
+    assert error.message =~ Atom.to_string(original)
+    assert [%{name: :"test plain checkout"}] = original.__ex_unit__().tests
+
+    {result, output} = Cucumber.BehaviorCase.run_isolated([original])
+    assert %{total: 1, failures: 0} = result, output
+    ExUnit.CaptureIO.capture_io(:stderr, fn -> assert [^original] = compile.(markdown) end)
+    assert [%{name: :"test markdown checkout"}] = original.__ex_unit__().tests
+    {result, output} = Cucumber.BehaviorCase.run_isolated([original])
+    assert %{total: 1, failures: 0} = result, output
+  end
+
+  @tag :tmp_dir
+  test "a failed batch keeps its defined modules and releases the unfinished names", %{
+    tmp_dir: dir
+  } do
+    [first, broken, last] =
+      Enum.map(~w(a b c), fn name ->
+        Path.join(dir, name <> ".feature") |> Path.relative_to_cwd()
+      end)
+
+    valid = "Feature: retry\n  Scenario: succeeds\n"
+    File.write!(first, valid)
+    File.write!(broken, valid <> "  Scenario: succeeds\n")
+    File.write!(last, valid)
+    compile = fn paths -> Cucumber.compile_features!(features: paths, steps: [], support: []) end
+
+    assert_raise ArgumentError, ~r/is already defined/, fn -> compile.([first, broken, last]) end
+    assert_raise ArgumentError, ~r/already registered/, fn -> compile.(first) end
+    File.write!(broken, valid)
+    modules = compile.([broken, last])
+    assert length(modules) == 2
+    # ExUnit already has the first module from the failed batch.
+    {result, output} = Cucumber.BehaviorCase.run_isolated(modules)
+    assert %{total: 3, failures: 0} = result, output
+  end
+
+  @tag :tmp_dir
+  test "concurrent callers cannot both register the same feature", %{tmp_dir: dir} do
+    file = Path.join(dir, "shared.feature") |> Path.relative_to_cwd()
+    File.write!(file, "Feature: shared\n  Scenario: only once\n")
+
+    results =
+      1..4
+      |> Task.async_stream(fn _ ->
+        try do
+          Cucumber.compile_features!(features: file, steps: [], support: [])
+        rescue
+          error in ArgumentError -> Exception.message(error)
+        end
+      end)
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    {compiled, rejected} = Enum.split_with(results, &is_list/1)
+    assert [[module]] = compiled
+    assert length(rejected) == 3
+    assert Enum.all?(rejected, &String.contains?(&1, "already registered"))
+    {result, output} = Cucumber.BehaviorCase.run_isolated([module])
+    assert %{total: 1, failures: 0} = result, output
+  end
+
+  @tag :tmp_dir
   test "uses every step definition module in the same file", %{tmp_dir: dir} do
     feature = dir |> Path.join("shared.feature") |> Path.relative_to_cwd()
     steps = Path.join(dir, "shared.exs")
