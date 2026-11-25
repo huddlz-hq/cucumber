@@ -143,6 +143,72 @@ after_step "@traced", context do
 end
 ```
 
+### Step Wrapper
+
+Hooks can't run code *around* a step. For that, configure a function that
+wraps every executed step, e.g. to run each Gherkin step inside a tracer's
+or test framework's own step (such as playwright_ex's `Playwright.Test.step/2`):
+
+```elixir
+# config/test.exs
+config :cucumber, step_wrapper: {MyApp.CucumberSteps, :wrap}
+
+defmodule MyApp.CucumberSteps do
+  def wrap(step, _context, run) do
+    MyTracer.span("#{step.keyword} #{step.text}", run)
+  end
+end
+```
+
+The function receives the step (`%{keyword: _, text: _, line: _}`, with
+the 1-based line in the feature file), the step's context (attachments
+recorded from it belong to the step), and `run`, a zero-arity function
+that runs the step, its step hooks included. Call `run` exactly once, in
+the wrapper's own process (`Playwright.Test.step/2` does), and let its
+raise propagate. `run` returns:
+
+- for a passed step, the updated context (a map);
+- for a pending or skipped step,
+  `{:halted, :pending | :skipped, reason, context}`;
+- for a failed, undefined or ambiguous step, nothing: it raises the
+  step's final error (a `Cucumber.StepError` or
+  `Cucumber.AmbiguousStepError`).
+
+The wrapper's return value is ignored: the step's outcome is what `run`
+recorded. A wrapper that doesn't call `run`, calls it twice (the second
+call raises) or from another process (it raises there), or raises before
+`run` or after `run` returned, fails the step with a
+`Cucumber.StepWrapperError`. Its `:cause` holds the wrapper's own raise,
+if any. A scenario failing on a contract break (no `run`, `run` twice or
+from another process, run's state lost) is never retried; one failing on a
+raise, exit or throw from the wrapper is retried like its cause would be. A wrapper function that isn't defined fails
+every scenario with an `ArgumentError`. Call `run` in the wrapper's own
+process: from a linked one (`Task.async`, `spawn_link`) it crashes the test
+with that process's exit instead of a `StepWrapperError`.
+Calling `run` a second time after it raised reports a `StepWrapperError`
+("called run more than once"), which hides the step's own error; that
+contract break is never retried.
+The wrapper's `context` is the one from before the step's arguments are
+added: no `:args`, datatable or docstring yet. Use `step.text`.
+
+`after_step` hooks run inside `run`, so they see the step's own status: a
+wrapper that raises after `run` returned fails a step they saw as passed.
+
+Background steps are wrapped too. Steps that don't run (after a failure
+or halt) aren't. A retried scenario calls the wrapper once per step per
+attempt.
+
+To wrap only some features, pass the wrapper to the
+`Cucumber.compile_features!/1` call that compiles them. The option wins
+over the config, and `step_wrapper: nil` turns it off:
+
+```elixir
+Cucumber.compile_features!(
+  features: ["test/browser/**/*.feature"],
+  step_wrapper: {MyApp.CucumberSteps, :wrap}
+)
+```
+
 ### Named Hooks
 
 Any hook can be given a `name:`, which appears in failure output. Names

@@ -75,7 +75,12 @@ defmodule Cucumber.Runtime do
     # code), so nothing in the test case runs user code.
     test_case = TestCase.new(scenario, step_registry, hooks, all_tags)
 
-    exec = %{test_case: test_case}
+    # Resolved before anything below runs, so an invalid wrapper fails the
+    # scenario before before_all or any message for it
+    exec = %{
+      test_case: test_case,
+      step_wrapper: validate_step_wrapper(Map.get(runtime_data, :step_wrapper))
+    }
 
     # Run-level setup happens lazily before the first scenario of the run —
     # and before this scenario's message session opens, so testRunHook
@@ -141,6 +146,12 @@ defmodule Cucumber.Runtime do
   defp retryable_error?(%Cucumber.PendingStepError{}), do: false
   defp retryable_error?(%Cucumber.AmbiguousStepError{}), do: false
   defp retryable_error?(%Cucumber.BeforeAllError{}), do: false
+  defp retryable_error?(%Cucumber.StepWrapperError{contract: true}), do: false
+  defp retryable_error?(%Cucumber.StepWrapperError{cause: {_kind, _reason}}), do: true
+
+  defp retryable_error?(%Cucumber.StepWrapperError{cause: %{} = cause}),
+    do: retryable_error?(cause)
+
   defp retryable_error?(%Cucumber.StepError{failure_reason: :missing_step_definition}), do: false
   defp retryable_error?(_error), do: true
 
@@ -157,6 +168,29 @@ defmodule Cucumber.Runtime do
         config_retry_limit()
 
     max(retries, 0) + 1
+  end
+
+  # The compile_features!/1 option or app env, resolved when the features
+  # were compiled
+  defp validate_step_wrapper(step_wrapper) do
+    case step_wrapper do
+      nil ->
+        nil
+
+      {module, function} = wrapper when is_atom(module) and is_atom(function) ->
+        unless Code.ensure_loaded?(module) and function_exported?(module, function, 3) do
+          raise ArgumentError,
+                ":step_wrapper names #{inspect(module)}.#{function}/3, " <>
+                  "which is not defined"
+        end
+
+        wrapper
+
+      other ->
+        raise ArgumentError,
+              ":step_wrapper must be a {module, function} tuple, " <>
+                "got: #{inspect(other)}"
+    end
   end
 
   defp config_retry_limit do
@@ -361,7 +395,7 @@ defmodule Cucumber.Runtime do
   to the rest of the scenario.
 
   Step hooks do not run through this entry point; they require the scenario
-  runner's hook list (see `run_scenario/3`).
+  runner's hook list (see `run_scenario/3`). A configured step wrapper does.
   """
   @spec execute_step(map(), Gherkin.Step.t(), StepRegistry.t()) ::
           map() | {:halted, :pending | :skipped, String.t() | nil, map()}
@@ -369,7 +403,11 @@ defmodule Cucumber.Runtime do
     do_execute_step(
       context,
       TestCase.pickle_test_step(step, step_registry),
-      %{test_case: %{before_step_hooks: [], after_step_hooks: []}, msg: nil}
+      %{
+        test_case: %{before_step_hooks: [], after_step_hooks: []},
+        msg: nil,
+        step_wrapper: validate_step_wrapper(Application.get_env(:cucumber, :step_wrapper))
+      }
     )
   end
 
@@ -380,8 +418,127 @@ defmodule Cucumber.Runtime do
     context = Map.put(context, :cucumber_phase, :step)
 
     Emitter.report_step(exec.msg, pickle_test_step, fn overrides ->
-      run_pickle_step(pickle_test_step.match, step, Map.merge(context, overrides), exec.test_case)
+      context = Map.merge(context, overrides)
+      run = fn -> run_pickle_step(pickle_test_step.match, step, context, exec.test_case) end
+
+      case exec.step_wrapper do
+        nil -> run.()
+        wrapper -> run_wrapped(wrapper, step, context, run)
+      end
     end)
+  end
+
+  # A configured step wrapper (see "Step Wrapper" in the Hooks guide) runs
+  # inside the step's Messages reporting. Its `run` records the step's
+  # outcome under a per-step key in the process dictionary, so it only works
+  # in the wrapper's own process. That recorded outcome, not the wrapper's
+  # return value, is the step's result; a broken contract fails the step
+  # with a Cucumber.StepWrapperError.
+  defp run_wrapped({module, function}, step, context, run_step) do
+    key = {__MODULE__, :step_wrapper, make_ref()}
+    Process.put(key, :not_run)
+
+    run = fn ->
+      case Process.get(key) do
+        :not_run ->
+          Process.put(key, :running)
+          outcome = catch_step(run_step)
+          Process.put(key, {:ran, outcome})
+          complete_step(outcome)
+
+        nil ->
+          raise Cucumber.StepWrapperError,
+            message: "the step_wrapper called run outside the step's process",
+            contract: true
+
+        _called ->
+          Process.put(key, :called_twice)
+
+          raise Cucumber.StepWrapperError,
+            message: "the step_wrapper called run more than once",
+            contract: true
+      end
+    end
+
+    # Step-scoped, like the context run_pickle_step prepares: attachments
+    # recorded from it belong to this step
+    raised =
+      try do
+        apply(module, function, [wrapper_step(step), Map.put(context, :step, step), run])
+        nil
+      catch
+        kind, reason -> {kind, reason, __STACKTRACE__}
+      end
+
+    wrapped_outcome(Process.delete(key), raised, context, step)
+  end
+
+  # A step's raise is its outcome, as Emitter.report_step records it
+  defp catch_step(run_step) do
+    run_step.()
+  catch
+    kind, reason ->
+      {:failed, Exception.format_banner(kind, reason), {:raise, kind, reason, __STACKTRACE__}}
+  end
+
+  defp complete_step({_status, _detail, {:return, value}}), do: value
+
+  defp complete_step({_status, _detail, {:raise, kind, reason, trace}}),
+    do: :erlang.raise(kind, reason, trace)
+
+  # The step's outcome once the wrapper is done: run's, unless the wrapper
+  # broke the contract. A raise from run is expected to propagate.
+  defp wrapped_outcome(:called_twice, _raised, context, step),
+    do: wrapper_failure("the step_wrapper called run more than once", nil, context, step)
+
+  defp wrapped_outcome({:ran, {_status, _detail, {:raise, _, _, _}} = outcome}, _raised, _, _),
+    do: outcome
+
+  defp wrapped_outcome({:ran, outcome}, nil, _context, _step), do: outcome
+
+  defp wrapped_outcome({:ran, _outcome}, raised, context, step),
+    do: wrapper_failure("the step_wrapper raised after run returned", raised, context, step)
+
+  defp wrapped_outcome(:not_run, nil, context, step),
+    do:
+      wrapper_failure(
+        "the step_wrapper returned without calling run in its process",
+        nil,
+        context,
+        step
+      )
+
+  defp wrapped_outcome(:not_run, raised, context, step),
+    do: wrapper_failure("the step_wrapper raised before calling run", raised, context, step)
+
+  # The wrapper erased run's state from the process dictionary
+  defp wrapped_outcome(_lost, raised, context, step),
+    do: wrapper_failure("the step_wrapper lost run's state", raised, context, step, true)
+
+  defp wrapper_failure(message, raised, context, step, contract \\ false)
+
+  defp wrapper_failure(message, nil, context, step, _contract) do
+    error = Cucumber.StepWrapperError.exception(message: message, contract: true)
+    trace = scenario_stacktrace(context, step, current_stacktrace())
+    {:failed, Exception.message(error), {:raise, :error, error, trace}}
+  end
+
+  defp wrapper_failure(message, {kind, reason, trace}, context, step, contract) do
+    trace = scenario_stacktrace(context, step, trace)
+
+    error =
+      Cucumber.StepWrapperError.exception(
+        message: message <> ": " <> Exception.format_banner(kind, reason, trace),
+        contract: contract,
+        cause:
+          if(kind == :error, do: Exception.normalize(kind, reason, trace), else: {kind, reason})
+      )
+
+    {:failed, Exception.message(error), {:raise, :error, error, trace}}
+  end
+
+  defp wrapper_step(step) do
+    %{keyword: step.keyword, text: step.text, line: step.line && step.line + 1}
   end
 
   defp run_pickle_step(match, step, context, test_case) do
@@ -478,8 +635,9 @@ defmodule Cucumber.Runtime do
 
     feature_file = Map.get(context, :feature_file, "unknown")
 
-    feature_frame =
-      {test_module, :scenario, 1, [file: String.to_charlist(feature_file), line: step.line + 1]}
+    location = [file: String.to_charlist(feature_file)]
+    location = if step.line, do: location ++ [line: step.line + 1], else: location
+    feature_frame = {test_module, :scenario, 1, location}
 
     [feature_frame | Enum.reject(stacktrace, &match?({__MODULE__, _, _, _}, &1))]
   end

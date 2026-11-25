@@ -111,10 +111,10 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  @spec register_compilation(Cucumber.StepRegistry.t(), [Cucumber.Hooks.hook()]) ::
+  @spec register_compilation(Cucumber.StepRegistry.t(), [Cucumber.Hooks.hook()], term()) ::
           Cucumber.CompiledRuntime.key()
-  def register_compilation(registry, hooks) do
-    GenServer.call(__MODULE__, {:register_compilation, registry, hooks})
+  def register_compilation(registry, hooks, step_wrapper \\ nil) do
+    GenServer.call(__MODULE__, {:register_compilation, registry, hooks, step_wrapper})
   end
 
   @doc "Returns the current run id."
@@ -409,8 +409,9 @@ defmodule Cucumber.RunCoordinator do
     end
   end
 
-  def handle_call({:register_compilation, registry, hooks}, _from, state) do
-    key = Cucumber.CompiledRuntime.store(state.scope, %{step_registry: registry, hooks: hooks})
+  def handle_call({:register_compilation, registry, hooks, step_wrapper}, _from, state) do
+    data = %{step_registry: registry, hooks: hooks, step_wrapper: step_wrapper}
+    key = Cucumber.CompiledRuntime.store(state.scope, data)
     {:reply, key, state}
   end
 
