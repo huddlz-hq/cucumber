@@ -94,10 +94,34 @@ defmodule Cucumber.BehaviorCase do
     def events, do: Agent.get(__MODULE__, &Enum.reverse/1)
   end
 
+  @doc false
+  # Nested ExUnit suites share the VM with the generated tests of the outer
+  # suite. Give synchronous tests a separate coordinator for their whole
+  # lifetime, including failures and on_exit callbacks.
+  def isolate_coordinator do
+    name = Cucumber.RunCoordinator
+    outer = Process.whereis(name)
+    if outer, do: Process.unregister(name)
+
+    {:ok, inner} =
+      GenServer.start(name, {System.unique_integer([:positive]), __MODULE__}, name: name)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      try do
+        if Process.alive?(inner), do: GenServer.stop(inner)
+      after
+        if outer && Process.alive?(outer), do: Process.register(outer, name)
+      end
+    end)
+
+    :ok
+  end
+
   # Tests that drive Cucumber.Runtime directly (bypassing run_feature/2)
   # still need the Collector running; without this, whether it exists
   # depends on which test the seed ordered first.
   setup do
+    isolate_coordinator()
     Collector.reset()
     :ok
   end
@@ -231,7 +255,12 @@ defmodule Cucumber.BehaviorCase do
     try do
       # Colors off so captured output is plain text regardless of whether
       # the outer run is on a TTY — assertions parse this output
-      ExUnit.configure(include: [], exclude: [], colors: [enabled: false])
+      ExUnit.configure(
+        include: [],
+        exclude: [],
+        colors: [enabled: false],
+        repeat_until_failure: 0
+      )
 
       case Keyword.fetch(opts, :seed) do
         {:ok, seed} -> ExUnit.configure(seed: seed)
@@ -249,6 +278,7 @@ defmodule Cucumber.BehaviorCase do
         include: config[:include],
         exclude: config[:exclude],
         seed: config[:seed],
+        repeat_until_failure: config[:repeat_until_failure],
         colors: config[:colors]
       )
     end
