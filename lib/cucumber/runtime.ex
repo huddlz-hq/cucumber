@@ -405,20 +405,7 @@ defmodule Cucumber.Runtime do
         step_error(:ambiguous, error, scenario_stacktrace(context, step, current_stacktrace()))
 
       :undefined ->
-        # Extract context info for better error
-        feature_file = Map.get(context, :feature_file, "unknown")
-        scenario_name = Map.get(context, :scenario_name, "unknown scenario")
-        step_history = Map.get(context, :step_history, [])
-
-        # Use the enhanced error module
-        error =
-          Cucumber.StepError.missing_step_definition(
-            step,
-            feature_file,
-            scenario_name,
-            format_step_history_with_status(step_history, step, context)
-          )
-
+        error = Cucumber.StepError.undefined(step, context)
         step_error(:undefined, error, scenario_stacktrace(context, step, current_stacktrace()))
     end
   end
@@ -451,21 +438,19 @@ defmodule Cucumber.Runtime do
   catch
     kind, reason ->
       trace = __STACKTRACE__
-      detail = describe_failure(kind, reason, trace)
       Cucumber.Hooks.run_after_step_hooks(after_hooks, context, :failed)
 
       error =
-        Cucumber.StepError.failed_step(
+        Cucumber.StepError.execution_failure(
           step,
+          context,
           Definition.display_pattern(definition),
-          detail,
-          Map.get(context, :feature_file, "unknown"),
-          Map.get(context, :scenario_name, "unknown scenario"),
-          format_step_history_with_status(context.step_history, step, context)
+          {kind, reason, trace},
+          Cucumber.RunCoordinator.attachments()
         )
-        |> append_attachments(context)
 
-      {:failed, detail, {:raise, :error, error, scenario_stacktrace(context, step, trace)}}
+      {:failed, error.failure_reason,
+       {:raise, :error, error, scenario_stacktrace(context, step, trace)}}
   else
     {:halted, status, reason, ctx} = outcome ->
       Cucumber.Hooks.run_after_step_hooks(after_hooks, ctx, status)
@@ -478,55 +463,6 @@ defmodule Cucumber.Runtime do
 
   defp hook_label(nil), do: ""
   defp hook_label(name), do: ~s( "#{name}")
-
-  defp describe_failure(:error, reason, stacktrace) do
-    format_exception_for_display(Exception.normalize(:error, reason, stacktrace))
-  end
-
-  # Exits and throws: the banner names the original kind and reason
-  # (e.g. `** (exit) :timeout`)
-  defp describe_failure(kind, reason, _stacktrace) do
-    Exception.format_banner(kind, reason)
-  end
-
-  # Until Cucumber Messages land (#28), attachments surface in failure
-  # output: a failing step's error lists everything the scenario attached.
-  # Only the current attempt's attachments — earlier attempts keep theirs
-  # in the coordinator (each retry is its own test case for #28), but
-  # listing them here would duplicate the evidence on every retry.
-  defp append_attachments(error, context) do
-    scenario_attachments =
-      Enum.filter(Cucumber.RunCoordinator.attachments(), fn attachment ->
-        attachment.feature_file == Map.get(context, :feature_file) and
-          attachment.scenario_name == Map.get(context, :scenario_name) and
-          attachment.attempt == Map.get(context, :retry_attempt)
-      end)
-
-    case scenario_attachments do
-      [] ->
-        error
-
-      attachments ->
-        listing = Enum.map_join(attachments, "\n", &format_attachment/1)
-        %{error | message: error.message <> "\n\nAttachments:\n\n" <> listing <> "\n"}
-    end
-  end
-
-  defp format_attachment(%Cucumber.Attachment{} = attachment) do
-    name = if attachment.filename, do: " (#{attachment.filename})", else: ""
-
-    body =
-      case attachment.encoding do
-        :base64 -> "#{byte_size(Base.decode64!(attachment.body))} bytes, base64-encoded"
-        :identity -> truncate(attachment.body, 200)
-      end
-
-    "  * #{attachment.media_type}#{name}: #{body}"
-  end
-
-  defp truncate(text, max) do
-    if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
-  end
 
   # The scenario-level attachment reference: hooks attach against the test
   # case only (no step id). Emitter supplies the active test step’s reference.
@@ -631,111 +567,5 @@ defmodule Cucumber.Runtime do
                 "Expected :ok, a map, a keyword list, {:ok, data}, " <>
                 ":pending, {:pending, message}, :skipped, or {:skipped, reason}"
     end
-  end
-
-  defp format_exception_for_display(exception) do
-    # Format the exception with enhanced readability
-    case exception do
-      %ExUnit.AssertionError{} = e ->
-        format_assertion_error(e)
-
-      %{__struct__: module} = e ->
-        if assertion_error_module?(module),
-          do: format_assertion_error(e),
-          else: Exception.message(e)
-
-      other ->
-        inspect(other, pretty: true)
-    end
-  end
-
-  defp assertion_error_module?(module) do
-    module_str = Atom.to_string(module)
-    String.ends_with?(module_str, "AssertionError") and Code.ensure_loaded?(module)
-  end
-
-  defp format_assertion_error(error) do
-    # Extract the most useful parts of assertion errors
-    base_message = Exception.message(error)
-
-    # For PhoenixTest errors, enhance the formatting
-    if String.contains?(base_message, "Found these elements") do
-      lines = String.split(base_message, "\n")
-
-      # Find where HTML elements start
-      {before_html, html_and_after} =
-        Enum.split_while(lines, fn line ->
-          not (String.trim(line) |> String.starts_with?("<"))
-        end)
-
-      # Format the message parts
-      formatted_before = Enum.join(before_html, "\n")
-
-      # Group and format HTML elements
-      formatted_html =
-        html_and_after
-        |> format_html_elements()
-        |> Enum.join("\n")
-
-      formatted_before <> "\n" <> formatted_html
-    else
-      base_message
-    end
-  end
-
-  defp format_html_elements(lines) do
-    lines
-    |> group_html_elements()
-    |> Enum.map(&format_single_html_element/1)
-    |> Enum.reject(&(&1 == []))
-  end
-
-  defp group_html_elements(lines) do
-    lines
-    |> Enum.reduce({[], []}, &group_line/2)
-    |> finalize_groups()
-  end
-
-  defp group_line(line, {groups, current}) do
-    if html_line?(line) do
-      {groups, current ++ [line]}
-    else
-      finalize_current_group(groups, current)
-    end
-  end
-
-  defp finalize_current_group(groups, []), do: {groups, []}
-  defp finalize_current_group(groups, current), do: {groups ++ [current], []}
-
-  defp finalize_groups({groups, []}), do: groups
-  defp finalize_groups({groups, current}), do: groups ++ [current]
-
-  defp html_line?(line) do
-    trimmed = String.trim(line)
-    String.starts_with?(trimmed, "<") or String.ends_with?(trimmed, ">")
-  end
-
-  defp format_single_html_element(lines) do
-    # Format a single HTML element with proper indentation
-    lines
-    |> Enum.map_join("\n", fn line ->
-      "  " <> line
-    end)
-    # Add blank line after each element
-    |> then(&[&1, ""])
-  end
-
-  defp format_step_history_with_status(step_history, current_step, context) do
-    # Convert step history to include status and context
-    step_history
-    |> Enum.reverse()
-    # Show last 10 steps to avoid clutter
-    |> Enum.take(10)
-    # Put them back in chronological order
-    |> Enum.reverse()
-    |> Enum.map(fn step ->
-      status = if step == current_step, do: :failed, else: :passed
-      {status, step, context}
-    end)
   end
 end

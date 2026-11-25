@@ -4,6 +4,26 @@ defmodule Cucumber.StepErrorTest do
   alias Cucumber.StepError
   alias Gherkin.Step
 
+  test "formats a caught assertion with its scenario location and compact history" do
+    step = %Gherkin.Step{keyword: "When", text: "submit", line: 8}
+
+    context = %{
+      feature_file: "form.feature",
+      scenario_name: "submit",
+      scenario_line: 3,
+      step_history: [step, step]
+    }
+
+    reason = %ExUnit.AssertionError{message: "Found these elements\n<button>Save</button>"}
+
+    error =
+      Cucumber.StepError.execution_failure(step, context, "submit", {:error, reason, []}, [])
+
+    assert error.message =~ "form.feature:3"
+    assert error.message =~ "  <button>Save</button>"
+    assert error.step_history == [{:passed, step}, {:failed, step}]
+  end
+
   describe "missing_step_definition/4" do
     test "creates error with helpful message for missing step" do
       step = %Step{

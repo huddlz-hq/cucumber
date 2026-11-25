@@ -34,6 +34,50 @@ defmodule Cucumber.StepError do
           step_history: list()
         }
 
+  @doc false
+  @spec undefined(Gherkin.Step.t(), map()) :: t()
+  def undefined(step, context) do
+    missing_error(
+      step,
+      Map.get(context, :feature_file, "unknown"),
+      Map.get(context, :scenario_name, "unknown scenario"),
+      recent_history(context),
+      Map.get(context, :scenario_line)
+    )
+  end
+
+  @doc false
+  @spec execution_failure(
+          Gherkin.Step.t(),
+          map(),
+          String.t(),
+          {Exception.kind(), term(), Exception.stacktrace()},
+          [Cucumber.Attachment.t()]
+        ) :: t()
+  def execution_failure(step, context, pattern, {kind, reason, trace}, attachments) do
+    step
+    |> execution_error(
+      pattern,
+      describe_failure(kind, reason, trace),
+      Map.get(context, :feature_file, "unknown"),
+      Map.get(context, :scenario_name, "unknown scenario"),
+      recent_history(context),
+      Map.get(context, :scenario_line)
+    )
+    |> append_attachments(attachments, context)
+  end
+
+  defp recent_history(context) do
+    # The runtime appends the current step before execution. Only that final
+    # entry failed, even when a previous step has the same text and location.
+    history = context[:step_history] || []
+
+    case history |> Enum.take(-10) |> List.pop_at(-1) do
+      {nil, []} -> []
+      {failed, earlier} -> Enum.map(earlier, &{:passed, &1}) ++ [{:failed, failed}]
+    end
+  end
+
   @doc """
   Creates a new step error for a missing step definition.
 
@@ -63,15 +107,17 @@ defmodule Cucumber.StepError do
   """
   @spec missing_step_definition(Gherkin.Step.t(), String.t(), String.t(), list()) :: t()
   def missing_step_definition(step, feature_file, scenario_name, step_history \\ []) do
-    # Get scenario line from step history context if available
-    scenario_line = extract_scenario_line(step_history)
+    missing_error(
+      step,
+      feature_file,
+      scenario_name,
+      step_history,
+      extract_scenario_line(step_history)
+    )
+  end
 
-    location =
-      if scenario_line && scenario_line > 0 do
-        "#{feature_file}:#{scenario_line}"
-      else
-        "#{feature_file}:#{step.line + 1}"
-      end
+  defp missing_error(step, feature_file, scenario_name, step_history, scenario_line) do
+    location = location(feature_file, scenario_line, step)
 
     message = """
     No matching step definition found for step:
@@ -138,15 +184,27 @@ defmodule Cucumber.StepError do
   """
   @spec failed_step(Gherkin.Step.t(), String.t(), term(), String.t(), String.t(), list()) :: t()
   def failed_step(step, pattern, failure_reason, feature_file, scenario_name, step_history \\ []) do
-    # Get scenario line from step history context if available
-    scenario_line = extract_scenario_line(step_history)
+    execution_error(
+      step,
+      pattern,
+      failure_reason,
+      feature_file,
+      scenario_name,
+      step_history,
+      extract_scenario_line(step_history)
+    )
+  end
 
-    location =
-      if scenario_line && scenario_line > 0 do
-        "#{feature_file}:#{scenario_line}"
-      else
-        "#{feature_file}:#{step.line + 1}"
-      end
+  defp execution_error(
+         step,
+         pattern,
+         failure_reason,
+         feature_file,
+         scenario_name,
+         step_history,
+         scenario_line
+       ) do
+    location = location(feature_file, scenario_line, step)
 
     message = """
     Step failed:
@@ -177,7 +235,8 @@ defmodule Cucumber.StepError do
     }
   end
 
-  # Helper functions for formatting
+  defp location(file, line, _step) when is_integer(line) and line > 0, do: "#{file}:#{line}"
+  defp location(file, _line, step), do: "#{file}:#{step.line + 1}"
 
   defp format_step_for_suggestion(text) do
     # Simple conversion to use Cucumber Expression placeholders
@@ -240,4 +299,140 @@ defmodule Cucumber.StepError do
   end
 
   defp extract_scenario_line(_), do: nil
+
+  defp describe_failure(:error, reason, stacktrace) do
+    format_exception_for_display(Exception.normalize(:error, reason, stacktrace))
+  end
+
+  # Exits and throws: the banner names the original kind and reason
+  # (e.g. `** (exit) :timeout`)
+  defp describe_failure(kind, reason, _stacktrace) do
+    Exception.format_banner(kind, reason)
+  end
+
+  defp append_attachments(error, attachments, context) do
+    scenario_attachments =
+      Enum.filter(attachments, fn attachment ->
+        attachment.feature_file == Map.get(context, :feature_file) and
+          attachment.scenario_name == Map.get(context, :scenario_name) and
+          attachment.attempt == Map.get(context, :retry_attempt)
+      end)
+
+    case scenario_attachments do
+      [] ->
+        error
+
+      attachments ->
+        listing = Enum.map_join(attachments, "\n", &format_attachment/1)
+        %{error | message: error.message <> "\n\nAttachments:\n\n" <> listing <> "\n"}
+    end
+  end
+
+  defp format_attachment(%Cucumber.Attachment{} = attachment) do
+    name = if attachment.filename, do: " (#{attachment.filename})", else: ""
+
+    body =
+      case attachment.encoding do
+        :base64 -> "#{byte_size(Base.decode64!(attachment.body))} bytes, base64-encoded"
+        :identity -> truncate(attachment.body, 200)
+      end
+
+    "  * #{attachment.media_type}#{name}: #{body}"
+  end
+
+  defp truncate(text, max) do
+    if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
+
+  defp format_exception_for_display(exception) do
+    # Format the exception with enhanced readability
+    case exception do
+      %ExUnit.AssertionError{} = e ->
+        format_assertion_error(e)
+
+      %{__struct__: module} = e ->
+        if assertion_error_module?(module),
+          do: format_assertion_error(e),
+          else: Exception.message(e)
+
+      other ->
+        inspect(other, pretty: true)
+    end
+  end
+
+  defp assertion_error_module?(module) do
+    module_str = Atom.to_string(module)
+    String.ends_with?(module_str, "AssertionError") and Code.ensure_loaded?(module)
+  end
+
+  defp format_assertion_error(error) do
+    # Extract the most useful parts of assertion errors
+    base_message = Exception.message(error)
+
+    # For PhoenixTest errors, enhance the formatting
+    if String.contains?(base_message, "Found these elements") do
+      lines = String.split(base_message, "\n")
+
+      # Find where HTML elements start
+      {before_html, html_and_after} =
+        Enum.split_while(lines, fn line ->
+          not (String.trim(line) |> String.starts_with?("<"))
+        end)
+
+      # Format the message parts
+      formatted_before = Enum.join(before_html, "\n")
+
+      # Group and format HTML elements
+      formatted_html =
+        html_and_after
+        |> format_html_elements()
+        |> Enum.join("\n")
+
+      formatted_before <> "\n" <> formatted_html
+    else
+      base_message
+    end
+  end
+
+  defp format_html_elements(lines) do
+    lines
+    |> group_html_elements()
+    |> Enum.map(&format_single_html_element/1)
+    |> Enum.reject(&(&1 == []))
+  end
+
+  defp group_html_elements(lines) do
+    lines
+    |> Enum.reduce({[], []}, &group_line/2)
+    |> finalize_groups()
+  end
+
+  defp group_line(line, {groups, current}) do
+    if html_line?(line) do
+      {groups, current ++ [line]}
+    else
+      finalize_current_group(groups, current)
+    end
+  end
+
+  defp finalize_current_group(groups, []), do: {groups, []}
+  defp finalize_current_group(groups, current), do: {groups ++ [current], []}
+
+  defp finalize_groups({groups, []}), do: groups
+  defp finalize_groups({groups, current}), do: groups ++ [current]
+
+  defp html_line?(line) do
+    trimmed = String.trim(line)
+    String.starts_with?(trimmed, "<") or String.ends_with?(trimmed, ">")
+  end
+
+  defp format_single_html_element(lines) do
+    # Format a single HTML element with proper indentation
+    lines
+    |> Enum.map_join("\n", fn line ->
+      "  " <> line
+    end)
+    # Add blank line after each element
+    |> then(&[&1, ""])
+  end
 end
