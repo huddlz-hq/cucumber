@@ -175,6 +175,8 @@ defmodule Cucumber.Behavior.CompileRunsTest do
     assert_raise ArgumentError, ~r/already registered/, fn -> compile.(first) end
     File.write!(broken, valid)
     modules = compile.([broken, last])
+    assert length(modules) == 2
+    # ExUnit already has the first module from the failed batch.
     {result, output} = Cucumber.BehaviorCase.run_isolated(modules)
     assert %{total: 3, failures: 0} = result, output
   end

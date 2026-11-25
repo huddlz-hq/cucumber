@@ -10,6 +10,8 @@ defmodule Cucumber.RunCoordinator do
 
   Current run-scoped concerns:
 
+    * **Feature names** — a compile call joins the run and reserves its test
+      module names atomically. Only that call can release its unfinished names.
     * **Compiled scenarios** — features from one compilation share a registry and hook
       set in persistent storage. Scenarios read the snapshot directly. Mix repetitions keep the definitions and start
       fresh hooks and Messages. Final teardown releases the definitions.
@@ -68,12 +70,8 @@ defmodule Cucumber.RunCoordinator do
   # the moduledoc). Returns the run id.
   @spec start_or_join() :: integer()
   def start_or_join do
-    run_id = :erlang.unique_integer([:positive])
-
-    case GenServer.start(__MODULE__, run_id, name: __MODULE__) do
-      {:ok, _pid} -> run_id
-      {:error, {:already_started, _pid}} -> GenServer.call(__MODULE__, {:join, run_id})
-    end
+    ensure_process()
+    GenServer.call(__MODULE__, :join)
   end
 
   @doc false
@@ -86,11 +84,13 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  @spec claim_feature_modules!([{module(), String.t()}]) :: integer()
+  @spec claim_feature_modules!([{module(), String.t()}]) :: reference()
   def claim_feature_modules!(names) do
+    ensure_process()
+
     case GenServer.call(__MODULE__, {:claim_feature_modules, names}) do
-      {:ok, run_id} ->
-        run_id
+      {:ok, claim} ->
+        claim
 
       {:collision, module, file, file} ->
         raise ArgumentError,
@@ -105,9 +105,9 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @doc false
-  @spec release_feature_modules(integer(), [module()]) :: :ok
-  def release_feature_modules(run_id, modules) do
-    GenServer.cast(__MODULE__, {:release_feature_modules, run_id, modules})
+  @spec release_feature_modules(reference(), [module()]) :: :ok
+  def release_feature_modules(claim, modules) do
+    GenServer.cast(__MODULE__, {:release_feature_modules, claim, modules})
   end
 
   @doc false
@@ -353,13 +353,9 @@ defmodule Cucumber.RunCoordinator do
     {:reply, run_id, initial_state(run_id, state.scope)}
   end
 
-  def handle_call({:join, _run_id}, _from, %{live: true} = state) do
+  def handle_call(:join, _from, state) do
+    state = join_live_run(state)
     {:reply, state.run_id, state}
-  end
-
-  def handle_call({:join, run_id}, _from, state) do
-    Cucumber.CompiledRuntime.release(state.scope)
-    {:reply, run_id, initial_state(run_id, state.scope)}
   end
 
   def handle_call({:end_run, result}, _from, state) do
@@ -396,17 +392,20 @@ defmodule Cucumber.RunCoordinator do
   end
 
   def handle_call({:claim_feature_modules, names}, _from, state) do
+    state = join_live_run(state)
+    claim = make_ref()
+
     result =
       Enum.reduce_while(names, state.feature_modules, fn {module, file}, known ->
         case Map.fetch(known, module) do
-          {:ok, previous} -> {:halt, {:collision, module, previous, file}}
-          :error -> {:cont, Map.put(known, module, file)}
+          {:ok, {previous, _claim}} -> {:halt, {:collision, module, previous, file}}
+          :error -> {:cont, Map.put(known, module, {file, claim})}
         end
       end)
 
     case result do
       {:collision, _, _, _} = collision -> {:reply, collision, state}
-      known -> {:reply, {:ok, state.run_id}, %{state | feature_modules: known}}
+      known -> {:reply, {:ok, claim}, %{state | feature_modules: known}}
     end
   end
 
@@ -501,11 +500,17 @@ defmodule Cucumber.RunCoordinator do
   end
 
   @impl true
-  def handle_cast({:release_feature_modules, run_id, modules}, %{run_id: run_id} = state) do
-    {:noreply, %{state | feature_modules: Map.drop(state.feature_modules, modules)}}
-  end
+  def handle_cast({:release_feature_modules, claim, modules}, state) do
+    remaining =
+      Enum.reduce(modules, state.feature_modules, fn module, known ->
+        case known do
+          %{^module => {_file, ^claim}} -> Map.delete(known, module)
+          _ -> known
+        end
+      end)
 
-  def handle_cast({:release_feature_modules, _ended_run, _modules}, state), do: {:noreply, state}
+    {:noreply, %{state | feature_modules: remaining}}
+  end
 
   @impl true
   def handle_info({:DOWN, monitor, :process, _pid, reason}, state) do
@@ -596,6 +601,13 @@ defmodule Cucumber.RunCoordinator do
   defp write_messages(path, recorder) do
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, Recorder.to_ndjson(recorder))
+  end
+
+  defp join_live_run(%{live: true} = state), do: state
+
+  defp join_live_run(state) do
+    Cucumber.CompiledRuntime.release(state.scope)
+    initial_state(System.unique_integer([:positive]), state.scope)
   end
 
   defp initial_state(run_id, scope) do

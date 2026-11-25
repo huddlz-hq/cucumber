@@ -74,14 +74,13 @@ defmodule Cucumber.Compiler do
   end
 
   defp compile_modules!(features, registry, hook_modules, prepare) do
-    Cucumber.RunCoordinator.start_or_join()
     register_after_suite_callback()
     hooks = Cucumber.Hooks.collect_hooks(hook_modules)
     names = Enum.map(features, &{generate_module_name(&1.file), &1.file})
-    run_id = Cucumber.RunCoordinator.claim_feature_modules!(names)
+    claim = Cucumber.RunCoordinator.claim_feature_modules!(names)
 
     {pairs, key} =
-      releasing_on_error(run_id, names, fn ->
+      releasing_on_error(claim, names, fn ->
         case prepare.(hooks) do
           [] ->
             {[], nil}
@@ -92,29 +91,29 @@ defmodule Cucumber.Compiler do
         end
       end)
 
-    define_claimed!(pairs, names, key, run_id)
+    define_claimed!(pairs, names, key, claim)
   end
 
-  defp define_claimed!([], [], _key, _run_id), do: []
+  defp define_claimed!([], [], _key, _claim), do: []
 
   defp define_claimed!(
          [{feature, compilation} | pairs],
          [{module, _} | rest] = names,
          key,
-         run_id
+         claim
        ) do
-    releasing_on_error(run_id, names, fn -> define_feature!(module, feature, key, compilation) end)
+    releasing_on_error(claim, names, fn -> define_feature!(module, feature, key, compilation) end)
 
-    [module | define_claimed!(pairs, rest, key, run_id)]
+    [module | define_claimed!(pairs, rest, key, claim)]
   end
 
   # Successful definitions may already be running in ExUnit. On failure only
   # release this call's unfinished names, so a corrected feature can be retried.
-  defp releasing_on_error(run_id, remaining, fun) do
+  defp releasing_on_error(claim, remaining, fun) do
     fun.()
   catch
     kind, reason ->
-      Cucumber.RunCoordinator.release_feature_modules(run_id, Enum.map(remaining, &elem(&1, 0)))
+      Cucumber.RunCoordinator.release_feature_modules(claim, Enum.map(remaining, &elem(&1, 0)))
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
